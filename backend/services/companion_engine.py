@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import Gemini
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False

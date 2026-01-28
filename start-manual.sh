@@ -81,7 +81,7 @@ if [ ! -d "frontend/node_modules" ]; then
     npm install --silent
 
     if [ ! -f ".env.local" ]; then
-        echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
+        echo "NEXT_PUBLIC_API_URL=http://localhost:8080" > .env.local
         echo "✓ Created .env.local file"
     fi
 
@@ -102,7 +102,7 @@ echo ""
 echo "Starting Backend..."
 cd backend
 source venv/bin/activate
-nohup uvicorn main:app --host 0.0.0.0 --port 8000 > ../logs/backend.log 2>&1 &
+nohup uvicorn main:app --host 0.0.0.0 --port 8080 > ../logs/backend.log 2>&1 &
 BACKEND_PID=$!
 echo "✓ Backend started (PID: $BACKEND_PID)"
 echo "  Logs: logs/backend.log"
@@ -113,11 +113,11 @@ echo "  Waiting for backend to initialize..."
 sleep 3
 
 # Check if backend is running
-if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+if curl -s http://localhost:8080/health > /dev/null 2>&1; then
     echo "✓ Backend is healthy!"
 else
     echo "⚠️  Backend may not be ready yet (this is normal on first start)"
-    echo "  Give it 10-20 seconds and check: http://localhost:8000/health"
+    echo "  Give it 10-20 seconds and check: http://localhost:8080/health"
 fi
 
 echo ""
@@ -143,8 +143,8 @@ echo "Services Started!"
 echo "=========================================="
 echo ""
 echo "🌐 Frontend: http://localhost:3000"
-echo "🔧 Backend:  http://localhost:8000"
-echo "📚 API Docs: http://localhost:8000/docs"
+echo "🔧 Backend:  http://localhost:8080"
+echo "📚 API Docs: http://localhost:8080/docs"
 echo ""
 echo "📊 View Logs:"
 echo "  Backend:  tail -f logs/backend.log"

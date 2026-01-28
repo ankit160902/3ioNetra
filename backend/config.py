@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     API_TITLE: str = "3ioNetra Spiritual Companion API"
     API_VERSION: str = "1.0.0"
     API_HOST: str = "0.0.0.0"
-    API_PORT: int = 8000
+    API_PORT: int = 8080
     DEBUG: bool = True
 
     # ------------------------------------------------------------------
@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 512
     LLM_TOP_P: float = 0.9
-    LLM_DEVICE: str = "cuda"  # "cpu" or "cuda"
-
+    LLM_DEVICE: str = "cpu"
+ 
     # ------------------------------------------------------------------
     # Embedding Settings
     # ------------------------------------------------------------------
@@ -79,9 +79,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # MongoDB Settings (FIXED)
     # ------------------------------------------------------------------
-    MONGODB_URI: str = Field(default="", env="mongodb_uri")
-    DATABASE_NAME: str = Field(default="", env="database_name")
-    DATABASE_PASSWORD: str = Field(default="", env="database_password")
+    MONGODB_URI: str = Field(default="", env="MONGODB_URI")
+    DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
+    DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
 
     # ------------------------------------------------------------------
     # System Prompt

@@ -188,6 +188,26 @@ async def startup_event():
 
     logger.info("Starting 3ioNetra Spiritual Companion API...")
 
+    # Fix MongoDB index issue (run once to clean up)
+    try:
+        from pymongo import MongoClient
+        mongo_uri = settings.MONGODB_URI
+        if settings.DATABASE_PASSWORD:
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+        
+        client = MongoClient(mongo_uri)
+        db = client[settings.DATABASE_NAME]
+        
+        try:
+            db.conversations.drop_index("conversation_id_1")
+            logger.info("✅ Dropped old conversation_id_1 index")
+        except:
+            logger.info("conversation_id_1 index doesn't exist (already cleaned)")
+        
+        client.close()
+    except Exception as e:
+        logger.warning(f"Could not drop index: {e}")
+
     try:
         # Initialize RAG Pipeline
         logger.info("Initializing RAG Pipeline...")
@@ -252,7 +272,6 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to initialize components: {str(e)}")
         raise
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -655,10 +674,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             search_query = dharmic_query.build_search_query()
 
             # Retrieve relevant verses
-            retrieved_docs = await rag_pipeline.search_with_filters(
+            retrieved_docs = await rag_pipeline.search(
                 query=search_query,
-                scripture_filter=dharmic_query.allowed_scriptures,
-                dharmic_concepts=dharmic_query.dharmic_concepts,
+                scripture_filter=None,
                 language=query.language,
                 top_k=5
             )
@@ -677,9 +695,28 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Validate response
             response_text = await safety_validator.validate_response(response_text)
 
+            
             # Add to history
             session.add_message('assistant', response_text)
             await session_manager.update_session(session)
+
+            # Auto-save conversation to MongoDB if user is authenticated
+            if user:
+                try:
+                    storage = get_conversation_storage()
+                    first_user_msg = next((msg['content'] for msg in session.conversation_history if msg['role'] == 'user'), 'Conversation')
+                    title = first_user_msg[:50] + '...' if len(first_user_msg) > 50 else first_user_msg
+                    
+                    storage.save_conversation(
+                        user_id=user["id"],
+                        conversation_id=session.session_id,
+                        title=title,
+                        messages=session.conversation_history
+                    )
+                    logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-save conversation: {e}")
+
 
             # Build citations
             citations = [
@@ -706,6 +743,23 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Still in listening phase - return companion's empathetic response
             session.add_message('assistant', companion_response)
             await session_manager.update_session(session)
+            
+            # Auto-save conversation to MongoDB if user is authenticated
+            if user:
+                try:
+                    storage = get_conversation_storage()
+                    first_user_msg = next((msg['content'] for msg in session.conversation_history if msg['role'] == 'user'), 'Conversation')
+                    title = first_user_msg[:50] + '...' if len(first_user_msg) > 50 else first_user_msg
+                    
+                    storage.save_conversation(
+                        user_id=user["id"],
+                        conversation_id=session.session_id,
+                        title=title,
+                        messages=session.conversation_history
+                    )
+                    logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to auto-save conversation: {e}")
 
             return ConversationalResponse(
                 session_id=session.session_id,

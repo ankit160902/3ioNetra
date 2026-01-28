@@ -5,7 +5,7 @@ pydantic
 pydantic-settings
 
 # LLM & AI - ONLY Google Gemini (actually used)
-google-generativeai
+google-genai
 
 # Embeddings - ONLY sentence-transformers (actually used)
 sentence-transformers
@@ -15,7 +15,6 @@ langchain
 langchain-community
 
 # Voice Processing - ONLY what's used
-openai-whisper
 gtts
 pydub
 
@@ -29,3 +28,4 @@ python-dotenv
 
 # Logging
 loguru
+email-validator

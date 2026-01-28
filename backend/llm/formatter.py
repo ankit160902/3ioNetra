@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 # Try to import Google Generative AI SDK
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except Exception as e:
     genai = None

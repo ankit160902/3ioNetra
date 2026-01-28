@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserProfile } from '../components/LoginPage';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export interface User {
   id: string;

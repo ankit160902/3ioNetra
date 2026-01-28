@@ -37,7 +37,7 @@ export interface UserProfile {
   name?: string;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export function useSession(userProfile?: UserProfile, authHeader?: Record<string, string>) {
   const [session, setSession] = useState<SessionState>({

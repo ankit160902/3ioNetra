@@ -256,7 +256,6 @@ class AuthService:
         result = self.db.tokens.delete_one({"token": token})
         return result.deleted_count > 0
 
-
 class ConversationStorage:
     """Store and retrieve user conversations in MongoDB"""
 
@@ -270,80 +269,90 @@ class ConversationStorage:
         title: str,
         messages: list
     ) -> str:
-        """Save or update a conversation"""
-        # Generate new ID if not provided
-        if not conversation_id:
-            conversation_id = secrets.token_hex(8)
-
-        # Check if conversation exists
-        existing = self.db.conversations.find_one({
-            "user_id": user_id,
-            "id": conversation_id
-        })
-
-        conversation_doc = {
-            "id": conversation_id,
-            "user_id": user_id,
-            "title": title[:100],  # Limit title length
-            "messages": messages,
-            "message_count": len(messages),
-            "created_at": existing["created_at"] if existing else datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
-        }
-
-        # Upsert conversation
-        self.db.conversations.update_one(
-            {"user_id": user_id, "id": conversation_id},
-            {"$set": conversation_doc},
-            upsert=True
-        )
-
-        logger.info(f"Saved conversation {conversation_id} for user {user_id}")
-        return conversation_id
+        """Append messages to user's single conversation document"""
+        
+        # Find user's conversation document
+        user_conversation = self.db.conversations.find_one({"user_id": user_id})
+        
+        if user_conversation:
+            # Append new messages to existing conversation
+            existing_messages = user_conversation.get("messages", [])
+            
+            # Add separator if not first conversation
+            if existing_messages:
+                existing_messages.append({
+                    "role": "system",
+                    "content": f"--- New Conversation: {title} ---",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+            
+            # Add all new messages
+            existing_messages.extend(messages)
+            
+            # Update document
+            self.db.conversations.update_one(
+                {"user_id": user_id},
+                {
+                    "$set": {
+                        "messages": existing_messages,
+                        "message_count": len(existing_messages),
+                        "updated_at": datetime.utcnow(),
+                        "last_title": title
+                    }
+                }
+            )
+            
+            conversation_id = user_conversation["_id"]
+        else:
+            # Create new conversation document for user
+            conversation_doc = {
+                "user_id": user_id,
+                "messages": messages,
+                "message_count": len(messages),
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow(),
+                "last_title": title
+            }
+            
+            result = self.db.conversations.insert_one(conversation_doc)
+            conversation_id = result.inserted_id
+        
+        logger.info(f"Saved conversation for user {user_id}, total messages: {len(existing_messages) if user_conversation else len(messages)}")
+        return str(conversation_id)
 
     def get_conversations_list(self, user_id: str, limit: int = 20) -> list:
-        """Get list of conversations for a user (most recent first)"""
-        conversations = list(
-            self.db.conversations
-            .find({"user_id": user_id})
-            .sort("updated_at", -1)
-            .limit(limit)
-        )
-
-        # Return summary only (without full messages)
+        """Get user's conversation (returns single document)"""
+        conversation = self.db.conversations.find_one({"user_id": user_id})
+        
+        if not conversation:
+            return []
+        
         return [
             {
-                "id": c["id"],
-                "title": c["title"],
-                "created_at": c["created_at"].isoformat(),
-                "message_count": c["message_count"],
+                "id": str(conversation["_id"]),
+                "title": conversation.get("last_title", "All Conversations"),
+                "created_at": conversation["created_at"].isoformat(),
+                "message_count": conversation["message_count"],
             }
-            for c in conversations
         ]
 
     def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific conversation"""
-        conversation = self.db.conversations.find_one({
-            "user_id": user_id,
-            "id": conversation_id
-        })
+        """Get user's complete conversation history"""
+        conversation = self.db.conversations.find_one({"user_id": user_id})
 
         if conversation:
-            # Convert datetime to ISO format for JSON serialization
             conversation["created_at"] = conversation["created_at"].isoformat()
             conversation["updated_at"] = conversation["updated_at"].isoformat()
+            conversation["id"] = str(conversation["_id"])
 
         return conversation
 
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
-        """Delete a conversation"""
-        result = self.db.conversations.delete_one({
-            "user_id": user_id,
-            "id": conversation_id
-        })
+        """Delete user's entire conversation history"""
+        result = self.db.conversations.delete_one({"user_id": user_id})
 
         if result.deleted_count > 0:
-            logger.info(f"Deleted conversation {conversation_id} for user {user_id}")
+            logger.info(f"Deleted all conversations for user {user_id}")
             return True
 
         return False
