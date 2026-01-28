@@ -4,21 +4,30 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 
-# LLM & AI - ONLY Google Gemini (actually used)
+# LLM
 google-genai
 
-# Embeddings - ONLY sentence-transformers (actually used)
+# Embeddings (REQUIRED runtime deps)
 sentence-transformers
+torch
+transformers
+huggingface-hub
 
-# Text Processing - ONLY langchain basics (actually used)
+# RAG / LangChain
 langchain
 langchain-community
 
-# Voice Processing - ONLY what's used
+# Vector DB client (USED IN CODE)
+qdrant-client
+
+# Database
+pymongo
+
+# Voice
 gtts
 pydub
 
-# Data Processing - Core only
+# Data Processing
 numpy
 
 # Utilities

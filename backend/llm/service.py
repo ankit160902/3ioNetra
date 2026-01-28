@@ -107,29 +107,28 @@ You ARE:
 """
 
     def __init__(self, api_key: Optional[str] = None):
-        """Initialize LLM service with Gemini API"""
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.available = False
-        self.model = None
-        
+        self.client = None
+
         if not GEMINI_AVAILABLE:
-            logger.warning("Gemini SDK not available. Install: pip install google-generativeai")
+            logger.warning("Gemini SDK not available")
             return
-        
+
         if not self.api_key:
-            logger.warning("Gemini API key not provided. Set GEMINI_API_KEY in settings.")
+            logger.warning("Gemini API key not provided")
             return
-        
+
         try:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel(
-                "gemini-2.0-flash-exp",
-                system_instruction=self.SYSTEM_INSTRUCTION
-            )
+            from google import genai
+
+            self.client = genai.Client(api_key=self.api_key)
             self.available = True
             logger.info("✅ LLM Service initialized with Gemini")
+
         except Exception as e:
-            logger.error(f"Failed to initialize Gemini: {e}")
+            self.available = False
+            logger.exception("❌ Failed to initialize Gemini")
 
     # --------------------------------------------------
     # Context Analysis
@@ -338,13 +337,16 @@ Respond now:
             prompt = self._build_prompt(query, conversation_history, phase, context)
             
             # Generate response from Gemini
-            response = self.model.generate_content(prompt)
+            response = self.client.models.generate_content(
+               model="gemini-2.0-flash",
+               contents=prompt,
+            )
+
             
             if not response or not response.text:
                 logger.error("Empty response from Gemini")
                 return "I'm here with you. You don't have to carry this alone."
-            
-            # Clean and return response
+
             cleaned_response = clean_response(response.text)
             return cleaned_response
             
@@ -357,12 +359,10 @@ Respond now:
 # Singleton Instance
 # --------------------------------------------------
 
-_llm_service: Optional[LLMService] = None
+_llm_service = None
 
-
-def get_llm_service() -> LLMService:
-    """Get or create singleton LLM service instance"""
+def get_llm_service(api_key: Optional[str] = None) -> LLMService:
     global _llm_service
     if _llm_service is None:
-        _llm_service = LLMService()
+        _llm_service = LLMService(api_key)
     return _llm_service

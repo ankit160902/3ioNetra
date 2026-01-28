@@ -23,6 +23,9 @@ from services.response_composer import get_response_composer
 from services.companion_engine import get_companion_engine
 from services.auth_service import get_auth_service, get_conversation_storage
 
+from rag.pipeline import RAGPipeline
+from rag.vector_store import get_vector_store
+
 from llm.service import get_llm_service
 from llm.formatter import get_refiner, get_reformatter
 
@@ -257,14 +260,14 @@ async def startup_event():
         logger.info(f"Safety Validator initialized (crisis_detection={settings.ENABLE_CRISIS_DETECTION})")
 
         # Response Composer
-        response_composer = get_response_composer(api_key=settings.GEMINI_API_KEY)
+        response_composer = get_response_composer()
         if response_composer.available:
             logger.info("Response Composer initialized with Gemini")
         else:
             logger.info("Response Composer using templates")
 
         # Companion Engine (new empathetic conversation handler)
-        companion_engine = get_companion_engine(api_key=settings.GEMINI_API_KEY)
+        companion_engine = get_companion_engine()
         if companion_engine.available:
             logger.info("Companion Engine initialized with Gemini")
         else:
