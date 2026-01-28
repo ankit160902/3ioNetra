@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple, Optional, TYPE_CHECKING
+from typing import Tuple, Optional, TYPE_CHECKING, Dict
 
 from models.session import SessionState, ConversationPhase
 from models.memory_context import ConversationMemory
@@ -85,11 +85,15 @@ class CompanionEngine:
                 except Exception as e:
                     logger.warning(f"Could not retrieve RAG context during listening: {e}")
             
+            # Build user profile from session memory
+            user_profile = self._build_user_profile(session.memory)
+            
             reply = await self.llm.generate_response(
                 query=message,
                 context_docs=context_docs,  # Now passing RAG context!
                 conversation_history=session.conversation_history,
                 user_id=session.memory.user_id or "anonymous",
+                user_profile=user_profile  # Pass user profile for personalization
             )
             logger.info(f"CompanionEngine received LLM reply (len={len(reply)}): '{reply}'")
             return reply, False
@@ -104,6 +108,31 @@ class CompanionEngine:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _build_user_profile(self, memory: ConversationMemory) -> Dict:
+        """
+        Build a user profile dictionary from conversation memory.
+        This includes all personalization data for the LLM.
+        """
+        profile = {}
+        
+        # User identity
+        if memory.user_name:
+            profile['name'] = memory.user_name
+        
+        # Demographics from story
+        if memory.story.age_group:
+            profile['age_group'] = memory.story.age_group
+        if memory.story.gender:
+            profile['gender'] = memory.story.gender
+        if memory.story.profession:
+            profile['profession'] = memory.story.profession
+        if memory.story.life_situation:
+            profile['life_situation'] = memory.story.life_situation
+        if memory.story.life_stage:
+            profile['life_stage'] = memory.story.life_stage
+        
+        return profile
 
     def _build_listening_query(self, message: str, memory: ConversationMemory) -> str:
         """

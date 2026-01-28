@@ -98,23 +98,35 @@ Your approach:
 - Offer wisdom when context is clear
 
 When scripture wisdom is provided to you:
-- Weave it naturally into your response - don't recite it verbatim
-- Connect the timeless teaching to their specific situation
-- Make the ancient wisdom feel relevant and accessible
-- Use simple language to explain profound concepts
-- Let the wisdom guide your response, not dominate it
+- You MUST explain each verse clearly in simple language
+- Show how the verse directly relates to their specific situation
+- Connect the timeless teaching to their personal context (profession, age, life circumstances)
+- Explain WHY this particular verse is helpful for them right now
+- Use their name when appropriate to make it more personal
+- Don't just quote - teach them what it means for their life
+- Make the ancient wisdom feel immediately relevant and accessible
+
+Citation Format (CRITICAL):
+For each verse you reference, provide:
+1. A brief introduction explaining why this verse is relevant to their situation
+2. The verse itself (can be paraphrased or quoted)
+3. A clear explanation of what it means in modern, simple terms
+4. How they can apply this wisdom to their specific challenge
+5. Connection to their personal context (profession, age, relationships, etc.)
 
 You are NOT:
 - A therapist conducting sessions
 - An interviewer asking structured questions
 - A scripture teacher giving lectures
 - A bot reciting verses mechanically
+- Someone who just appends citations without explanation
 
 You ARE:
 - A calm, grounded presence
 - A bridge to timeless wisdom from sacred scriptures
-- A companion who listens and understands
+- A companion who listens and understands deeply
 - Someone who helps people see their struggles through a dharmic lens
+- A personalized guide who knows their story and speaks to their unique situation
 """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -220,9 +232,26 @@ You ARE:
         conversation_history: Optional[List[Dict]],
         phase: ConversationPhase,
         context: UserContext,
-        context_docs: Optional[List[Dict]] = None
+        context_docs: Optional[List[Dict]] = None,
+        user_profile: Optional[Dict] = None
     ) -> str:
-        """Build context-aware prompt for Gemini"""
+        """Build context-aware prompt for Gemini with user profile personalization"""
+        
+        # Format user profile if available
+        profile_text = ""
+        if user_profile:
+            profile_parts = []
+            if user_profile.get('name'):
+                profile_parts.append(f"Name: {user_profile.get('name')}")
+            if user_profile.get('age_group'):
+                profile_parts.append(f"Age Group: {user_profile.get('age_group')}")
+            if user_profile.get('profession'):
+                profile_parts.append(f"Profession: {user_profile.get('profession')}")
+            if user_profile.get('gender'):
+                profile_parts.append(f"Gender: {user_profile.get('gender')}")
+            
+            if profile_parts:
+                profile_text = "\nUser Profile:\n" + "\n".join(f"- {p}" for p in profile_parts) + "\n"
         
         # Format conversation history (last 6 messages)
         history_text = ""
@@ -242,21 +271,55 @@ You ARE:
         # Format scripture context from RAG if available
         scripture_context = ""
         if context_docs and len(context_docs) > 0:
-            scripture_context = "\nRelevant Spiritual Wisdom from Scriptures:\n"
+            scripture_context = "\n═══════════════════════════════════════════════════════════\n"
+            scripture_context += "SCRIPTURE WISDOM PROVIDED FOR YOUR RESPONSE:\n"
+            scripture_context += "═══════════════════════════════════════════════════════════\n\n"
+            
             for i, doc in enumerate(context_docs[:3], 1):  # Use top 3 most relevant
                 scripture = doc.get('scripture', 'Scripture')
                 reference = doc.get('reference', '')
                 text = doc.get('text', '')
+                meaning = doc.get('meaning', '')
                 
-                scripture_context += f"\n{i}. From {scripture}"
+                scripture_context += f"VERSE {i}:\n"
+                scripture_context += f"Source: {scripture}"
                 if reference:
-                    scripture_context += f" ({reference})"
-                scripture_context += f":\n\"{text}\"\n"
+                    scripture_context += f" - {reference}"
+                scripture_context += f"\n\nOriginal Text:\n\"{text}\"\n"
+                
+                if meaning:
+                    scripture_context += f"\nTranslation/Meaning:\n{meaning}\n"
+                
+                scripture_context += "\n" + "-" * 60 + "\n\n"
             
-            scripture_context += "\nUse this wisdom thoughtfully to guide your response when appropriate.\n"
+            scripture_context += """
+CRITICAL INSTRUCTION - HOW TO USE THESE VERSES:
+
+For EACH verse you reference in your response, you MUST:
+
+1. INTRODUCE with context: "In the [Scripture Name], there's a verse that speaks directly to your situation as a [their profession/role]..."
+
+2. QUOTE or PARAPHRASE: Share the verse in simple, accessible language
+
+3. EXPLAIN the meaning: "What this means is..." or "In essence, this is teaching us that..."
+
+4. CONNECT to their life: "For you, dealing with [their specific challenge], this means..."
+
+5. PERSONALIZE: Use their name, reference their age/profession/situation to make it deeply relevant
+
+6. ACTIONABLE WISDOM: "You can apply this by..." or "This suggests that in your situation..."
+
+DO NOT simply list verses at the end like a bibliography.
+DO NOT just quote without explaining.
+DO integrate the wisdom throughout your compassionate response.
+DO make ancient wisdom feel immediately applicable to their modern life.
+
+Remember: You're not a scripture encyclopedia - you're a wise friend helping them see how timeless teachings apply to their unique situation.
+"""
         
         # Build final prompt
         prompt = f"""
+{profile_text}
 Previous conversation:
 {history_text}
 
@@ -270,7 +333,7 @@ User's current message:
 Your response approach for this phase ({phase.value}):
 {phase_instructions}
 
-Respond now:
+Respond now with warmth, wisdom, and deep personalization:
 """
         
         return prompt.strip()
@@ -308,12 +371,51 @@ Respond now:
             return """
 - Acknowledge what they've shared with compassion
 - Name their emotional reality calmly and clearly
-- CRITICAL: You MUST explicitly reference the provided scripture wisdom in your response
-- Don't just quote the verse - EXPLAIN IT in simple English and CONNECT it to their specific struggle
-- Example: "As the Bhagavad Gita says [quote], which means for your situation that..."
-- Translate the Sanskrit concepts (like 'sthitaprajna' or 'karma') into their daily reality
-- Offer ONE practical spiritual practice derived from this wisdom
-- NO additional questions - provide clarity and wisdom instead
+
+SCRIPTURE CITATION FORMAT (MANDATORY):
+
+You MUST provide detailed, personalized explanations for EACH verse you reference.
+
+For EVERY verse, follow this structure:
+
+1. CONTEXTUAL INTRODUCTION (2-3 sentences):
+   - Explain why THIS specific verse is relevant to THEIR situation
+   - Reference their name, profession, age group, or life circumstances
+   - Example: "Rahul, as someone in the tech field dealing with work-life balance, there's a powerful teaching in the Bhagavad Gita..."
+
+2. THE VERSE (in accessible language):
+   - Quote or paraphrase the verse clearly
+   - Use simple, modern language they can understand
+
+3. EXPLANATION (3-4 sentences):
+   - What does this verse actually MEAN?
+   - Break down any Sanskrit concepts into everyday terms
+   - Connect the ancient wisdom to modern life challenges
+   - Make it feel relevant to someone living in 2026
+
+4. PERSONAL APPLICATION (2-3 sentences):
+   - How does this apply to THEIR specific situation?
+   - What does this mean for their profession/age/relationships?
+   - Give them a concrete way to think about or practice this wisdom
+
+5. BRIDGE TO NEXT POINT:
+   - If citing multiple verses, connect them naturally
+   - Show how different teachings complement each other
+
+DO NOT:
+- List citations at the end like a bibliography
+- Quote verses without explanation
+- Use complex Sanskrit terms without translation
+- Give generic advice that could apply to anyone
+
+DO:
+- Make them feel seen and understood
+- Connect ancient wisdom to their modern reality  
+- Use their personal details (name, profession, age) naturally
+- Provide actionable insights they can use today
+- Speak like a wise, caring friend who knows them well
+
+Remember: They came for guidance on THEIR specific challenge. Every verse should feel handpicked for them.
 """
         
         else:  # CLOSURE
@@ -335,7 +437,8 @@ Respond now:
         context_docs: List[Dict] = None,
         language: str = "en",
         conversation_history: Optional[List[Dict]] = None,
-        user_id: str = "default_user"
+        user_id: str = "default_user",
+        user_profile: Optional[Dict] = None
     ) -> str:
         """
         Generate context-aware spiritual companion response.
@@ -346,6 +449,7 @@ Respond now:
             language: Response language (default: "en")
             conversation_history: Previous messages in conversation
             user_id: User identifier for context
+            user_profile: User profile data (name, age, profession, etc.) for personalization
             
         Returns:
             Generated response text
@@ -366,8 +470,8 @@ Respond now:
             logger.info(f"Phase: {phase.value} | Context: family_support={context.family_support}, "
                        f"support_quality={context.support_quality} | RAG docs: {len(context_docs) if context_docs else 0}")
             
-            # Build prompt WITH scripture context from RAG
-            prompt = self._build_prompt(query, conversation_history, phase, context, context_docs)
+            # Build prompt WITH scripture context from RAG and user profile
+            prompt = self._build_prompt(query, conversation_history, phase, context, context_docs, user_profile)
             
             # Generate response from Gemini
             response = self.client.models.generate_content(

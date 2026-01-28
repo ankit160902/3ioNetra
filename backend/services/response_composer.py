@@ -53,16 +53,45 @@ class ResponseComposer:
         if reduce_scripture and len(retrieved_verses) > 2:
             context_docs = retrieved_verses[:2]
 
+        # Build user profile from memory
+        user_profile = self._build_user_profile(memory)
+
         if self.llm.available:
             return await self.llm.generate_response(
                 query=query_text,
                 context_docs=context_docs,
                 conversation_history=memory.conversation_history,
                 user_id=memory.user_id,
+                user_profile=user_profile  # Pass user profile for personalization
             )
 
         logger.info("LLM unavailable, using fallback")
         return self._compose_fallback(dharmic_query)
+
+    def _build_user_profile(self, memory: ConversationMemory) -> Dict:
+        """
+        Build a user profile dictionary from conversation memory.
+        This includes all personalization data for the LLM.
+        """
+        profile = {}
+        
+        # User identity
+        if memory.user_name:
+            profile['name'] = memory.user_name
+        
+        # Demographics from story
+        if memory.story.age_group:
+            profile['age_group'] = memory.story.age_group
+        if memory.story.gender:
+            profile['gender'] = memory.story.gender
+        if memory.story.profession:
+            profile['profession'] = memory.story.profession
+        if memory.story.life_situation:
+            profile['life_situation'] = memory.story.life_situation
+        if memory.story.life_stage:
+            profile['life_stage'] = memory.story.life_stage
+        
+        return profile
 
     def _compose_fallback(self, dq: DharmicQueryObject) -> str:
         response = (
