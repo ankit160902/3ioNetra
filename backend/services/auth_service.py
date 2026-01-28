@@ -24,12 +24,16 @@ def get_mongo_client():
     if _mongo_client is None:
         # Construct MongoDB URI with authentication
         mongo_uri = settings.MONGODB_URI
-        if settings.DATABASE_PASSWORD:
+
+        if settings.DATABASE_PASSWORD
+:
             # Replace password placeholder if exists
-            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
+)
         
         _mongo_client = MongoClient(mongo_uri)
-        _db = _mongo_client[settings.DATABASE_NAME]
+        _db = _mongo_client[settings.DATABASE_NAME
+]
         
         # Create indexes
         _db.users.create_index("email", unique=True)

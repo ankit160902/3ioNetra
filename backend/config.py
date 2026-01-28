@@ -79,9 +79,15 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # MongoDB Settings (FIXED)
     # ------------------------------------------------------------------
-    MONGODB_URI: str = Field(default="", env="MONGODB_URI")
-    DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
-    DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
+    MONGODB_URI
+: str = Field(default="", env="MONGODB_URI
+")
+    DATABASE_NAME
+: str = Field(default="", env="DATABASE_NAME
+")
+    DATABASE_PASSWORD
+: str = Field(default="", env="DATABASE_PASSWORD
+")
 
     # ------------------------------------------------------------------
     # System Prompt

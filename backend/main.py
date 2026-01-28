@@ -192,11 +192,15 @@ async def startup_event():
     try:
         from pymongo import MongoClient
         mongo_uri = settings.MONGODB_URI
-        if settings.DATABASE_PASSWORD:
-            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+
+        if settings.DATABASE_PASSWORD
+:
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
+)
         
         client = MongoClient(mongo_uri)
-        db = client[settings.DATABASE_NAME]
+        db = client[settings.DATABASE_NAME
+]
         
         try:
             db.conversations.drop_index("conversation_id_1")
