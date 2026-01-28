@@ -43,13 +43,15 @@ class UserContext:
 
 def clean_response(text: str) -> str:
     """Remove trailing questions and clean formatting"""
-    lines = [line.strip() for line in text.strip().split("\n")]
-    
-    # Remove trailing questions
-    while lines and lines[-1].endswith("?"):
-        lines.pop()
-    
-    return "\n".join(lines).strip()
+    # Simply return the text cleaned of whitespace
+    # We rely on prompts to control questionasking behavior now
+    return text.strip()
+
+    # OLD LOGIC disabled because it was deleting single-line questions entirely
+    # lines = [line.strip() for line in text.strip().split("\n")]
+    # while lines and lines[-1].endswith("?"):
+    #     lines.pop()
+    # return "\n".join(lines).strip()
 
 
 def is_closure_signal(text: str) -> bool:
@@ -95,15 +97,24 @@ Your approach:
 - Ask minimal questions, prioritize understanding
 - Offer wisdom when context is clear
 
+When scripture wisdom is provided to you:
+- Weave it naturally into your response - don't recite it verbatim
+- Connect the timeless teaching to their specific situation
+- Make the ancient wisdom feel relevant and accessible
+- Use simple language to explain profound concepts
+- Let the wisdom guide your response, not dominate it
+
 You are NOT:
 - A therapist conducting sessions
 - An interviewer asking structured questions
 - A scripture teacher giving lectures
+- A bot reciting verses mechanically
 
 You ARE:
 - A calm, grounded presence
-- A bridge to timeless wisdom
+- A bridge to timeless wisdom from sacred scriptures
 - A companion who listens and understands
+- Someone who helps people see their struggles through a dharmic lens
 """
 
     def __init__(self, api_key: Optional[str] = None):
@@ -208,7 +219,8 @@ You ARE:
         query: str,
         conversation_history: Optional[List[Dict]],
         phase: ConversationPhase,
-        context: UserContext
+        context: UserContext,
+        context_docs: Optional[List[Dict]] = None
     ) -> str:
         """Build context-aware prompt for Gemini"""
         
@@ -227,6 +239,22 @@ You ARE:
         # Phase-specific instructions
         phase_instructions = self._get_phase_instructions(phase)
         
+        # Format scripture context from RAG if available
+        scripture_context = ""
+        if context_docs and len(context_docs) > 0:
+            scripture_context = "\nRelevant Spiritual Wisdom from Scriptures:\n"
+            for i, doc in enumerate(context_docs[:3], 1):  # Use top 3 most relevant
+                scripture = doc.get('scripture', 'Scripture')
+                reference = doc.get('reference', '')
+                text = doc.get('text', '')
+                
+                scripture_context += f"\n{i}. From {scripture}"
+                if reference:
+                    scripture_context += f" ({reference})"
+                scripture_context += f":\n\"{text}\"\n"
+            
+            scripture_context += "\nUse this wisdom thoughtfully to guide your response when appropriate.\n"
+        
         # Build final prompt
         prompt = f"""
 Previous conversation:
@@ -234,6 +262,7 @@ Previous conversation:
 
 Context you understand about the user:
 {context_summary}
+{scripture_context}
 
 User's current message:
 {query}
@@ -268,8 +297,9 @@ Respond now:
         if phase == ConversationPhase.LISTENING:
             return """
 - Listen with empathy and validate their feelings
+- If scripture wisdom is provided, let it subtly inform your empathy (don't quote directly)
 - Ask AT MOST ONE clarifying question if critical context is missing
-- Do NOT give advice or spiritual wisdom yet
+- Do NOT give advice or spiritual wisdom yet - just be present
 - Keep response warm and conversational
 - Focus on understanding, not solving
 """
@@ -278,9 +308,12 @@ Respond now:
             return """
 - Acknowledge what they've shared with compassion
 - Name their emotional reality calmly and clearly
-- Offer ONE practical spiritual practice or perspective from Sanatan Dharma
-- Keep it grounded and actionable
-- NO additional questions - provide clarity instead
+- CRITICAL: You MUST explicitly reference the provided scripture wisdom in your response
+- Don't just quote the verse - EXPLAIN IT in simple English and CONNECT it to their specific struggle
+- Example: "As the Bhagavad Gita says [quote], which means for your situation that..."
+- Translate the Sanskrit concepts (like 'sthitaprajna' or 'karma') into their daily reality
+- Offer ONE practical spiritual practice derived from this wisdom
+- NO additional questions - provide clarity and wisdom instead
 """
         
         else:  # CLOSURE
@@ -331,10 +364,10 @@ Respond now:
             phase = self._detect_phase(query, context)
             
             logger.info(f"Phase: {phase.value} | Context: family_support={context.family_support}, "
-                       f"support_quality={context.support_quality}")
+                       f"support_quality={context.support_quality} | RAG docs: {len(context_docs) if context_docs else 0}")
             
-            # Build prompt
-            prompt = self._build_prompt(query, conversation_history, phase, context)
+            # Build prompt WITH scripture context from RAG
+            prompt = self._build_prompt(query, conversation_history, phase, context, context_docs)
             
             # Generate response from Gemini
             response = self.client.models.generate_content(

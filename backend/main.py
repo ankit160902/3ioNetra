@@ -272,6 +272,11 @@ async def startup_event():
             logger.info("Companion Engine initialized with Gemini")
         else:
             logger.info("Companion Engine using templates")
+        
+        # Connect RAG pipeline to Companion Engine for spiritually-informed responses
+        if rag_pipeline:
+            companion_engine.set_rag_pipeline(rag_pipeline)
+            logger.info("✅ RAG pipeline connected to Companion Engine")
 
         logger.info("All components initialized successfully!")
 

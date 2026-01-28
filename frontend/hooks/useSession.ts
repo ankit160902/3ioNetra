@@ -130,6 +130,8 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         }
 
         const data: ConversationalResponse = await response.json();
+        console.log('🔌 [useSession] Raw API response:', data);
+
 
         setSession((prev) => ({
           ...prev,

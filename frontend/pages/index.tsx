@@ -191,16 +191,55 @@ export default function Home() {
     try {
       if (useConversationFlow) {
         // Use new conversation flow API
+        console.log('📤 Sending message:', currentInput);
         const response = await sendMessage(currentInput, language);
+        console.log('📥 Received full response:', JSON.stringify(response, null, 2));
+
+        // Validate response structure
+        if (!response) {
+          console.error('❌ Response is null or undefined');
+          throw new Error('No response received from server');
+        }
+
+        // Extract the response text - handle different possible structures
+        let responseText = '';
+        if (typeof response.response === 'string') {
+          responseText = response.response;
+        } else if (typeof response === 'string') {
+          responseText = response;
+        } else {
+          console.error('❌ Invalid response structure:', response);
+          responseText = 'I apologize, but I received an invalid response. Please try again.';
+        }
+
+        console.log('📝 Response text extracted:', responseText);
+        console.log('📝 Response text length:', responseText?.length || 0);
+
+        // Ensure we have content
+        if (!responseText || responseText.trim().length === 0) {
+          console.warn('⚠️ Empty response text, using fallback');
+          responseText = 'I received your message, but I\'m having trouble formulating a response. Please try again.';
+        }
 
         const assistantMessage: Message = {
           role: 'assistant',
-          content: response.response,
-          citations: response.citations,
+          content: responseText,
+          citations: response.citations || [],
           timestamp: new Date(),
         };
 
-        setMessages((prev) => [...prev, assistantMessage]);
+        console.log('✅ Creating assistant message:', {
+          content: assistantMessage.content.substring(0, 100) + '...',
+          contentLength: assistantMessage.content.length,
+          hasCitations: (assistantMessage.citations?.length || 0) > 0
+        });
+
+        setMessages((prev) => {
+          const newMessages = [...prev, assistantMessage];
+          console.log('📊 Total messages after update:', newMessages.length);
+          console.log('📊 Last message:', newMessages[newMessages.length - 1]);
+          return newMessages;
+        });
 
         // Auto-save conversation periodically
         if (isAuthenticated) {
@@ -285,7 +324,14 @@ export default function Home() {
         }
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ Error in handleTextSubmit:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', error.message);
+        console.error('Stack trace:', error.stack);
+      } else {
+        console.error('Unknown error object:', JSON.stringify(error));
+      }
+
       const errorMessage: Message = {
         role: 'assistant',
         content: 'I apologize, but I encountered an error. Please try again.',
@@ -480,18 +526,16 @@ export default function Home() {
                   className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-lg p-4 ${
-                      message.role === 'user'
-                        ? 'bg-orange-500 text-white'
-                        : 'bg-white shadow-sm border border-orange-100'
-                    }`}
+                    className={`max-w-[80%] rounded-lg p-4 ${message.role === 'user'
+                      ? 'bg-orange-500 text-white'
+                      : 'bg-white shadow-sm border border-orange-100'
+                      }`}
                   >
                     <p
-                      className={`whitespace-pre-wrap ${
-                        isProcessing && index === messages.length - 1
-                          ? 'streaming-text'
-                          : 'message-content'
-                      }`}
+                      className={`whitespace-pre-wrap ${isProcessing && index === messages.length - 1
+                        ? 'streaming-text'
+                        : 'message-content'
+                        }`}
                     >
                       {message.content ||
                         (isProcessing && index === messages.length - 1 ? '...' : '')}
@@ -527,8 +571,8 @@ export default function Home() {
                         {session.phase === 'clarification'
                           ? 'Listening...'
                           : session.phase === 'synthesis'
-                          ? 'Reflecting...'
-                          : 'Finding wisdom...'}
+                            ? 'Reflecting...'
+                            : 'Finding wisdom...'}
                       </span>
                     </div>
                   </div>
