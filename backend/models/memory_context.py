@@ -84,35 +84,32 @@ class ConversationMemory:
             self.relevant_concepts.append(concept)
 
     def get_memory_summary(self) -> str:
-        """Get a textual summary of the conversation memory"""
+        """Get a textual summary of the conversation memory in natural language"""
         parts = []
 
-        # User identity
-        if self.user_name:
-            parts.append(f"User: {self.user_name}")
-
-        # Story summary
+        # Build a narrative sentence
         if self.story.primary_concern:
-            parts.append(f"Concern: {self.story.primary_concern[:100]}")
+            parts.append(f"The user is dealing with {self.story.primary_concern}")
 
         if self.story.emotional_state:
-            parts.append(f"Feeling: {self.story.emotional_state}")
+            parts.append(f"They are currently feeling {self.story.emotional_state}")
 
         if self.story.life_area:
-            parts.append(f"Area: {self.story.life_area}")
+            parts.append(f"This situation relates to their {self.story.life_area}")
 
         if self.story.trigger_event:
-            parts.append(f"Trigger: {self.story.trigger_event}")
+            parts.append(f"It was triggered by {self.story.trigger_event}")
 
         if self.story.unmet_needs:
-            parts.append(f"Needs: {', '.join(self.story.unmet_needs[:3])}")
+            parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
 
-        # Key quotes
         if self.user_quotes:
-            recent_quote = self.user_quotes[-1]["quote"][:80]
-            parts.append(f"Recent: \"{recent_quote}\"")
+            recent_quote = self.user_quotes[-1]["quote"]
+            # Only add if significant
+            if len(recent_quote) > 20:
+                parts.append(f"They recently mentioned: \"{recent_quote}\"")
 
-        return " | ".join(parts) if parts else ""
+        return ". ".join(parts) if parts else ""
 
     def get_user_context_string(self) -> str:
         """Get a string describing the user for personalization"""

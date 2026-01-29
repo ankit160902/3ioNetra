@@ -6,6 +6,7 @@ import logging
 
 from models.dharmic_query import DharmicQueryObject
 from models.memory_context import ConversationMemory
+from models.session import SessionState, ConversationPhase
 from llm.service import get_llm_service
 
 logger = logging.getLogger(__name__)
@@ -24,27 +25,30 @@ class ResponseComposer:
         memory: ConversationMemory,
         retrieved_verses: List[Dict],
         reduce_scripture: bool = False,
+        phase: Optional[ConversationPhase] = None,
+        original_query: Optional[str] = None
     ) -> str:
         """
         Compose a response using:
-        - synthesized dharmic query
+        - synthesized dharmic query (for RAG context)
         - rich conversation memory
         - verses retrieved via RAG
-
-        `reduce_scripture` lets the SafetyValidator ask us to lean
-        more on plain‑language comfort vs dense citation lists.
+        - current conversation phase
+        - original user query (for natural response)
         """
 
-        # Build search/query text in a way that's compatible with both
-        # old and new DharmicQueryObject implementations.
-        query_text = (
-            dharmic_query.build_search_query()
-            if hasattr(dharmic_query, "build_search_query")
-            else dharmic_query.get_search_query()
-        )
+        # Use original query for the LLM prompt if available, 
+        # otherwise fallback to build_search_query
+        llm_query = original_query
+        if not llm_query:
+            llm_query = (
+                dharmic_query.build_search_query()
+                if hasattr(dharmic_query, "build_search_query")
+                else dharmic_query.get_search_query()
+            )
 
-        if not query_text:
-            logger.error("DharmicQueryObject has no extractable query text")
+        if not llm_query:
+            logger.error("No query text available for ResponseComposer")
             return self._compose_fallback(dharmic_query)
 
         # Optionally thin out the scripture context when a user is very
@@ -58,11 +62,12 @@ class ResponseComposer:
 
         if self.llm.available:
             return await self.llm.generate_response(
-                query=query_text,
+                query=llm_query,
                 context_docs=context_docs,
                 conversation_history=memory.conversation_history,
-                user_id=memory.user_id,
-                user_profile=user_profile  # Pass user profile for personalization
+                user_profile=user_profile,
+                phase=phase,
+                memory_context=memory
             )
 
         logger.info("LLM unavailable, using fallback")
@@ -79,14 +84,23 @@ class ResponseComposer:
         if memory.user_name:
             profile['name'] = memory.user_name
         
-        # Demographics from story
-        if memory.story.age_group:
-            profile['age_group'] = memory.story.age_group
-        if memory.story.gender:
-            profile['gender'] = memory.story.gender
-        if memory.story.profession:
-            profile['profession'] = memory.story.profession
+        # Demographics and current state from story
+        story = memory.story
+        if story.age_group:
+            profile['age_group'] = story.age_group
+        if story.gender:
+            profile['gender'] = story.gender
+        if story.profession:
+            profile['profession'] = story.profession
         
+        # Add situational context for the "Problem" and "Action" pillars
+        if story.primary_concern:
+            profile['primary_concern'] = story.primary_concern
+        if story.emotional_state:
+            profile['emotional_state'] = story.emotional_state
+        if story.life_area:
+            profile['life_area'] = story.life_area
+            
         return profile
 
     def _compose_fallback(self, dq: DharmicQueryObject) -> str:

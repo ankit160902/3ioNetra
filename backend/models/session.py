@@ -13,6 +13,9 @@ class ConversationPhase(str, Enum):
     CLARIFICATION = "clarification"
     SYNTHESIS = "synthesis"
     ANSWERING = "answering"
+    LISTENING = "listening"
+    GUIDANCE = "guidance"
+    CLOSURE = "closure"
 
 
 class SignalType(str, Enum):
@@ -41,7 +44,7 @@ class SessionState:
     Tracks signals, conversation history, and phase transitions.
     """
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    phase: ConversationPhase = ConversationPhase.CLARIFICATION
+    phase: ConversationPhase = ConversationPhase.LISTENING
     turn_count: int = 0
     signals_collected: Dict[SignalType, Signal] = field(default_factory=dict)
     conversation_history: List[Dict[str, str]] = field(default_factory=list)
@@ -115,8 +118,7 @@ class SessionState:
 
     def is_ready_for_transition(self) -> bool:
         """Check if session is ready to transition to answering phase"""
-        # Check memory readiness
-        if self.memory_readiness >= 0.8:
+        if self.memory_readiness >= 0.7:
             return True
 
         # Check turn count

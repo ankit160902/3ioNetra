@@ -13,7 +13,7 @@ export interface Citation {
 
 export interface SessionState {
   sessionId: string | null;
-  phase: 'clarification' | 'synthesis' | 'answering';
+  phase: 'clarification' | 'synthesis' | 'answering' | 'listening' | 'guidance' | 'closure';
   turnCount: number;
   signalsCollected: Record<string, string>;
   isComplete: boolean;
@@ -21,7 +21,7 @@ export interface SessionState {
 
 export interface ConversationalResponse {
   session_id: string;
-  phase: 'clarification' | 'synthesis' | 'answering';
+  phase: 'clarification' | 'synthesis' | 'answering' | 'listening' | 'guidance' | 'closure';
   response: string;
   signals_collected: Record<string, string>;
   turn_count: number;
@@ -42,7 +42,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 export function useSession(userProfile?: UserProfile, authHeader?: Record<string, string>) {
   const [session, setSession] = useState<SessionState>({
     sessionId: null,
-    phase: 'clarification',
+    phase: 'listening',
     turnCount: 0,
     signalsCollected: {},
     isComplete: false,
@@ -126,7 +126,49 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
 
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || 'Failed to get response');
+          const errorMessage = errorData.detail || 'Failed to get response';
+
+          // If session expired, try to transparently recover
+          if (response.status === 404 && (errorMessage.includes('Session expired') || errorMessage.includes('not found'))) {
+            console.warn('⚠️ Session expired on server. Attempting to create a new session and retry...');
+
+            // 1. Create a new session
+            const newSessionId = await createSession();
+
+            // 2. Re-build request body with new session ID
+            const retryRequestBody: Record<string, unknown> = {
+              ...requestBody,
+              session_id: newSessionId,
+            };
+
+            // 3. Retry the request
+            const retryResponse = await fetch(`${API_URL}/api/conversation`, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(retryRequestBody),
+            });
+
+            if (retryResponse.ok) {
+              const data: ConversationalResponse = await retryResponse.json();
+              console.log('🔄 [useSession] Successfully recovered with new session:', data);
+
+              setSession((prev) => ({
+                ...prev,
+                sessionId: data.session_id,
+                phase: data.phase,
+                turnCount: data.turn_count,
+                signalsCollected: data.signals_collected,
+                isComplete: data.is_complete,
+              }));
+
+              return data;
+            } else {
+              const retryErrorData = await retryResponse.json().catch(() => ({}));
+              throw new Error(retryErrorData.detail || 'Failed after session retry');
+            }
+          }
+
+          throw new Error(errorMessage);
         }
 
         const data: ConversationalResponse = await response.json();

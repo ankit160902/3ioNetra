@@ -320,7 +320,8 @@ class ConversationStorage:
             result = self.db.conversations.insert_one(conversation_doc)
             conversation_id = result.inserted_id
         
-        logger.info(f"Saved conversation for user {user_id}, total messages: {len(existing_messages) if user_conversation else len(messages)}")
+        total_messages = len(existing_messages) if user_conversation else len(messages)
+        logger.info(f"Saved conversation for user {user_id}, total messages: {total_messages}")
         return str(conversation_id)
 
     def get_conversations_list(self, user_id: str, limit: int = 20) -> list:

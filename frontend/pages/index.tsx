@@ -541,7 +541,7 @@ export default function Home() {
                         (isProcessing && index === messages.length - 1 ? '...' : '')}
                     </p>
 
-                    {message.citations && message.citations.length > 0 && (
+                    {/* message.citations && message.citations.length > 0 && (
                       <div className="mt-3 pt-3 border-t border-orange-200">
                         <p className="text-sm font-semibold text-gray-700 mb-2">Citations:</p>
                         <div className="space-y-2">
@@ -553,7 +553,7 @@ export default function Home() {
                           ))}
                         </div>
                       </div>
-                    )}
+                    ) */}
 
                     <p className="text-xs mt-2 opacity-70">
                       {message.timestamp.toLocaleTimeString()}

@@ -67,9 +67,14 @@ class DharmicQueryObject:
         """Build a search query for RAG retrieval"""
         query_parts = []
 
-        # Start with the user's actual query
+        # Start with the core user query/intent
         if self.query:
             query_parts.append(self.query)
+
+        # Add the conversation summary to provide more semantic context for RAG
+        if self.conversation_summary and len(self.conversation_summary) > 20:
+            # We add this to help the embedding model pick up on the broader story
+            query_parts.append(self.conversation_summary)
 
         # Add emotional context
         if self.emotion and self.emotion != "unknown":
@@ -84,7 +89,8 @@ class DharmicQueryObject:
             concepts = " ".join(self.dharmic_concepts[:3])
             query_parts.append(concepts)
 
-        return " ".join(query_parts)
+        # Return a semantic blob for the embedding model
+        return ". ".join(query_parts)
 
     def get_search_query(self) -> str:
         """Alias for build_search_query for backwards compatibility"""

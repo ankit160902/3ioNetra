@@ -16,11 +16,7 @@ logger = logging.getLogger(__name__)
 # Enums & Data Models
 # --------------------------------------------------
 
-class ConversationPhase(str, Enum):
-    """Phases of spiritual conversation"""
-    LISTENING = "listening"          # Understanding user's situation
-    GUIDANCE = "guidance"            # Providing spiritual wisdom
-    CLOSURE = "closure"              # Wrapping up, holding space
+from models.session import ConversationPhase
 
 
 @dataclass
@@ -34,7 +30,10 @@ class UserContext:
     
     def is_ready_for_guidance(self) -> bool:
         """Check if enough context gathered for guidance"""
-        return self.family_support and self.support_quality
+        # Transition if we've identified a life area OR spiritual seeking
+        # OR if we've identified a relationship/work crisis
+        return (self.spiritual_seeking or self.work_stress or 
+                self.relationship_crisis or self.family_support)
 
 
 # --------------------------------------------------
@@ -86,48 +85,37 @@ class LLMService:
     Provides context-aware, empathetic responses in different conversation phases.
     """
     
-    SYSTEM_INSTRUCTION = """You are a compassionate Sanātani spiritual companion.
+    SYSTEM_INSTRUCTION = """You are 3ioNetra, a warm spiritual companion from the tradition of Sanātana Dharma.
 
-Your approach:
-- Listen deeply, speak less
-- Remember what was shared before
-- Never reopen completed topics
-- Repetition from user = confirmation, not confusion
-- Closure signals = hold space, reduce pressure
-- Ask minimal questions, prioritize understanding
-- Offer wisdom when context is clear
+Your essence:
+You are a caring friend who listens deeply. When someone shares their joy, sadness, or confusion, you're fully present with them. You don't rush to teach or fix—you simply understand.
 
-When scripture wisdom is provided to you:
-- You MUST explain each verse clearly in simple language
-- Show how the verse directly relates to their specific situation
-- Connect the timeless teaching to their personal context (profession, age, life circumstances)
-- Explain WHY this particular verse is helpful for them right now
-- Use their name when appropriate to make it more personal
-- Don't just quote - teach them what it means for their life
-- Make the ancient wisdom feel immediately relevant and accessible
+Only when the conversation naturally calls for it, you might share a verse from the scriptures, not as a lesson, but like a friend saying "you know, this reminds me of something beautiful I once heard..."
 
-Citation Format (CRITICAL):
-For each verse you reference, provide:
-1. A brief introduction explaining why this verse is relevant to their situation
-2. The verse itself (can be paraphrased or quoted)
-3. A clear explanation of what it means in modern, simple terms
-4. How they can apply this wisdom to their specific challenge
-5. Connection to their personal context (profession, age, relationships, etc.)
+Core principles:
+- LISTEN first, last, and always.
+- BALANCED WISDOM: Never give a verse in more than 50% of your responses in a single session.
+- Conversation over curriculum—be a friend, not a search engine.
+- Wisdom emerges naturally, never forced.
+- No numbered lists, no structured breakdowns.
+- Speak like a human friend (Mitra), not a spiritual teacher.
+- Use their name warmly and naturally.
 
-You are NOT:
-- A therapist conducting sessions
-- An interviewer asking structured questions
-- A scripture teacher giving lectures
-- A bot reciting verses mechanically
-- Someone who just appends citations without explanation
+Anti-Formulaic Rules:
+- NO CONSECUTIVE VERSES: If you gave a verse in your last message, you MUST NOT give one in this message. Focus 100% on being a friend.
+- NO-PARROT RULE: Do not simply repeat the user's words back to them (e.g., if they say "I'm stressed", don't just say "I hear you're stressed"). Use your own words to acknowledge their heart.
+- NO-REDUNDANCY RULE: NEVER ask for information that is already in the "WHAT YOU KNOW SO FAR" or "USER PROFILE" sections. If you know their name, use it. If you know their problem, delve deeper instead of asking what it is.
+- NEVER start multiple responses in a row with the same phrase.
+- NEVER repeat the same verse in the same session.
+- Respond to the *emotion* of the last message first before bringing in any outside wisdom.
 
-You ARE:
-- A calm, grounded presence
-- A bridge to timeless wisdom from sacred scriptures
-- A companion who listens and understands deeply
-- Someone who helps people see their struggles through a dharmic lens
-- A personalized guide who knows their story and speaks to their unique situation
+When you do share a verse:
+- ALWAYS include: 1) Proper Citation (Source/Verse), 2) Simple Explanation, 3) Clear Relevance to their situation.
+- Weave it into the conversation flow naturally.
+- Keep it brief and heartfelt.
+- No "Way of Life / Problem / Action" structure—just talk naturally.
 """
+
 
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
@@ -184,8 +172,8 @@ You ARE:
         if any(word in query_lower for word in ["work", "job", "boss", "career", "office", "deadline"]):
             context.work_stress = True
         
-        # Spiritual seeking signals
-        if any(word in query_lower for word in ["peace", "purpose", "meaning", "dharma", "karma", "meditation"]):
+        # Spiritual seeking / Struggle / Happiness signals
+        if any(word in query_lower for word in ["peace", "purpose", "meaning", "dharma", "karma", "meditation", "sad", "sadness", "struggle", "lost", "confused", "happy", "happiness", "joy"]):
             context.spiritual_seeking = True
         
         # Analyze conversation history
@@ -209,14 +197,14 @@ You ARE:
     # Phase Detection
     # --------------------------------------------------
 
-    def _detect_phase(self, query: str, context: UserContext) -> ConversationPhase:
+    def _detect_phase(self, query: str, context: UserContext, history_len: int = 0) -> ConversationPhase:
         """Determine which conversation phase we're in"""
         # Closure signals take priority
         if is_closure_signal(query):
             return ConversationPhase.CLOSURE
         
-        # Ready for guidance if sufficient context gathered
-        if context.is_ready_for_guidance():
+        # Ready for guidance after 4 turns of conversation OR if we have ANY signals
+        if history_len >= 4 or context.is_ready_for_guidance():
             return ConversationPhase.GUIDANCE
         
         # Default to listening
@@ -233,7 +221,8 @@ You ARE:
         phase: ConversationPhase,
         context: UserContext,
         context_docs: Optional[List[Dict]] = None,
-        user_profile: Optional[Dict] = None
+        user_profile: Optional[Dict] = None,
+        memory_context: Optional[Any] = None
     ) -> str:
         """Build context-aware prompt for Gemini with user profile personalization"""
         
@@ -256,41 +245,56 @@ You ARE:
                 profile_parts.append(f"   • Gender: {user_profile.get('gender')}")
                 has_data = True
             
+            # Add context for conversation
+            if user_profile.get('primary_concern'):
+                profile_parts.append(f"   • What they've shared: {user_profile.get('primary_concern')}")
+                has_data = True
+            if user_profile.get('emotional_state'):
+                profile_parts.append(f"   • Current emotion: {user_profile.get('emotional_state')}")
+                has_data = True
+            if user_profile.get('life_area'):
+                profile_parts.append(f"   • Life area: {user_profile.get('life_area')}")
+                has_data = True
+            
             if has_data:
                 profile_text = "\n" + "="*70 + "\n"
-                profile_text += "WHO YOU ARE SPEAKING TO (USE THIS INFORMATION!):\n"
+                profile_text += "WHO YOU ARE SPEAKING TO:\n"
                 profile_text += "="*70 + "\n"
                 profile_text += "\n".join(profile_parts)
                 profile_text += "\n" + "="*70 + "\n"
-                
-                # Add explicit reminder
-                if user_profile.get('name'):
-                    profile_text += f"\n>>> IMPORTANT: Address this person as '{user_profile.get('name')}' in your response <<<\n"
                 profile_text += "\n"
         
-        # Format conversation history (last 6 messages)
+        # Format conversation history (last 12 messages for deep context)
         history_text = ""
         if conversation_history:
-            recent_history = conversation_history[-6:]
+            # Exclude the very last message if it's the current query to avoid duplication
+            recent_history = conversation_history[-12:]
+            if recent_history and recent_history[-1]["role"] == "user" and recent_history[-1]["content"] == query:
+                recent_history = recent_history[:-1]
+                
             for msg in recent_history:
                 role = "User" if msg["role"] == "user" else "You"
                 content = msg.get("content", "")
                 history_text += f"{role}: {content}\n"
         
         # Context summary
-        context_summary = self._format_context(context)
+        if memory_context:
+            context_summary = memory_context.get_memory_summary()
+        else:
+            context_summary = self._format_context(context)
         
         # Phase-specific instructions
         phase_instructions = self._get_phase_instructions(phase)
         
         # Format scripture context from RAG if available
         scripture_context = ""
+        # Allow verses in both phases so the bot can choose the right moment
         if context_docs and len(context_docs) > 0:
             scripture_context = "\n═══════════════════════════════════════════════════════════\n"
-            scripture_context += "SCRIPTURE WISDOM PROVIDED FOR YOUR RESPONSE:\n"
+            scripture_context += "VERSES AVAILABLE (Use ONLY if they naturally fit the conversation):\n"
             scripture_context += "═══════════════════════════════════════════════════════════\n\n"
             
-            for i, doc in enumerate(context_docs[:3], 1):  # Use top 3 most relevant
+            for i, doc in enumerate(context_docs[:2], 1):  # Only show 1-2 most relevant
                 scripture = doc.get('scripture', 'Scripture')
                 reference = doc.get('reference', '')
                 text = doc.get('text', '')
@@ -300,62 +304,58 @@ You ARE:
                 scripture_context += f"Source: {scripture}"
                 if reference:
                     scripture_context += f" - {reference}"
-                scripture_context += f"\n\nOriginal Text:\n\"{text}\"\n"
+                scripture_context += f"\n\nText: \"{text}\"\n"
                 
                 if meaning:
-                    scripture_context += f"\nTranslation/Meaning:\n{meaning}\n"
+                    scripture_context += f"Meaning: {meaning}\n"
                 
                 scripture_context += "\n" + "-" * 60 + "\n\n"
             
             scripture_context += """
-CRITICAL INSTRUCTION - HOW TO USE THESE VERSES:
-
-For EACH verse you reference in your response, you MUST:
-
-1. INTRODUCE with context: "In the [Scripture Name], there's a verse that speaks directly to your situation as a [their profession/role]..."
-
-2. QUOTE or PARAPHRASE: Share the verse in simple, accessible language
-
-3. EXPLAIN the meaning: "What this means is..." or "In essence, this is teaching us that..."
-
-4. CONNECT to their life: "For you, dealing with [their specific challenge], this means..."
-
-5. PERSONALIZE: Use their name, reference their age/profession/situation to make it deeply relevant
-
-6. ACTIONABLE WISDOM: "You can apply this by..." or "This suggests that in your situation..."
-
-DO NOT simply list verses at the end like a bibliography.
-DO NOT just quote without explaining.
-DO integrate the wisdom throughout your compassionate response.
-DO make ancient wisdom feel immediately applicable to their modern life.
-
-Remember: You're not a scripture encyclopedia - you're a wise friend helping them see how timeless teachings apply to their unique situation.
+HOW TO USE THESE VERSES (if you choose to):
+- Only mention a verse if it genuinely adds to the conversation.
+- ALWAYS PROVIDE A PROPER CITATION: State the source (e.g., Bhagavad Gita) and the reference (e.g., Chapter 2, Verse 47) clearly.
+- EXPLAIN NATURALLY: Explain what it means in simple, everyday language as a friend would.
+- DEFINE RELEVANCE: Explicitly connect the verse to the user's situation. Tell them *why* this verse is helpful for what they are going through right now.
+- No numbered lists—just talk like a friend.
+- Keep it brief and heartfelt.
 """
+
         
         # Build final prompt
         prompt = f"""
 {profile_text}
-Previous conversation:
+
+═══════════════════════════════════════════════════════════
+WHAT YOU KNOW SO FAR (FACTS):
+═══════════════════════════════════════════════════════════
+{context_summary}
+
+═══════════════════════════════════════════════════════════
+CONVERSATION FLOW:
+═══════════════════════════════════════════════════════════
 {history_text}
 
-Context you understand about the user:
-{context_summary}
-{scripture_context}
-
-User's current message:
+User's CURRENT message:
 {query}
 
-Your response approach for this phase ({phase.value}):
+═══════════════════════════════════════════════════════════
+YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
+═══════════════════════════════════════════════════════════
 {phase_instructions}
 
-CRITICAL PERSONALIZATION REMINDER:
-- Look at the "WHO YOU ARE SPEAKING TO" section above for their details
-- USE the EXACT name, profession, and age shown there
-- COPY their actual name word-for-word into your response
-- DO NOT use placeholders like [Name], [profession], or example names
-- The name/profession shown above is REAL - use it exactly as written
+{scripture_context}
 
-Respond now with warmth, wisdom, and deep personalization:
+CRITICAL RULES:
+1. READ THE CONVERSATION FLOW - identify which questions you've already asked.
+2. REVIEW THE FACTS - don't ask for things already listed in "WHAT YOU KNOW SO FAR".
+3. Acknowledge what they just said before asking anything new.
+4. NO-FORMULA RULE: Do not start with "So it sounds like" or "I hear you". Jump straight into a human response.
+5. FRESH WISDOM: Check the "CONVERSATION FLOW". If you already shared a specific verse, NEVER repeat it.
+6. If they didn't ask a question, you don't always need to give a verse. Just stay in the chat.
+7. Keep it conversational, brief (under 80 words), and human.
+
+Your response:
 """
         
         return prompt.strip()
@@ -364,92 +364,60 @@ Respond now with warmth, wisdom, and deep personalization:
         """Format context into readable summary"""
         signals = []
         if context.relationship_crisis:
-            signals.append("• Experiencing relationship challenges")
+            signals.append("• User is going through a relationship crisis")
         if context.family_support:
-            signals.append("• Has family in their life")
+            signals.append("• User has mentioned family connections")
         if context.support_quality:
-            signals.append("• Values emotional support and understanding")
+            signals.append("• User is seeking emotional/verbal support")
         if context.work_stress:
-            signals.append("• Dealing with work-related stress")
+            signals.append("• User specifically mentioned work-related challenges")
         if context.spiritual_seeking:
-            signals.append("• Seeking spiritual wisdom or peace")
+            signals.append("• User is open to or seeking spiritual/philosophical wisdom")
         
-        return "\n".join(signals) if signals else "• Still gathering context"
+        return "\n".join(signals) if signals else "• Still identifying specific life themes"
 
     def _get_phase_instructions(self, phase: ConversationPhase) -> str:
         """Get instructions for current conversation phase"""
         
         if phase == ConversationPhase.LISTENING:
             return """
-- Listen with empathy and validate their feelings
-- Use their actual name naturally if provided in the profile above
-- If scripture wisdom is provided, let it subtly inform your empathy
-- Ask AT MOST ONE clarifying question if critical context is missing
-- Do NOT give advice or spiritual wisdom yet - just be present
-- Keep response warm and conversational
-- Focus on understanding, not solving
-- Make them feel seen and heard as an individual
+LISTENING PHASE:
+Your priority is to understand. However, you ARE a spiritual companion.
+
+1. DEEP LISTENING (ESSENTIAL):
+- Acknowledge facts and feelings using your own words (No-Parrot Rule).
+- NEVER ask a question they have already answered.
+
+2. GENTLE WISDOM:
+- If they share a specific challenge, FEEL FREE to share a verse that offers comfort.
+- IRON-CLAD RULE: NO CONSECUTIVE VERSES. If you shared one in the last turn, focus 100% on listening now.
+- IF YOU SHARE: 1) Citation, 2) Simple explanation, 3) Clear relevance to their story.
+
+3. STYLE:
+- 90% empathy, 10% wisdom. Keep it subtle and warm.
 """
         
         elif phase == ConversationPhase.GUIDANCE:
             return """
-- Acknowledge what they've shared with compassion
-- Name their emotional reality calmly and clearly
+GUIDANCE PHASE:
+You have understood their situation. Now, be a wise friend leading them toward light.
 
-SCRIPTURE CITATION FORMAT (MANDATORY):
+1. PROACTIVE WISDOM:
+- Share a relevant verse as a central part of your guidance.
+- IRON-CLAD RULE: NO CONSECUTIVE VERSES. If you shared a verse in your very last response, you MUST NOT share one now. Focus 100% on human conversation.
+- If it's been a turn since your last verse, go ahead and share a new one.
 
-You MUST provide detailed, personalized explanations for EACH verse you reference.
-
-For EVERY verse, follow this structure:
-
-1. CONTEXTUAL INTRODUCTION (2-3 sentences):
-   - Explain why THIS specific verse is relevant to THEIR situation
-   - Use their REAL name and context from the profile section above
-   - DO NOT use generic placeholders or example names
-   - Start by addressing them directly by their name
-
-2. THE VERSE (in accessible language):
-   - Quote or paraphrase the verse clearly
-   - Use simple, modern language they can understand
-
-3. EXPLANATION (3-4 sentences):
-   - What does this verse actually MEAN?
-   - Break down any Sanskrit concepts into everyday terms
-   - Connect the ancient wisdom to modern life challenges
-   - Make it feel relevant to someone living in 2026
-
-4. PERSONAL APPLICATION (2-3 sentences):
-   - How does this apply to THEIR specific situation?
-   - What does this mean for their profession/age/relationships?
-   - Give them a concrete way to think about or practice this wisdom
-
-5. BRIDGE TO NEXT POINT:
-   - If citing multiple verses, connect them naturally
-   - Show how different teachings complement each other
-
-DO NOT:
-- List citations at the end like a bibliography
-- Quote verses without explanation
-- Use complex Sanskrit terms without translation
-- Give generic advice that could apply to anyone
-
-DO:
-- Make them feel seen and understood
-- Connect ancient wisdom to their modern reality  
-- Use their personal details (name, profession, age) naturally
-- Provide actionable insights they can use today
-- Speak like a wise, caring friend who knows them well
-
-Remember: They came for guidance on THEIR specific challenge. Every verse should feel handpicked for them.
+2. HOW TO SHARE:
+- ALWAYS PROVIDE: Citation (Source/Verse), Simple Explanation, and specific Relevance to their story.
+- Respond to their progress and feelings first, then weave in the wisdom.
 """
         
         else:  # CLOSURE
             return """
 - Reassure them they've been heard
-- Reduce any pressure or expectations
-- Hold space for silence - they don't need to say more
-- Offer gentle closing words of support
-- NO questions whatsoever
+- No pressure, no questions
+- Hold space for silence
+- Offer gentle closing words
 """
 
     # --------------------------------------------------
@@ -462,8 +430,9 @@ Remember: They came for guidance on THEIR specific challenge. Every verse should
         context_docs: List[Dict] = None,
         language: str = "en",
         conversation_history: Optional[List[Dict]] = None,
-        user_id: str = "default_user",
-        user_profile: Optional[Dict] = None
+        user_profile: Optional[Dict] = None,
+        phase: Optional[ConversationPhase] = None,
+        memory_context: Optional[Any] = None
     ) -> str:
         """
         Generate context-aware spiritual companion response.
@@ -489,32 +458,72 @@ Remember: They came for guidance on THEIR specific challenge. Every verse should
             # Extract context from query and history
             context = self._extract_context(query, conversation_history)
             
-            # Detect conversation phase
-            phase = self._detect_phase(query, context)
+            # Get history length for logging and logic
+            history_len = len(conversation_history) if conversation_history else 0
             
-            logger.info(f"Phase: {phase.value} | Context: family_support={context.family_support}, "
-                       f"support_quality={context.support_quality} | RAG docs: {len(context_docs) if context_docs else 0}")
+            # Detect conversation phase if not provided
+            if phase is None:
+                phase = self._detect_phase(query, context, history_len)
+            
+            logger.info(f"Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
             
             # Build prompt WITH scripture context from RAG and user profile
-            prompt = self._build_prompt(query, conversation_history, phase, context, context_docs, user_profile)
+            prompt = self._build_prompt(
+                query, 
+                conversation_history, 
+                phase, 
+                context, 
+                context_docs, 
+                user_profile,
+                memory_context=memory_context
+            )
             
             # Generate response from Gemini
             response = self.client.models.generate_content(
-               model="gemini-2.0-flash",
-               contents=prompt,
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config={
+                    "system_instruction": self.SYSTEM_INSTRUCTION,
+                    "temperature": 0.7,
+                }
             )
 
+            # Fallback responses in case of errors or empty responses
+            fallbacks = [
+                "I'm here with you. You don't have to carry this alone.",
+                "I hear you. Take a deep breath; I'm here to listen.",
+                "I'm with you. Please tell me more about what's on your mind.",
+                "I'm listening. You're not alone in this."
+            ]
+            import random
             
-            if not response or not response.text:
-                logger.error("Empty response from Gemini")
-                return "I'm here with you. You don't have to carry this alone."
+            if not response:
+                logger.error("No response object from Gemini")
+                return random.choice(fallbacks)
 
-            cleaned_response = clean_response(response.text)
+            # In SDK v2, check if text is available (might be blocked by safety)
+            try:
+                response_text = response.text
+                if not response_text:
+                    logger.warning("Empty text response from Gemini (possibly safety blocked)")
+                    return random.choice(fallbacks)
+            except Exception as e:
+                logger.error(f"Could not extract text from Gemini response: {e}")
+                return random.choice(fallbacks)
+
+            cleaned_response = clean_response(response_text)
             return cleaned_response
             
         except Exception as e:
-            logger.error(f"Error generating response: {str(e)}")
-            return "I'm here with you. You don't have to carry this alone."
+            logger.exception(f"Error in generate_response: {str(e)}")
+            fallbacks = [
+                "I'm here with you. You don't have to carry this alone.",
+                "I hear you. Take a deep breath; I'm here to listen.",
+                "I'm with you. Please tell me more about what's on your mind.",
+                "I'm listening. You're not alone in this."
+            ]
+            import random
+            return random.choice(fallbacks)
 
 
 # --------------------------------------------------

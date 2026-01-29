@@ -1,4 +1,5 @@
 import logging
+import random
 from typing import Tuple, Optional, TYPE_CHECKING, Dict
 
 from models.session import SessionState, ConversationPhase
@@ -58,10 +59,13 @@ class CompanionEngine:
         # We still return a short acknowledgment so the UI always has
         # something sane to show if needed.
         if is_ready:
-            ack = (
-                "Thank you for sharing this so openly. "
-                "Let me gather some wisdom from the scriptures that fits your situation."
-            )
+            acks = [
+                "Thank you for sharing this so openly. Let me see how the ancient wisdom of the scriptures can light your path.",
+                "I truly appreciate your trust in sharing this. I am looking into the sacred texts now to find the guidance that speaks to your situation.",
+                "Your openness helps me understand deeply. Let me reach into the timeless wisdom of Dharma to find a perspective that might help you find peace.",
+                "I feel your situation deeply. I'm gathering some specific verses right now that offer a mirror to what you're experiencing."
+            ]
+            ack = random.choice(acks)
             return ack, True
 
         # Clarification / listening phase – use LLM with RAG context if available
@@ -99,10 +103,11 @@ class CompanionEngine:
             
             reply = await self.llm.generate_response(
                 query=message,
-                context_docs=context_docs,  # Now passing RAG context!
+                context_docs=context_docs,
                 conversation_history=session.conversation_history,
-                user_id=session.memory.user_id or "anonymous",
-                user_profile=user_profile  # Pass user profile for personalization
+                user_profile=user_profile,
+                phase=ConversationPhase.LISTENING,
+                memory_context=session.memory
             )
             logger.info(f"CompanionEngine received LLM reply (len={len(reply)}): '{reply}'")
             return reply, False
@@ -129,14 +134,23 @@ class CompanionEngine:
         if memory.user_name:
             profile['name'] = memory.user_name
         
-        # Demographics from story
-        if memory.story.age_group:
-            profile['age_group'] = memory.story.age_group
-        if memory.story.gender:
-            profile['gender'] = memory.story.gender
-        if memory.story.profession:
-            profile['profession'] = memory.story.profession
+        # Demographics and current state from story
+        story = memory.story
+        if story.age_group:
+            profile['age_group'] = story.age_group
+        if story.gender:
+            profile['gender'] = story.gender
+        if story.profession:
+            profile['profession'] = story.profession
         
+        # Add situational context for the "3-Value Framework"
+        if story.primary_concern:
+            profile['primary_concern'] = story.primary_concern
+        if story.emotional_state:
+            profile['emotional_state'] = story.emotional_state
+        if story.life_area:
+            profile['life_area'] = story.life_area
+            
         return profile
 
     def _build_listening_query(self, message: str, memory: ConversationMemory) -> str:
@@ -146,32 +160,14 @@ class CompanionEngine:
         to find relevant gentle wisdom.
         """
         query_parts = []
+        # Add conversation summary narrative for richer RAG context
+        summary = memory.get_memory_summary()
+        if summary:
+            query_parts.append(summary)
         
-        # Add the user's current concern
-        if memory.story.primary_concern:
-            query_parts.append(memory.story.primary_concern[:100])
-        
-        # Add emotional context
-        if memory.story.emotional_state:
-            emotions_map = {
-                "anxiety": "peace of mind, overcoming worry, finding calm",
-                "sadness": "dealing with grief, finding strength, inner peace",
-                "anger": "managing anger, patience, self-control"
-            }
-            query_parts.append(emotions_map.get(memory.story.emotional_state, "inner peace"))
-        
-        # Add life area context
-        if memory.story.life_area:
-            life_areas_map = {
-                "work": "dharmic approach to work, duty, balance",
-                "family": "family relationships, dharma towards family",
-                "relationships": "relationships, love, understanding"
-            }
-            query_parts.append(life_areas_map.get(memory.story.life_area, ""))
-        
-        # Fallback to current message
+        # Fallback to current message if still empty
         if not query_parts:
-            query_parts.append(message[:100])
+            query_parts.append(message[:150])
         
         query = " ".join(query_parts)
         logger.debug(f"Listening phase RAG query: {query[:100]}...")
@@ -191,25 +187,66 @@ class CompanionEngine:
         """
         text_lower = message.lower().strip()
 
-        # Seed primary concern on first few turns
         if not memory.story.primary_concern:
-            memory.story.primary_concern = message[:200]
+            if len(message) > 10:
+                 memory.story.primary_concern = message[:200]
+        else:
+            if len(message) > 20 and message[:50].lower() not in memory.story.primary_concern.lower():
+                memory.story.primary_concern = f"{memory.story.primary_concern} | {message[:150]}"
 
-        # Very rough emotion tagging
-        if any(w in text_lower for w in ["anxious", "worried", "nervous", "panic"]):
+        # Name extraction (simple)
+        if any(intro in text_lower for intro in ["my name is ", "i am ", "call me "]):
+            for intro in ["my name is ", "i am ", "call me "]:
+                if intro in text_lower:
+                    try:
+                        name = message[text_lower.find(intro) + len(intro):].split()[0].strip(',.')
+                        if len(name) > 2:
+                            memory.user_name = name
+                            logger.info(f"Extracted name: {name}")
+                    except: pass
+
+        # Age group extraction (simple)
+        if any(age_ref in text_lower for age_ref in ["years old", "i'm "]) and any(char.isdigit() for char in message):
+            # Very rough guess
+            if any(str(i) in message for i in range(15, 25)): memory.story.age_group = "18-24"
+            elif any(str(i) in message for i in range(25, 35)): memory.story.age_group = "25-34"
+            elif any(str(i) in message for i in range(35, 50)): memory.story.age_group = "35-50"
+
+        # Expanded keyword lists for better sensitivity
+        anxiety_words = ["anxious", "worried", "nervous", "panic", "stress", "overwhelmed", "pressure", "scared", "fear", "tension"]
+        sadness_words = ["sad", "cry", "depressed", "lonely", "grief", "loss", "tired", "down", "low", "hopeless", "hurt"]
+        anger_words = ["angry", "frustrated", "irritated", "mad", "annoyed", "hate", "unfair", "furious"]
+
+        if any(w in text_lower for w in anxiety_words):
             memory.story.emotional_state = "anxiety"
-        elif any(w in text_lower for w in ["sad", "cry", "depressed", "lonely"]):
+        elif any(w in text_lower for w in sadness_words):
             memory.story.emotional_state = "sadness"
-        elif any(w in text_lower for w in ["angry", "frustrated", "irritated"]):
+        elif any(w in text_lower for w in anger_words):
             memory.story.emotional_state = "anger"
 
         # Track life area
-        if any(w in text_lower for w in ["job", "office", "work", "career"]):
-            memory.story.life_area = memory.story.life_area or "work"
-        elif any(w in text_lower for w in ["marriage", "partner", "husband", "wife", "relationship"]):
-            memory.story.life_area = memory.story.life_area or "relationships"
-        elif any(w in text_lower for w in ["family", "parents", "children", "son", "daughter"]):
-            memory.story.life_area = memory.story.life_area or "family"
+        work_words = ["job", "office", "work", "career", "salary", "boss", "deadline", "project", "business", "company"]
+        relationship_words = ["marriage", "partner", "husband", "wife", "relationship", "dating", "boyfriend", "girlfriend", "breakup", "divorce"]
+        family_words = ["family", "parents", "children", "son", "daughter", "mother", "father", "relative", "brother", "sister"]
+
+        if any(w in text_lower for w in work_words):
+            memory.story.life_area = "work"
+        elif any(w in text_lower for w in relationship_words):
+            memory.story.life_area = "relationships"
+        elif any(w in text_lower for w in family_words):
+            memory.story.life_area = "family"
+
+        # Try to extract trigger event
+        if any(w in text_lower for w in ["happened", "because", "after", "since", "due to", "started", "occurred"]):
+            if len(message) > 25 and not memory.story.trigger_event:
+                memory.story.trigger_event = message[:150]
+
+        # Try to extract unmet needs
+        if "need" in text_lower or "want" in text_lower or "wish" in text_lower:
+            need_keywords = ["peace", "clarity", "guidance", "strength", "support", "solutions", "action"]
+            for kw in need_keywords:
+                if kw in text_lower and kw not in memory.story.unmet_needs:
+                    memory.story.unmet_needs.append(kw)
 
         # Record a quote + emotional arc point
         memory.add_user_quote(turn=session.turn_count, quote=message[:200])
@@ -220,10 +257,10 @@ class CompanionEngine:
                 intensity="moderate",
             )
 
-        # Increase readiness slowly each turn
+        # Increase readiness faster each turn to be more responsive
         memory.readiness_for_wisdom = min(
             1.0,
-            memory.readiness_for_wisdom + 0.2,
+            memory.readiness_for_wisdom + 0.4,
         )
 
     def _assess_readiness(self, session: SessionState) -> bool:
@@ -249,7 +286,7 @@ class CompanionEngine:
             f"turns={session.turn_count}"
         )
 
-        return readiness >= 0.8
+        return readiness >= 0.7
 
 
 _companion_engine: CompanionEngine | None = None

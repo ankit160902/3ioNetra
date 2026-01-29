@@ -56,9 +56,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Conversation Flow
     # ------------------------------------------------------------------
-    MIN_SIGNALS_THRESHOLD: int = 4
-    MIN_CLARIFICATION_TURNS: int = 3
-    MAX_CLARIFICATION_TURNS: int = 10
+    MIN_SIGNALS_THRESHOLD: int = 2
+    MIN_CLARIFICATION_TURNS: int = 1
+    MAX_CLARIFICATION_TURNS: int = 4
     SESSION_TTL_MINUTES: int = 60
 
     # ------------------------------------------------------------------

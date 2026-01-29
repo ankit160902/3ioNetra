@@ -46,7 +46,13 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://3io-netra-spiritual-companion.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://localhost:8000",
+        "http://localhost:8080",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -77,6 +83,9 @@ class ConversationPhaseEnum(str, Enum):
     clarification = "clarification"
     synthesis = "synthesis"
     answering = "answering"
+    listening = "listening"
+    guidance = "guidance"
+    closure = "closure"
 
 
 class SessionCreateResponse(BaseModel):
@@ -611,76 +620,11 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         logger.info(f"Session {session.session_id}: turn={session.turn_count}, memory_readiness={session.memory.readiness_for_wisdom:.2f}, ready={is_ready_for_wisdom}")
 
         if is_ready_for_wisdom:
-            # Check if we're already in answering phase (not first wisdom response)
-            is_repeat_wisdom_turn = session.phase == ConversationPhase.ANSWERING
+            # Transition to guidance phase
+            session.phase = ConversationPhase.GUIDANCE
             
-            # Detect if user is giving minimal engagement ("sure", "ok", "yeah", "fine", etc.)
-            minimal_engagement_words = ['sure', 'ok', 'okay', 'yeah', 'yes', 'fine', 'alright', 'good', 'uh huh', 'mhm']
-            user_message_lower = query.message.lower().strip()
-            is_minimal_engagement = (
-                len(user_message_lower) < 30 and  # Very short message
-                any(word in user_message_lower for word in minimal_engagement_words)
-            )
-            
-            logger.info(
-                f"Session {session.session_id}: In answering phase - "
-                f"is_repeat={is_repeat_wisdom_turn}, minimal_engagement={is_minimal_engagement}"
-            )
-            
-            # If user is giving minimal responses while in answering phase, ask deeper questions
-            # This prevents repeating the same wisdom over and over
-            if is_repeat_wisdom_turn and is_minimal_engagement:
-                logger.info(f"Session {session.session_id}: Detecting disengagement, switching to deeper questions")
-                
-                # Instead of repeating wisdom, ask more probing companion questions
-                deeper_questions = {
-                    'family': [
-                        "I sense you might be going through the motions. What would truly help you feel more connected to your family?",
-                        "When you think about your family, what's the one thing that matters most to you right now?",
-                        "Is it really time that's the issue, or is there something deeper you're struggling with?",
-                        "What would feel like real success to you in terms of family connection?",
-                        "Tell me - if you had unlimited time, what would you do differently with your family?",
-                    ],
-                    'work': [
-                        "Help me understand - is the work itself the problem, or is it how it's affecting other parts of your life?",
-                        "What would 'sustainable balance' actually look like for you?",
-                        "If you could change one thing about your work situation, what would it be?",
-                        "When did the overwork start feeling this overwhelming?",
-                        "What part of the work drains you the most?",
-                    ],
-                    'relationships': [
-                        "What's the hardest part about maintaining this connection right now?",
-                        "If the pressure lifted, what would change in how you relate to them?",
-                        "What does meaningful connection look like to you?",
-                        "Are you afraid of something specific, or is it just the overwhelm?",
-                        "What would your ideal relationship look like?",
-                    ]
-                }
-                
-                # Select deeper question based on detected life area
-                life_area = session.memory.story.life_area or 'family'
-                questions = deeper_questions.get(life_area, deeper_questions['family'])
-                deeper_q = questions[session.turn_count % len(questions)]
-                
-                session.add_message('assistant', deeper_q)
-                await session_manager.update_session(session)
-                
-                return ConversationalResponse(
-                    session_id=session.session_id,
-                    phase=ConversationPhaseEnum.clarification,  # Back to clarification
-                    response=deeper_q,
-                    signals_collected=session.get_signals_summary(),
-                    turn_count=session.turn_count,
-                    is_complete=False
-                )
-            
-            # Transition to answering phase
-            session.phase = ConversationPhase.ANSWERING
-
             # Use memory-aware synthesis
             session.dharmic_query = context_synthesizer.synthesize_from_memory(session)
-
-            # Build search query from memory
             dharmic_query = session.dharmic_query
             search_query = dharmic_query.build_search_query()
 
@@ -695,12 +639,13 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Check if we should reduce scripture density
             reduce_scripture = safety_validator.should_reduce_scripture_density(session)
 
-            # Compose personalized response using memory context
             response_text = await response_composer.compose_with_memory(
                 dharmic_query=dharmic_query,
                 memory=session.memory,
                 retrieved_verses=retrieved_docs,
-                reduce_scripture=reduce_scripture
+                reduce_scripture=reduce_scripture,
+                phase=ConversationPhase.GUIDANCE,
+                original_query=query.message
             )
 
             # Validate response
@@ -742,7 +687,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 
             return ConversationalResponse(
                 session_id=session.session_id,
-                phase=ConversationPhaseEnum.answering,
+                phase=ConversationPhaseEnum.guidance,
                 response=response_text,
                 signals_collected=session.get_signals_summary(),
                 turn_count=session.turn_count,
@@ -774,7 +719,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 
             return ConversationalResponse(
                 session_id=session.session_id,
-                phase=ConversationPhaseEnum.clarification,
+                phase=ConversationPhaseEnum.listening,
                 response=companion_response,
                 signals_collected=session.get_signals_summary(),
                 turn_count=session.turn_count,
