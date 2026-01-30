@@ -61,6 +61,7 @@ class ConversationMemory:
     user_name: str = ""
     user_email: str = ""
     user_phone: str = ""
+    user_dob: str = ""
     user_created_at: str = ""
 
     def add_user_quote(self, turn: int, quote: str) -> None:

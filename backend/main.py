@@ -550,44 +550,45 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 max_turns=settings.MAX_CLARIFICATION_TURNS
             )
 
-            # Pre-populate session memory with user profile and authentication info
-            # This enables personalized responses from the start with full user context
-            if user:
-                # Add authenticated user information to memory
-                session.memory.user_id = user.get('id', '')
-                session.memory.user_name = user.get('name', '')
-                session.memory.user_email = user.get('email', '')
-                session.memory.user_phone = user.get('phone', '')
-                session.memory.user_created_at = user.get('created_at', '')
-                
-                # Add user demographics to story
-                story = session.memory.story
-                if user.get('age_group'):
-                    story.age_group = user.get('age_group')
-                if user.get('gender'):
-                    story.gender = user.get('gender')
-                if user.get('profession'):
-                    story.profession = user.get('profession')
-                
-                logger.info(
-                    f"Session {session.session_id}: Pre-populated with authenticated user "
-                    f"(id={session.memory.user_id}, name={session.memory.user_name}, age_group={story.age_group})"
-                )
+        # ALWAYS refresh user data in session memory if user is authenticated
+        # This ensures even existing sessions get updated with user profile
+        if user:
+            # Update authenticated user information in memory
+            session.memory.user_id = user.get('id', '')
+            session.memory.user_name = user.get('name', '')
+            session.memory.user_email = user.get('email', '')
+            session.memory.user_phone = user.get('phone', '')
+            session.memory.user_dob = user.get('dob', '')
+            session.memory.user_created_at = user.get('created_at', '')
             
-            # Also populate from user_profile if provided in query
-            if query.user_profile:
-                profile = query.user_profile
-                story = session.memory.story
-                if profile.age_group:
-                    story.age_group = profile.age_group
-                if profile.gender:
-                    story.gender = profile.gender
-                if profile.profession:
-                    story.profession = profile.profession
-                logger.info(
-                    f"Session {session.session_id}: Pre-populated with user profile "
-                    f"(age_group={profile.age_group}, profession={profile.profession})"
-                )
+            # Update user demographics in story (only if not already set or if user data has changed)
+            story = session.memory.story
+            if user.get('age_group'):
+                story.age_group = user.get('age_group')
+            if user.get('gender'):
+                story.gender = user.get('gender')
+            if user.get('profession'):
+                story.profession = user.get('profession')
+            
+            logger.info(
+                f"Session {session.session_id}: Refreshed user data "
+                f"(id={session.memory.user_id}, name={session.memory.user_name}, age_group={story.age_group})"
+            )
+        
+        # Also populate from user_profile if provided in query
+        if query.user_profile:
+            profile = query.user_profile
+            story = session.memory.story
+            if profile.age_group:
+                story.age_group = profile.age_group
+            if profile.gender:
+                story.gender = profile.gender
+            if profile.profession:
+                story.profession = profile.profession
+            logger.info(
+                f"Session {session.session_id}: Updated with user profile "
+                f"(age_group={profile.age_group}, profession={profile.profession})"
+            )
 
         # Safety check first
         is_crisis, crisis_response = await safety_validator.check_crisis_signals(

@@ -80,9 +80,19 @@ class ResponseComposer:
         """
         profile = {}
         
-        # User identity
+        # User identity and contact info (from authentication)
         if memory.user_name:
             profile['name'] = memory.user_name
+        if memory.user_email:
+            profile['email'] = memory.user_email
+        if memory.user_phone:
+            profile['phone'] = memory.user_phone
+        if memory.user_dob:
+            profile['dob'] = memory.user_dob
+        if memory.user_id:
+            profile['user_id'] = memory.user_id
+        if memory.user_created_at:
+            profile['created_at'] = memory.user_created_at
         
         # Demographics and current state from story
         story = memory.story

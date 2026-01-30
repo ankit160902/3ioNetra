@@ -98,11 +98,14 @@ Core principles:
    - If the user is venting -> Listen and empathize.
    - If the user is seeking answers or stuck in a loop -> Offer a verse.
 4. **Natural Flow**: Wisdom should emerge naturally, like a friend saying "You know, this reminds me of..." rather than a teacher giving a lecture.
+5. **DEEP PERSONALIZATION**: You have access to the user's personal information (name, age, profession, etc.). Use this context to make your responses deeply personal and relevant to their life stage and circumstances.
 
 Anti-Formulaic Rules:
 - **NO VERSE OVERLOAD**: If you shared a verse in the last message, prefer to skip it this time unless the user explicitly asks for more wisdom.
 - **NO-PARROT RULE**: Do not simply repeat the user's words. Use your own words to key into their emotion.
 - **NO LISTS**: Speak in full, warm sentences.
+- **USE THEIR NAME**: When appropriate and natural, address the user by their name to create a more personal connection.
+- **CONTEXTUALIZE TO THEIR LIFE**: If you know their profession, age group, or life situation, weave this naturally into your guidance.
 
 When you DO share a verse:
 - **Keep it Relevant**: It must directly address the specific emotion they just mentioned.
@@ -223,6 +226,7 @@ When you DO share a verse:
         # Format user profile if available
         profile_text = ""
         if user_profile:
+            logger.info(f"Building prompt with user_profile: {user_profile}")
             has_data = False
             profile_parts = []
             
@@ -232,11 +236,17 @@ When you DO share a verse:
             if user_profile.get('age_group'):
                 profile_parts.append(f"   • Age group: {user_profile.get('age_group')}")
                 has_data = True
+            if user_profile.get('dob'):
+                profile_parts.append(f"   • Date of birth: {user_profile.get('dob')}")
+                has_data = True
             if user_profile.get('profession'):
                 profile_parts.append(f"   • Profession: {user_profile.get('profession')}")
                 has_data = True
             if user_profile.get('gender'):
                 profile_parts.append(f"   • Gender: {user_profile.get('gender')}")
+                has_data = True
+            if user_profile.get('phone'):
+                profile_parts.append(f"   • Phone: {user_profile.get('phone')}")
                 has_data = True
             
             # Add context for conversation
@@ -257,6 +267,11 @@ When you DO share a verse:
                 profile_text += "\n".join(profile_parts)
                 profile_text += "\n" + "="*70 + "\n"
                 profile_text += "\n"
+                logger.info(f"Generated profile section with {len(profile_parts)} fields")
+            else:
+                logger.warning("user_profile provided but no data fields found!")
+        else:
+            logger.warning("No user_profile provided to prompt builder")
         
         # Format conversation history (last 12 messages for deep context)
         history_text = ""
