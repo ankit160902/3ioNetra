@@ -200,18 +200,26 @@ async def startup_event():
 
     logger.info("Starting 3ioNetra Spiritual Companion API...")
 
+    # Start heavy initialization in background to allow fast container startup
+    import asyncio
+    asyncio.create_task(initialize_components_background())
+    logger.info("🚀 Server started! Heavy components initializing in background...")
+
+
+async def initialize_components_background():
+    """Background task to initialize heavy components"""
+    global rag_pipeline
+    
     # Fix MongoDB index issue (run once to clean up)
     try:
         from pymongo import MongoClient
         mongo_uri = settings.MONGODB_URI
 
         if settings.DATABASE_PASSWORD:
-            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
-)
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
         
         client = MongoClient(mongo_uri)
-        db = client[settings.DATABASE_NAME
-]
+        db = client[settings.DATABASE_NAME]
         
         try:
             db.conversations.drop_index("conversation_id_1")
@@ -225,15 +233,16 @@ async def startup_event():
 
     try:
         # Initialize RAG Pipeline
-        logger.info("Initializing RAG Pipeline...")
+        logger.info("Initializing RAG Pipeline (Background)...")
         rag_pipeline = RAGPipeline()
         await rag_pipeline.initialize()
+        logger.info("✅ RAG Pipeline initialized")
 
         # Initialize LLM Service
         logger.info("Initializing LLM Service...")
         llm_service = get_llm_service()
         if llm_service.available:
-            logger.info("LLM Service initialized successfully with Gemini")
+            logger.info("✅ LLM Service initialized successfully with Gemini")
         else:
             logger.warning("LLM Service not available - will use fallback templates. Set GEMINI_API_KEY to enable.")
 
@@ -241,7 +250,7 @@ async def startup_event():
         logger.info("Initializing Query Refiner...")
         refiner = get_refiner(settings.GEMINI_API_KEY)
         if refiner and refiner.available:
-            logger.info("Query Refiner initialized successfully")
+            logger.info("✅ Query Refiner initialized successfully")
         else:
             logger.warning("Query Refiner not available")
 
@@ -249,7 +258,7 @@ async def startup_event():
         logger.info("Initializing Response Reformatter...")
         reformatter = get_reformatter(settings.GEMINI_API_KEY)
         if reformatter and reformatter.available:
-            logger.info("Response Reformatter initialized successfully")
+            logger.info("✅ Response Reformatter initialized successfully")
         else:
             logger.warning("Response Reformatter not available")
 
@@ -258,27 +267,27 @@ async def startup_event():
 
         # Session Manager
         session_manager = get_session_manager(ttl_minutes=settings.SESSION_TTL_MINUTES)
-        logger.info(f"Session Manager initialized (TTL: {settings.SESSION_TTL_MINUTES} min)")
+        logger.info(f"✅ Session Manager initialized (TTL: {settings.SESSION_TTL_MINUTES} min)")
 
         # Context Synthesizer
         get_context_synthesizer()
-        logger.info("Context Synthesizer initialized")
+        logger.info("✅ Context Synthesizer initialized")
 
         # Safety Validator
         safety_validator = get_safety_validator(enable_crisis_detection=settings.ENABLE_CRISIS_DETECTION)
-        logger.info(f"Safety Validator initialized (crisis_detection={settings.ENABLE_CRISIS_DETECTION})")
+        logger.info(f"✅ Safety Validator initialized (crisis_detection={settings.ENABLE_CRISIS_DETECTION})")
 
         # Response Composer
         response_composer = get_response_composer()
         if response_composer.available:
-            logger.info("Response Composer initialized with Gemini")
+            logger.info("✅ Response Composer initialized with Gemini")
         else:
             logger.info("Response Composer using templates")
 
         # Companion Engine (new empathetic conversation handler)
         companion_engine = get_companion_engine()
         if companion_engine.available:
-            logger.info("Companion Engine initialized with Gemini")
+            logger.info("✅ Companion Engine initialized with Gemini")
         else:
             logger.info("Companion Engine using templates")
         
@@ -287,11 +296,12 @@ async def startup_event():
             companion_engine.set_rag_pipeline(rag_pipeline)
             logger.info("✅ RAG pipeline connected to Companion Engine")
 
-        logger.info("All components initialized successfully!")
+        logger.info("🎉 All components initialized successfully!")
 
     except Exception as e:
-        logger.error(f"Failed to initialize components: {str(e)}")
-        raise
+        logger.error(f"❌ Failed to initialize components: {str(e)}")
+        # Note: We don't raise here because it crashes the background task, 
+        # but the server stays running. It's better than crashing the container loop.
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -4,7 +4,7 @@ Provides empathetic, phase-aware interactions using Gemini AI
 """
 
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from config import settings
