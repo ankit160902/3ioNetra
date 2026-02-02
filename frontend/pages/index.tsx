@@ -608,11 +608,14 @@ export default function Home() {
           <div className="max-w-4xl mx-auto px-4 py-4">
             <form onSubmit={handleTextSubmit} className="flex gap-2">
               <input
+                id="chat-input"
+                name="message"
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 placeholder="Share what's on your mind..."
                 disabled={isProcessing}
+                autoComplete="off"
                 className="flex-1 px-4 py-3 border border-orange-300 rounded-full focus:ring-2 focus:ring-orange-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
               />
 

@@ -40,17 +40,41 @@ export interface UserProfile {
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
 export function useSession(userProfile?: UserProfile, authHeader?: Record<string, string>) {
-  const [session, setSession] = useState<SessionState>({
-    sessionId: null,
-    phase: 'listening',
-    turnCount: 0,
-    signalsCollected: {},
-    isComplete: false,
+  const [session, setSession] = useState<SessionState>(() => {
+    // Try to restore session from localStorage on mount
+    if (typeof window !== 'undefined') {
+      const savedSessionId = localStorage.getItem('spiritual_session_id');
+      if (savedSessionId) {
+        console.log('🔄 Restoring session from localStorage:', savedSessionId);
+        return {
+          sessionId: savedSessionId,
+          phase: 'listening',
+          turnCount: 0,
+          signalsCollected: {},
+          isComplete: false,
+        };
+      }
+    }
+    return {
+      sessionId: null,
+      phase: 'listening',
+      turnCount: 0,
+      signalsCollected: {},
+      isComplete: false,
+    };
   });
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [welcomeMessage, setWelcomeMessage] = useState<string>('');
+
+  // Sync session_id to localStorage whenever it changes
+  useEffect(() => {
+    if (session.sessionId) {
+      console.log('💾 Saving session_id to localStorage:', session.sessionId);
+      localStorage.setItem('spiritual_session_id', session.sessionId);
+    }
+  }, [session.sessionId]);
 
   // Create new session
   const createSession = useCallback(async (): Promise<string> => {
@@ -95,15 +119,22 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setError(null);
 
       try {
+        // CRITICAL: Get current session state at call time, not closure time
+        let currentSessionId: string | null = null;
+        setSession((prev) => {
+          currentSessionId = prev.sessionId;
+          return prev; // No change, just reading
+        });
+
         // Build request body, including user profile for new sessions
         const requestBody: Record<string, unknown> = {
-          session_id: session.sessionId,
+          session_id: currentSessionId,
           message,
           language,
         };
 
         // Include user profile for personalization (especially for new sessions)
-        if (userProfile && (!session.sessionId || session.turnCount === 0)) {
+        if (userProfile && !currentSessionId) {
           requestBody.user_profile = {
             age_group: userProfile.age_group || '',
             gender: userProfile.gender || '',
@@ -117,6 +148,9 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         if (authHeader) {
           Object.assign(headers, authHeader);
         }
+
+        console.log('📤 Sending to /api/conversation with session_id:', requestBody.session_id || 'NULL');
+        console.log('📤 Full request body:', JSON.stringify(requestBody, null, 2));
 
         const response = await fetch(`${API_URL}/api/conversation`, {
           method: 'POST',
@@ -193,7 +227,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         setIsLoading(false);
       }
     },
-    [session.sessionId, session.turnCount, userProfile, authHeader]
+    [userProfile, authHeader, createSession]
   );
 
   // Send message with streaming (for future use)
@@ -316,6 +350,10 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
 
   // Reset session
   const resetSession = useCallback(() => {
+    console.log('🔄 Resetting session and clearing localStorage');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('spiritual_session_id');
+    }
     setSession({
       sessionId: null,
       phase: 'clarification',
