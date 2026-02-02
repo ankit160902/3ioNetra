@@ -110,9 +110,15 @@ class AuthService:
         phone: str = "",
         gender: str = "",
         dob: str = "",
-        profession: str = ""
+        profession: str = "",
+        rashi: str = "",
+        gotra: str = "",
+        nakshatra: str = "",
+        preferred_deity: str = "",
+        temple_visits: List[str] = [],
+        purchase_history: List[str] = []
     ) -> Optional[Dict[str, Any]]:
-        """Register a new user with extended profile"""
+        """Register a new user with extended profile in the new schema structure"""
         email_lower = email.lower()
 
         # Check if email already exists
@@ -125,44 +131,93 @@ class AuthService:
         # Calculate age and age group from DOB
         age, age_group = _calculate_age_and_group(dob)
 
-        # Create user
+        # Create user ID
         user_id = _generate_user_id()
+        
+        # Map simple lists to the complex structure requested
+        # Temples
+        temples_data = []
+        for t in temple_visits:
+            if t.strip():
+                temples_data.append({
+                    "temple_id": t.strip(),
+                    "visits": [{
+                        "date": datetime.utcnow().isoformat(),
+                        "purpose": "Historical Visit",
+                        "event": "",
+                        "sevas": [],
+                        "activity": []
+                    }]
+                })
+        
+        # Purchases
+        purchases_data = []
+        for p in purchase_history:
+            if p.strip():
+                purchases_data.append({
+                    "type": "Historical",
+                    "datetime": datetime.utcnow().isoformat(),
+                    "product_id": "",
+                    "name": p.strip(),
+                    "category": "",
+                    "amount": 0
+                })
+
+        # Split name into first, middle, last
+        name_parts = name.strip().split()
+        first_name = name_parts[0] if name_parts else ""
+        if len(name_parts) == 1:
+            middle_name = ""
+            last_name = ""
+        elif len(name_parts) == 2:
+            middle_name = ""
+            last_name = name_parts[1]
+        else:
+            middle_name = name_parts[1]
+            last_name = " ".join(name_parts[2:])
+
+        # Construct the new nested document structure
+        # Keeping necessary auth fields at root (email, password, phone, created_at)
+        # STRICT SCHEMA IMPLEMENTATION AS PER REQUIREMENTS (Step 211)
         user_doc = {
             "id": user_id,
-            "name": name,
-            "email": email_lower,
-            "phone": phone,
-            "gender": gender,
-            "dob": dob,
-            "age": age,
-            "age_group": age_group,
-            "profession": profession,
+            "email": email_lower, 
+            "phone": phone, # Kept at root as it's contact info
             "password_hash": hashed,
             "password_salt": salt,
             "created_at": datetime.utcnow(),
+            
+            # Requested Structure Fields
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "last_name": last_name,
+            "date_of_birth": dob,
+            "occupation": profession,
+            "gender": gender,
+            "deities": [preferred_deity] if preferred_deity else [],
+            
+            "spiritual_profile": {
+                "rashi": rashi,
+                "gothra": gotra,
+                "nakshatra": nakshatra,
+                "kundli": None
+            },
+            
+            "temples": temples_data,
+            "purchases": purchases_data
         }
 
         try:
             # Save user to MongoDB
             self.db.users.insert_one(user_doc)
-            logger.info(f"New user registered: {email_lower}")
+            logger.info(f"New user registered: {email_lower} (Profile: {age_group}, {profession}, rashi={rashi}, deity={preferred_deity})")
 
             # Generate token
             token = self._create_token(user_id)
-
+            
+            # Return flat structure for frontend compatibility
             return {
-                "user": {
-                    "id": user_id,
-                    "name": name,
-                    "email": email_lower,
-                    "phone": phone,
-                    "gender": gender,
-                    "dob": dob,
-                    "age": age,
-                    "age_group": age_group,
-                    "profession": profession,
-                    "created_at": user_doc["created_at"].isoformat(),
-                },
+                "user": self._flatten_user_msg(user_doc, age, age_group),
                 "token": token,
             }
         except DuplicateKeyError:
@@ -187,22 +242,12 @@ class AuthService:
 
         logger.info(f"User logged in: {email_lower}")
 
-        # Recalculate age in case it's been a while since registration
-        age, age_group = _calculate_age_and_group(user.get("dob", ""))
+        # Recalculate age/group
+        dob = user.get("date_of_birth", user.get("dob", ""))
+        age, age_group = _calculate_age_and_group(dob)
 
         return {
-            "user": {
-                "id": user["id"],
-                "name": user["name"],
-                "email": user["email"],
-                "phone": user.get("phone", ""),
-                "gender": user.get("gender", ""),
-                "dob": user.get("dob", ""),
-                "age": age,
-                "age_group": age_group,
-                "profession": user.get("profession", ""),
-                "created_at": user["created_at"].isoformat(),
-            },
+            "user": self._flatten_user_msg(user, age, age_group),
             "token": token,
         }
 
@@ -238,20 +283,65 @@ class AuthService:
         if not user:
             return None
 
-        # Recalculate age in case it's been a while
-        age, age_group = _calculate_age_and_group(user.get("dob", ""))
+        # Recalculate age
+        dob = user.get("date_of_birth", user.get("dob", ""))
+        age, age_group = _calculate_age_and_group(dob)
         
+        return self._flatten_user_msg(user, age, age_group)
+
+    def _flatten_user_msg(self, user_doc: Dict, age: int, age_group: str) -> Dict:
+        """Helper to flatten user doc for frontend response"""
+        # Handle backward compatibility (some fields might be at root in old docs)
+        
+        # Deities
+        deities = user_doc.get("deities", [])
+        pref_deity = deities[0] if deities and isinstance(deities, list) else user_doc.get("preferred_deity", "")
+        
+        # Spiritual Profile
+        sp = user_doc.get("spiritual_profile", {})
+        
+        # Temples (Flatten to list of names)
+        temples = user_doc.get("temples", [])
+        temple_names = []
+        if temples and isinstance(temples, list):
+            for t in temples:
+                if isinstance(t, dict):
+                    temple_names.append(t.get("temple_id", ""))
+                elif isinstance(t, str):
+                    temple_names.append(t)
+        if not temple_names:
+            # Fallback to old field
+            temple_names = user_doc.get("temple_visits", [])
+
+        # Purchases (Flatten to list of names)
+        purchases = user_doc.get("purchases", [])
+        purchase_names = []
+        if purchases and isinstance(purchases, list):
+            for p in purchases:
+                if isinstance(p, dict):
+                    purchase_names.append(p.get("name", ""))
+                elif isinstance(p, str):
+                    purchase_names.append(p)
+        if not purchase_names:
+            purchase_names = user_doc.get("purchase_history", [])
+
         return {
-            "id": user["id"],
-            "name": user["name"],
-            "email": user["email"],
-            "phone": user.get("phone", ""),
-            "gender": user.get("gender", ""),
-            "dob": user.get("dob", ""),
+            "id": user_doc["id"],
+            "name": user_doc.get("first_name", user_doc.get("name", "")),
+            "email": user_doc["email"],
+            "phone": user_doc.get("phone", ""),
+            "gender": user_doc.get("gender", ""),
+            "dob": user_doc.get("date_of_birth", user_doc.get("dob", "")),
             "age": age,
             "age_group": age_group,
-            "profession": user.get("profession", ""),
-            "created_at": user["created_at"].isoformat(),
+            "profession": user_doc.get("occupation", user_doc.get("profession", "")),
+            "rashi": sp.get("rashi", user_doc.get("rashi", "")),
+            "gotra": sp.get("gothra", sp.get("gotra", user_doc.get("gotra", ""))), # Handle spelling diff gothra/gotra
+            "nakshatra": sp.get("nakshatra", user_doc.get("nakshatra", "")),
+            "preferred_deity": pref_deity,
+            "temple_visits": temple_names,
+            "purchase_history": purchase_names,
+            "created_at": user_doc["created_at"].isoformat() if isinstance(user_doc["created_at"], datetime) else user_doc["created_at"],
         }
 
     def logout_user(self, token: str) -> bool:
@@ -270,59 +360,73 @@ class ConversationStorage:
         user_id: str,
         conversation_id: Optional[str],
         title: str,
-        messages: list
+        messages: list,
+        memory: Optional[Dict] = None
     ) -> str:
-        """Append messages to user's single conversation document"""
+        """Add unique messages and persistent memory to user's global history"""
         
         # Find user's conversation document
         user_conversation = self.db.conversations.find_one({"user_id": user_id})
         
-        if user_conversation:
-            # Append new messages to existing conversation
-            existing_messages = user_conversation.get("messages", [])
+        existing_messages = user_conversation.get("messages", []) if user_conversation else []
+        
+        # Deduplicate: only add messages that don't already exist
+        existing_sigs = set()
+        for m in existing_messages:
+            sig = (m.get("role"), m.get("content"), m.get("timestamp"))
+            existing_sigs.add(sig)
             
-            # Add separator if not first conversation
-            if existing_messages:
-                existing_messages.append({
+        new_to_add = []
+        for m in messages:
+            sig = (m.get("role"), m.get("content"), m.get("timestamp"))
+            if sig not in existing_sigs:
+                new_to_add.append(m)
+        
+        if not new_to_add and not memory:
+            return str(user_conversation["_id"]) if user_conversation else ""
+
+        # Session separator logic
+        if existing_messages and new_to_add:
+            if not any("New Session" in str(m.get("content", "")) for m in new_to_add[:1]):
+                 existing_messages.append({
                     "role": "system",
-                    "content": f"--- New Conversation: {title} ---",
+                    "content": f"--- New Session: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} ---",
                     "timestamp": datetime.utcnow().isoformat()
                 })
-            
-            # Add all new messages
-            existing_messages.extend(messages)
-            
+
+        # Add all new messages
+        existing_messages.extend(new_to_add)
+        
+        update_data = {
+            "messages": existing_messages,
+            "message_count": len(existing_messages),
+            "updated_at": datetime.utcnow(),
+            "last_title": title
+        }
+        
+        if memory:
+            update_data["memory"] = memory
+
+        if user_conversation:
             # Update document
             self.db.conversations.update_one(
                 {"user_id": user_id},
-                {
-                    "$set": {
-                        "messages": existing_messages,
-                        "message_count": len(existing_messages),
-                        "updated_at": datetime.utcnow(),
-                        "last_title": title
-                    }
-                }
+                {"$set": update_data}
             )
-            
-            conversation_id = user_conversation["_id"]
+            conv_id = user_conversation["_id"]
         else:
             # Create new conversation document for user
             conversation_doc = {
                 "user_id": user_id,
-                "messages": messages,
-                "message_count": len(messages),
                 "created_at": datetime.utcnow(),
-                "updated_at": datetime.utcnow(),
-                "last_title": title
+                **update_data
             }
             
             result = self.db.conversations.insert_one(conversation_doc)
-            conversation_id = result.inserted_id
+            conv_id = result.inserted_id
         
-        total_messages = len(existing_messages) if user_conversation else len(messages)
-        logger.info(f"Saved conversation for user {user_id}, total messages: {total_messages}")
-        return str(conversation_id)
+        logger.info(f"Updated persistent history and story for user {user_id}")
+        return str(conv_id)
 
     def get_conversations_list(self, user_id: str, limit: int = 20) -> list:
         """Get user's conversation (returns single document)"""

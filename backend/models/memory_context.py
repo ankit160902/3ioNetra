@@ -30,6 +30,10 @@ class UserStory:
     age_group: str = ""
     gender: str = ""
     profession: str = ""
+    rashi: str = ""
+    gotra: str = ""
+    nakshatra: str = ""
+    preferred_deity: str = ""
     
     def to_dict(self) -> Dict:
         return {
@@ -40,7 +44,11 @@ class UserStory:
             "unmet_needs": self.unmet_needs,
             "age_group": self.age_group,
             "gender": self.gender,
-            "profession": self.profession
+            "profession": self.profession,
+            "rashi": self.rashi,
+            "gotra": self.gotra,
+            "nakshatra": self.nakshatra,
+            "preferred_deity": self.preferred_deity
         }
     
     @classmethod
@@ -55,7 +63,11 @@ class UserStory:
             unmet_needs=data.get("unmet_needs", []),
             age_group=data.get("age_group", ""),
             gender=data.get("gender", ""),
-            profession=data.get("profession", "")
+            profession=data.get("profession", ""),
+            rashi=data.get("rashi", ""),
+            gotra=data.get("gotra", ""),
+            nakshatra=data.get("nakshatra", ""),
+            preferred_deity=data.get("preferred_deity", "")
         )
 
 
@@ -89,6 +101,9 @@ class ConversationMemory:
     user_email: str = ""
     user_phone: str = ""
     user_dob: str = ""
+    user_rashi: str = ""
+    user_gotra: str = ""
+    user_nakshatra: str = ""
     user_created_at: str = ""
 
     def to_dict(self) -> Dict:
@@ -104,6 +119,9 @@ class ConversationMemory:
             "user_email": self.user_email,
             "user_phone": self.user_phone,
             "user_dob": self.user_dob,
+            "user_rashi": self.user_rashi,
+            "user_gotra": self.user_gotra,
+            "user_nakshatra": self.user_nakshatra,
             "user_created_at": self.user_created_at
         }
     
@@ -123,6 +141,9 @@ class ConversationMemory:
             user_email=data.get("user_email", ""),
             user_phone=data.get("user_phone", ""),
             user_dob=data.get("user_dob", ""),
+            user_rashi=data.get("user_rashi", ""),
+            user_gotra=data.get("user_gotra", ""),
+            user_nakshatra=data.get("user_nakshatra", ""),
             user_created_at=data.get("user_created_at", "")
         )
         return memory
@@ -190,5 +211,14 @@ class ConversationMemory:
 
         if self.story.profession:
             parts.append(f"working as {self.story.profession}")
+
+        if self.story.rashi:
+            parts.append(f"Rashi: {self.story.rashi}")
+
+        if self.story.nakshatra:
+            parts.append(f"Nakshatra: {self.story.nakshatra}")
+            
+        if self.story.gotra:
+            parts.append(f"Gotra: {self.story.gotra}")
 
         return ", ".join(parts) if parts else "anonymous seeker"

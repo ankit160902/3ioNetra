@@ -12,6 +12,12 @@ export interface UserProfile {
   gender: string;
   dob: string;
   profession: string;
+  rashi?: string;
+  gotra?: string;
+  nakshatra?: string;
+  preferred_deity?: string;
+  temple_visits?: string[];
+  purchase_history?: string[];
 }
 
 interface LoginPageProps {
@@ -54,6 +60,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
   const [gender, setGender] = useState('');
   const [dob, setDob] = useState('');
   const [profession, setProfession] = useState('');
+  const [rashi, setRashi] = useState('');
+  const [gotra, setGotra] = useState('');
+  const [nakshatra, setNakshatra] = useState('');
+  const [preferredDeity, setPreferredDeity] = useState('');
+  const [templeVisits, setTempleVisits] = useState('');
+  const [purchaseHistory, setPurchaseHistory] = useState('');
 
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -132,6 +144,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         gender,
         dob,
         profession,
+        rashi,
+        gotra,
+        nakshatra,
+        preferred_deity: preferredDeity,
+        temple_visits: templeVisits ? templeVisits.split(',').map(s => s.trim()) : [],
+        purchase_history: purchaseHistory ? purchaseHistory.split(',').map(s => s.trim()) : [],
       });
     } else {
       await onLogin(email, password);
@@ -150,6 +168,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     setGender('');
     setDob('');
     setProfession('');
+    setRashi('');
+    setGotra('');
+    setNakshatra('');
+    setPreferredDeity('');
+    setTempleVisits('');
+    setPurchaseHistory('');
   };
 
   // Calculate max date for DOB (user should be at least 13 years old)
@@ -336,6 +360,94 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="rashi" className="block text-sm font-medium text-gray-700 mb-1">
+                      Rashi
+                    </label>
+                    <input
+                      id="rashi"
+                      type="text"
+                      value={rashi}
+                      onChange={(e) => setRashi(e.target.value)}
+                      placeholder="e.g. Mesha"
+                      className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="nakshatra" className="block text-sm font-medium text-gray-700 mb-1">
+                      Nakshatra
+                    </label>
+                    <input
+                      id="nakshatra"
+                      type="text"
+                      value={nakshatra}
+                      onChange={(e) => setNakshatra(e.target.value)}
+                      placeholder="e.g. Ashwini"
+                      className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="gotra" className="block text-sm font-medium text-gray-700 mb-1">
+                      Gotra
+                    </label>
+                    <input
+                      id="gotra"
+                      type="text"
+                      value={gotra}
+                      onChange={(e) => setGotra(e.target.value)}
+                      placeholder="e.g. Kashyapa"
+                      className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label htmlFor="preferred_deity" className="block text-sm font-medium text-gray-700 mb-1">
+                      Preferred Deity (Ishta Devata)
+                    </label>
+                    <input
+                      id="preferred_deity"
+                      type="text"
+                      value={preferredDeity}
+                      onChange={(e) => setPreferredDeity(e.target.value)}
+                      placeholder="e.g. Shiva, Krishna"
+                      className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label htmlFor="temple_visits" className="block text-sm font-medium text-gray-700 mb-1">
+                    Previous Temple Visits (if any)
+                  </label>
+                  <input
+                    id="temple_visits"
+                    type="text"
+                    value={templeVisits}
+                    onChange={(e) => setTempleVisits(e.target.value)}
+                    placeholder="e.g. Kashi Vishwanath, Tirupati (separate by comma)"
+                    className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="purchase_history" className="block text-sm font-medium text-gray-700 mb-1">
+                    Previous Spiritual Purchases (if any)
+                  </label>
+                  <input
+                    id="purchase_history"
+                    type="text"
+                    value={purchaseHistory}
+                    onChange={(e) => setPurchaseHistory(e.target.value)}
+                    placeholder="e.g. Rudraksha Mala, Geeta (separate by comma)"
+                    className="w-full px-4 py-2.5 border border-orange-200 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent transition-colors"
+                  />
                 </div>
 
                 <p className="text-xs text-gray-500 text-center">

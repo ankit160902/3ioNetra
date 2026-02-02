@@ -16,6 +16,10 @@ export interface User {
   age: number;
   age_group: string;
   profession: string;
+  rashi?: string;
+  gotra?: string;
+  nakshatra?: string;
+  preferred_deity?: string;
   created_at: string;
 }
 
@@ -150,6 +154,12 @@ export function useAuth() {
           gender: profile.gender,
           dob: profile.dob,
           profession: profile.profession,
+          rashi: profile.rashi,
+          gotra: profile.gotra,
+          nakshatra: profile.nakshatra,
+          preferred_deity: profile.preferred_deity,
+          temple_visits: profile.temple_visits,
+          purchase_history: profile.purchase_history,
         }),
       });
 

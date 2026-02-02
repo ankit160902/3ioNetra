@@ -41,6 +41,10 @@ export default function Home() {
     gender: user.gender || '',
     profession: user.profession || '',
     name: user.name || '',
+    rashi: user.rashi || '',
+    gotra: user.gotra || '',
+    nakshatra: user.nakshatra || '',
+    preferred_deity: user.preferred_deity || '',
   } : undefined;
 
   const {
@@ -61,8 +65,30 @@ export default function Home() {
   useEffect(() => {
     if (isAuthenticated && user) {
       loadConversationHistory();
+
+      // If we don't have any messages yet (fresh login), try to load the latest history
+      if (messages.length === 0) {
+        const autoLoadLatest = async () => {
+          try {
+            const response = await fetch(`${API_URL}/api/user/conversations`, {
+              headers: { ...getAuthHeader() },
+            });
+            if (response.ok) {
+              const data = await response.json();
+              const latest = data.conversations?.[0];
+              if (latest) {
+                console.log('🔄 Auto-loading latest conversation history:', latest.id);
+                loadConversation(latest.id);
+              }
+            }
+          } catch (e) {
+            console.error('Failed to auto-load latest conversation:', e);
+          }
+        };
+        autoLoadLatest();
+      }
     }
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, messages.length]);
 
   // Initialize session when using conversation flow and authenticated
 

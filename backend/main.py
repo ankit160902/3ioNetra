@@ -110,6 +110,10 @@ class UserProfileContext(BaseModel):
     gender: str = ""
     profession: str = ""
     name: str = ""
+    rashi: str = ""
+    gotra: str = ""
+    nakshatra: str = ""
+    preferred_deity: str = ""
 
 
 class ConversationalQuery(BaseModel):
@@ -144,6 +148,12 @@ class UserRegisterRequest(BaseModel):
     gender: str = ""
     dob: str = ""  # Format: YYYY-MM-DD
     profession: str = ""
+    rashi: str = ""
+    gotra: str = ""
+    nakshatra: str = ""
+    preferred_deity: str = ""
+    temple_visits: List[str] = []
+    purchase_history: List[str] = []
 
 
 class UserLoginRequest(BaseModel):
@@ -164,6 +174,12 @@ class UserResponse(BaseModel):
     age_group: str = ""
     profession: str = ""
     created_at: str
+    rashi: str = ""
+    gotra: str = ""
+    nakshatra: str = ""
+    preferred_deity: str = ""
+    temple_visits: List[str] = []
+    purchase_history: List[str] = []
 
 
 class AuthResponse(BaseModel):
@@ -580,8 +596,37 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             session.memory.user_email = user.get('email', '')
             session.memory.user_phone = user.get('phone', '')
             session.memory.user_dob = user.get('dob', '')
+            session.memory.user_rashi = user.get('rashi', '')
+            session.memory.user_gotra = user.get('gotra', '')
+            session.memory.user_nakshatra = user.get('nakshatra', '')
             session.memory.user_created_at = user.get('created_at', '')
             
+            # 🔥 NEW: Load global conversation history if this is a new session
+            if session.turn_count == 0:
+                try:
+                    storage = get_conversation_storage()
+                    # Pass empty string to get the user's global conversation doc
+                    past_convo = storage.get_conversation(user["id"], "")
+                    if past_convo and past_convo.get("messages"):
+                        past_messages = past_convo["messages"]
+                        # Prepend last 15 messages for context
+                        context_history = past_messages[-15:]
+                        
+                        session.conversation_history = context_history + session.conversation_history
+                        
+                        # 🔥 NEW: Restore high-level story and memory from DB if available
+                        if past_convo.get("memory"):
+                            from models.memory_context import ConversationMemory
+                            session.memory = ConversationMemory.from_dict(past_convo["memory"])
+                            logger.info(f"Restored permanent memory story for user {user['id']}")
+                        else:
+                            # Reconstruct high-level memory context from history if no saved memory exists
+                            await companion_engine.reconstruct_memory(session, context_history)
+                        
+                        logger.info(f"Loaded {len(context_history)} past history messages for user {user['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to load past history in session: {e}")
+
             # Update user demographics in story (only if not already set or if user data has changed)
             story = session.memory.story
             if user.get('age_group'):
@@ -590,6 +635,14 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 story.gender = user.get('gender')
             if user.get('profession'):
                 story.profession = user.get('profession')
+            if user.get('rashi'):
+                story.rashi = user.get('rashi')
+            if user.get('gotra'):
+                story.gotra = user.get('gotra')
+            if user.get('nakshatra'):
+                story.nakshatra = user.get('nakshatra')
+            if user.get('preferred_deity'):
+                story.preferred_deity = user.get('preferred_deity')
             
             logger.info(
                 f"Session {session.session_id}: Refreshed user data "
@@ -606,6 +659,14 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 story.gender = profile.gender
             if profile.profession:
                 story.profession = profile.profession
+            if profile.rashi:
+                story.rashi = profile.rashi
+            if profile.gotra:
+                story.gotra = profile.gotra
+            if profile.nakshatra:
+                story.nakshatra = profile.nakshatra
+            if profile.preferred_deity:
+                story.preferred_deity = profile.preferred_deity
             logger.info(
                 f"Session {session.session_id}: Updated with user profile "
                 f"(age_group={profile.age_group}, profession={profile.profession})"
@@ -694,7 +755,8 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         user_id=user["id"],
                         conversation_id=session.session_id,
                         title=title,
-                        messages=session.conversation_history
+                        messages=session.conversation_history,
+                        memory=session.memory.to_dict()
                     )
                     logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
                 except Exception as e:
@@ -738,7 +800,8 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         user_id=user["id"],
                         conversation_id=session.session_id,
                         title=title,
-                        messages=session.conversation_history
+                        messages=session.conversation_history,
+                        memory=session.memory.to_dict()
                     )
                     logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
                 except Exception as e:
@@ -846,7 +909,13 @@ async def register_user(request: UserRegisterRequest):
             phone=request.phone,
             gender=request.gender,
             dob=request.dob,
-            profession=request.profession
+            profession=request.profession,
+            rashi=request.rashi,
+            gotra=request.gotra,
+            nakshatra=request.nakshatra,
+            preferred_deity=request.preferred_deity,
+            temple_visits=request.temple_visits,
+            purchase_history=request.purchase_history
         )
 
         if not result:

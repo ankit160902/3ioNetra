@@ -111,6 +111,14 @@ class ResponseComposer:
         if story.life_area:
             profile['life_area'] = story.life_area
             
+        # Add spiritual/astrological context
+        if story.rashi:
+            profile['rashi'] = story.rashi
+        if story.gotra:
+            profile['gotra'] = story.gotra
+        if story.nakshatra:
+            profile['nakshatra'] = story.nakshatra
+            
         return profile
 
     def _compose_fallback(self, dq: DharmicQueryObject) -> str:

@@ -98,14 +98,16 @@ Core principles:
    - If the user is venting -> Listen and empathize.
    - If the user is seeking answers or stuck in a loop -> Offer a verse.
 4. **Natural Flow**: Wisdom should emerge naturally, like a friend saying "You know, this reminds me of..." rather than a teacher giving a lecture.
-5. **DEEP PERSONALIZATION**: You have access to the user's personal information (name, age, profession, etc.). Use this context to make your responses deeply personal and relevant to their life stage and circumstances.
+5. **DEEP PERSONALIZATION**: You have access to the user's personal information. Use this context to make your responses deeply personal.
+6. **PERFECT MEMORY (CRITICAL)**: As a "Mitra" (friend), you are expected to hold the user's story with care and accuracy. If the user asks "do you remember...", "where did I say...", or asks for any specific details about their plans or past, you MUST search the conversation history and facts carefully. Provide the EXACT details (locations, dates, names, intentions) they shared earlier. Do not be vague if the information is present in the context.
 
 Anti-Formulaic Rules:
 - **NO VERSE OVERLOAD**: If you shared a verse in the last message, prefer to skip it this time unless the user explicitly asks for more wisdom.
+- **NO REPETITION**: If you have shared a specific verse (like Gita 2.47) in the CONVERSATION FLOW recently, DO NOT share the same verse again. Choose a different one or focus on conversation.
 - **NO-PARROT RULE**: Do not simply repeat the user's words. Use your own words to key into their emotion.
 - **NO LISTS**: Speak in full, warm sentences.
-- **USE THEIR NAME**: When appropriate and natural, address the user by their name to create a more personal connection.
-- **CONTEXTUALIZE TO THEIR LIFE**: If you know their profession, age group, or life situation, weave this naturally into your guidance.
+- **USE THEIR NAME**: Address the user by their name to create a personal connection.
+- **CONTEXTUALIZE TO THEIR LIFE**: Weave their profession/life situation naturally into your guidance.
 
 When you DO share a verse:
 - **Keep it Relevant**: It must directly address the specific emotion they just mentioned.
@@ -287,10 +289,18 @@ When you DO share a verse:
                 history_text += f"{role}: {content}\n"
         
         # Context summary
+        fact_text = ""
         if memory_context:
             context_summary = memory_context.get_memory_summary()
+            # Also extract specific user quotes as "Facts"
+            facts = []
+            if hasattr(memory_context, 'user_quotes'):
+                for quote in memory_context.user_quotes[-15:]: # Last 15 significant quotes
+                    facts.append(f"• User shared: \"{quote['quote']}\"")
+            fact_text = "\n".join(facts) if facts else "• No specific facts extracted yet"
         else:
             context_summary = self._format_context(context)
+            fact_text = "• No memory context available"
         
         # Phase-specific instructions
         phase_instructions = self._get_phase_instructions(phase)
@@ -337,7 +347,12 @@ HOW TO USE THESE VERSES:
 {profile_text}
 
 ═══════════════════════════════════════════════════════════
-WHAT YOU KNOW SO FAR (FACTS):
+EXTRACTED FACTS & PLANS:
+═══════════════════════════════════════════════════════════
+{fact_text}
+
+═══════════════════════════════════════════════════════════
+WHAT YOU KNOW SO FAR (EMOTIONAL CONTEXT):
 ═══════════════════════════════════════════════════════════
 {context_summary}
 
