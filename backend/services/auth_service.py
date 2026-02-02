@@ -37,7 +37,7 @@ def get_mongo_client():
         # Create indexes
         _db.users.create_index("email", unique=True)
         _db.tokens.create_index("token", unique=True)
-        _db.tokens.create_index("expires_at")
+        _db.tokens.create_index("expires_at", expireAfterSeconds=0)
         _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
         
         logger.info("MongoDB connection established")

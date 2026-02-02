@@ -266,7 +266,7 @@ async def initialize_components_background():
         logger.info("Initializing Conversation Flow Services...")
 
         # Session Manager
-        session_manager = get_session_manager(ttl_minutes=settings.SESSION_TTL_MINUTES)
+        session_manager = get_session_manager()
         logger.info(f"✅ Session Manager initialized (TTL: {settings.SESSION_TTL_MINUTES} min)")
 
         # Context Synthesizer
