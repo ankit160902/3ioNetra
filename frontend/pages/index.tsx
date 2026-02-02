@@ -568,11 +568,13 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <Loader2 className="w-5 h-5 animate-spin text-orange-500" />
                       <span className="text-sm text-gray-600">
-                        {session.phase === 'clarification'
+                        {(session.phase === 'clarification' || session.phase === 'listening')
                           ? 'Listening...'
                           : session.phase === 'synthesis'
                             ? 'Reflecting...'
-                            : 'Finding wisdom...'}
+                            : (session.phase === 'closure')
+                              ? 'Concluding...'
+                              : 'Finding wisdom...'}
                       </span>
                     </div>
                   </div>

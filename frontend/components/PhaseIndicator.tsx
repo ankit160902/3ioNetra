@@ -5,16 +5,26 @@
 import React from 'react';
 
 interface PhaseIndicatorProps {
-  phase: 'clarification' | 'synthesis' | 'answering';
+  phase: 'clarification' | 'synthesis' | 'answering' | 'listening' | 'guidance' | 'closure';
   turnCount: number;
   maxTurns?: number;
   signalsCollected?: Record<string, string>;
 }
 
 const phases = [
+  { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
+  { id: 'guidance', label: 'Guidance', description: 'Sharing wisdom' },
+  { id: 'closure', label: 'Closing', description: 'Wrapping up' },
+] as const;
+
+// Combined phases mapping for indices
+const allPhases = [
+  { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
   { id: 'clarification', label: 'Understanding', description: 'Learning about your situation' },
   { id: 'synthesis', label: 'Reflecting', description: 'Finding the right guidance' },
   { id: 'answering', label: 'Guidance', description: 'Sharing wisdom' },
+  { id: 'guidance', label: 'Guidance', description: 'Sharing wisdom' },
+  { id: 'closure', label: 'Closing', description: 'Wrapping up' },
 ] as const;
 
 export function PhaseIndicator({
@@ -23,14 +33,31 @@ export function PhaseIndicator({
   maxTurns = 6,
   signalsCollected = {},
 }: PhaseIndicatorProps) {
-  const currentIndex = phases.findIndex((p) => p.id === phase);
+  const currentIndex = allPhases.findIndex((p) => p.id === phase);
+
+  // Map current phase to display phase index (0, 1, or 2)
+  let displayIndex = 0;
+  if (phase === 'synthesis') displayIndex = 1;
+  else if (phase === 'answering' || phase === 'guidance' || phase === 'closure') displayIndex = 1; // Show as middle or end?
+
+  // Re-define display phases for UI
+  const displayPhases = [
+    { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
+    { id: 'guidance', label: 'Guidance', description: 'Sharing dharmic wisdom' },
+    { id: 'closure', label: 'Complete', description: 'Peace be with you' },
+  ];
+
+  const currentDisplayIndex = (phase === 'listening' || phase === 'clarification') ? 0
+    : (phase === 'guidance' || phase === 'answering' || phase === 'synthesis') ? 1
+      : 2;
+
   const signalCount = Object.keys(signalsCollected).length;
 
   return (
     <div className="w-full px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
       {/* Phase Progress */}
       <div className="flex items-center justify-center gap-2 mb-2">
-        {phases.map((p, index) => (
+        {displayPhases.map((p, index) => (
           <React.Fragment key={p.id}>
             {/* Phase Circle */}
             <div className="flex flex-col items-center">
@@ -38,16 +65,15 @@ export function PhaseIndicator({
                 className={`
                   w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
                   transition-all duration-300
-                  ${
-                    index < currentIndex
-                      ? 'bg-green-500 text-white'
-                      : index === currentIndex
+                  ${index < currentDisplayIndex
+                    ? 'bg-green-500 text-white'
+                    : index === currentDisplayIndex
                       ? 'bg-orange-500 text-white ring-2 ring-orange-300 ring-offset-2'
                       : 'bg-gray-200 text-gray-500'
                   }
                 `}
               >
-                {index < currentIndex ? (
+                {index < currentDisplayIndex ? (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                   </svg>
@@ -58,7 +84,7 @@ export function PhaseIndicator({
               <span
                 className={`
                   text-xs mt-1 font-medium
-                  ${index === currentIndex ? 'text-orange-700' : 'text-gray-500'}
+                  ${index === currentDisplayIndex ? 'text-orange-700' : 'text-gray-500'}
                 `}
               >
                 {p.label}
@@ -66,11 +92,11 @@ export function PhaseIndicator({
             </div>
 
             {/* Connector Line */}
-            {index < phases.length - 1 && (
+            {index < displayPhases.length - 1 && (
               <div
                 className={`
                   w-12 h-0.5 -mt-4
-                  ${index < currentIndex ? 'bg-green-500' : 'bg-gray-200'}
+                  ${index < currentDisplayIndex ? 'bg-green-500' : 'bg-gray-200'}
                 `}
               />
             )}
@@ -80,7 +106,7 @@ export function PhaseIndicator({
 
       {/* Phase Description and Progress */}
       <div className="text-center">
-        <p className="text-sm text-gray-600">{phases[currentIndex]?.description}</p>
+        <p className="text-sm text-gray-600">{displayPhases[currentDisplayIndex]?.description}</p>
 
         {/* Show turn count and signals during clarification */}
         {phase === 'clarification' && (
@@ -101,8 +127,11 @@ export function PhaseIndicator({
         )}
 
         {/* Show completion message */}
-        {phase === 'answering' && (
+        {(phase === 'answering' || phase === 'guidance') && (
           <p className="text-xs text-green-600 mt-1">Ready to share dharmic guidance</p>
+        )}
+        {phase === 'closure' && (
+          <p className="text-xs text-green-600 mt-1">Conversation complete</p>
         )}
       </div>
     </div>
@@ -115,11 +144,20 @@ export function PhaseIndicatorCompact({
   turnCount,
   maxTurns = 6,
 }: {
-  phase: 'clarification' | 'synthesis' | 'answering';
+  phase: 'clarification' | 'synthesis' | 'answering' | 'listening' | 'guidance' | 'closure';
   turnCount: number;
   maxTurns?: number;
 }) {
-  const currentPhase = phases.find((p) => p.id === phase);
+  const displayPhasesMap = {
+    'listening': { label: 'Listening', description: 'Learning about you' },
+    'clarification': { label: 'Listening', description: 'Learning about you' },
+    'synthesis': { label: 'Reflecting', description: 'Finding wisdom' },
+    'guidance': { label: 'Guidance', description: 'Sharing wisdom' },
+    'answering': { label: 'Guidance', description: 'Sharing wisdom' },
+    'closure': { label: 'Complete', description: 'Peace be with you' },
+  };
+
+  const currentPhase = displayPhasesMap[phase];
 
   return (
     <div className="flex items-center justify-between px-4 py-2 bg-orange-50 border-b border-orange-100 text-sm">
@@ -127,10 +165,9 @@ export function PhaseIndicatorCompact({
         <span
           className={`
             px-2 py-0.5 rounded-full text-xs font-medium
-            ${
-              phase === 'clarification'
-                ? 'bg-orange-100 text-orange-700'
-                : phase === 'synthesis'
+            ${(phase === 'clarification' || phase === 'listening')
+              ? 'bg-orange-100 text-orange-700'
+              : (phase === 'synthesis')
                 ? 'bg-blue-100 text-blue-700'
                 : 'bg-green-100 text-green-700'
             }
@@ -141,7 +178,7 @@ export function PhaseIndicatorCompact({
         <span className="text-gray-600">{currentPhase?.description}</span>
       </div>
 
-      {phase === 'clarification' && (
+      {(phase === 'clarification' || phase === 'listening') && (
         <span className="text-xs text-gray-500">
           {turnCount}/{maxTurns}
         </span>
