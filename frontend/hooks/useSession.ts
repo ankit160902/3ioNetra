@@ -39,10 +39,6 @@ export interface UserProfile {
   gender?: string;
   profession?: string;
   name?: string;
-  rashi?: string;
-  gotra?: string;
-  nakshatra?: string;
-  preferred_deity?: string;
 }
 
 /* =======================

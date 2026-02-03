@@ -110,14 +110,12 @@ class ResponseComposer:
             profile['emotional_state'] = story.emotional_state
         if story.life_area:
             profile['life_area'] = story.life_area
-            
-        # Add spiritual/astrological context
-        if story.rashi:
-            profile['rashi'] = story.rashi
-        if story.gotra:
-            profile['gotra'] = story.gotra
-        if story.nakshatra:
-            profile['nakshatra'] = story.nakshatra
+        if story.preferred_deity:
+            profile['preferred_deity'] = story.preferred_deity
+        if story.location:
+            profile['location'] = story.location
+        if story.spiritual_interests:
+            profile['spiritual_interests'] = story.spiritual_interests
             
         return profile
 

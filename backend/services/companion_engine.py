@@ -135,6 +135,12 @@ class CompanionEngine:
             profile["emotional_state"] = story.emotional_state
         if story.life_area:
             profile["life_area"] = story.life_area
+        if story.preferred_deity:
+            profile["preferred_deity"] = story.preferred_deity
+        if story.location:
+            profile["location"] = story.location
+        if story.spiritual_interests:
+            profile["spiritual_interests"] = story.spiritual_interests
 
         return profile
 
@@ -143,48 +149,6 @@ class CompanionEngine:
     ) -> str:
         summary = memory.get_memory_summary()
         return summary if summary else message[:150]
-
-    async def reconstruct_memory(
-        self,
-        session: SessionState,
-        history: List[Dict[str, str]]
-    ) -> None:
-        """
-        Reconstruct memory context from past conversation history.
-        Ensures the AI 'remembers' the user's story even in a new session.
-        """
-        if not history:
-            return
-            
-        logger.info(f"Reconstructing memory from {len(history)} messages for session {session.session_id}")
-        
-        # Temporarily suppress turn count logic or follow it
-        original_turn = session.turn_count
-        
-        for i, msg in enumerate(history):
-            if msg.get("role") == "user":
-                # We use a simulated turn count for reconstruction
-                self._update_memory(session.memory, session, msg.get("content", ""))
-                
-        # Restore actual session turn count
-        session.turn_count = original_turn
-
-    def _assess_readiness(self, session: SessionState) -> bool:
-        """
-        Decide if we should transition to ANSWERING phase.
-        """
-        if session.should_force_transition():
-            logger.info(
-                f"Session {session.session_id}: forced wisdom after {session.turn_count} turns"
-            )
-            return True
-
-        readiness = session.memory.readiness_for_wisdom
-        logger.info(
-            f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}"
-        )
-
-        return readiness >= 0.7
 
     def _update_memory(
         self,
@@ -215,8 +179,14 @@ class CompanionEngine:
         elif any(w in text for w in ["family", "parents", "children"]):
             memory.story.life_area = "family"
 
-        # 🔥 Increased length to ensure complex plans/locations are captured
-        memory.add_user_quote(session.turn_count, message[:500])
+        # Temple and Pilgrimage detection
+        temple_keywords = ["temple", "mandir", "visit", "trip", "pilgrimage", "architecture", "darshan", "puri", "kashi", "tirupati", "badrinath", "kedarnath", "dwarka", "rameswaram"]
+        if any(w in text for w in temple_keywords):
+            memory.story.temple_interest = message[:100]
+            # Boost readiness if they are asking about temples
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
+
+        memory.add_user_quote(session.turn_count, message[:200])
 
         if memory.story.emotional_state:
             memory.record_emotion(

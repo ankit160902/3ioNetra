@@ -93,6 +93,10 @@ class UniversalScriptureIngester:
 
     def parse_json_file(self, file_path: Path) -> List[Dict]:
         """Parse JSON file and extract verses"""
+        # Handle temple data separately
+        if "temple" in file_path.name.lower():
+            return self.parse_temples_file(file_path)
+
         verses = []
 
         try:
@@ -131,6 +135,66 @@ class UniversalScriptureIngester:
             logger.error(f"✗ Error parsing JSON {file_path.name}: {e}")
 
         return verses
+
+    def parse_temples_file(self, file_path: Path) -> List[Dict]:
+        """Parse Hindu Temples JSON file"""
+        verses = []
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            
+            if not isinstance(data, dict):
+                return []
+
+            for state, temples in data.items():
+                if not isinstance(temples, list):
+                    continue
+                for temple in temples:
+                    verse = self._extract_temple_as_verse(temple, state)
+                    if verse:
+                        verses.append(verse)
+            
+            logger.info(f"✓ Parsed {len(verses)} temples from {file_path.name}")
+        except Exception as e:
+            logger.error(f"✗ Error parsing Temples JSON {file_path.name}: {e}")
+        return verses
+
+    def _extract_temple_as_verse(self, temple: Dict, state: str) -> Dict:
+        """Convert temple info to a verse-like structure for RAG"""
+        name = temple.get('name')
+        if not name:
+            return None
+        
+        # Combine all info fields for searchable text
+        text_parts = []
+        if temple.get('info'): text_parts.append(temple['info'])
+        if temple.get('story'): text_parts.append(temple['story'])
+        if temple.get('architecture'): text_parts.append(temple['architecture'])
+        if temple.get('mention_in_scripture'): text_parts.append(temple['mention_in_scripture'])
+        
+        combined_text = "\n\n".join(text_parts)
+        
+        if not combined_text:
+            # Fallback if text is empty but we have a name
+            combined_text = f"Information about {name} temple in {state}."
+
+        # Create a verse-like object
+        verse = {
+            'chapter': state,
+            'verse': name,
+            'text': combined_text,
+            'scripture': 'Hindu Temples',
+            'source': 'hindu_temples',
+            'reference': f"Temple: {name} ({state})",
+            'language': 'en',
+            'topic': 'Temples and Pilgrimage',
+            'metadata': {
+                'state': state,
+                'name': name,
+                'visiting_guide': temple.get('visiting_guide')
+            }
+        }
+        return verse
 
     def _extract_verse_from_csv_row(self, row: Dict, source: str) -> Dict:
         """Extract verse from CSV row"""
@@ -220,6 +284,8 @@ class UniversalScriptureIngester:
             return 'Yajur Veda'
         elif 'vedas' in source_lower:
             return 'Vedas'
+        elif 'temples' in source_lower:
+            return 'Hindu Temples'
         else:
             return 'Sanatan Scriptures'
 

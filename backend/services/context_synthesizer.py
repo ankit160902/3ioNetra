@@ -30,6 +30,7 @@ EMOTION_TO_CONCEPTS = {
     'loneliness': ['connection', 'devotion', 'sangha', 'inner_self', 'love'],
     'stress': ['peace', 'balance', 'karma_yoga', 'detachment', 'breath'],
     'overwhelm': ['surrender', 'one_step', 'trust', 'simplicity', 'present_moment'],
+    'pilgrimage': ['tirtha', 'darshan', 'kshetra', 'bhakti', 'serenity', 'connection'],
 }
 
 LIFE_DOMAIN_TO_SCRIPTURES = {
@@ -40,6 +41,8 @@ LIFE_DOMAIN_TO_SCRIPTURES = {
     'spiritual': ['Bhagavad Gita', 'Sanatan Scriptures'],
     'financial': ['Mahabharata', 'Bhagavad Gita'],
     'career': ['Bhagavad Gita', 'Mahabharata'],
+    'pilgrimage': ['Hindu Temples', 'Bhagavad Gita'],
+    'temples': ['Hindu Temples'],
 }
 
 EMOTION_TO_GUIDANCE_TYPE = {
@@ -117,7 +120,7 @@ class ContextSynthesizer:
         dharmic_query = DharmicQueryObject(
             query=query_text,
             query_type=self._determine_query_type_from_memory(story),
-            dharmic_concepts=memory.relevant_concepts[:7] or DEFAULT_CONCEPTS,
+            dharmic_concepts=self._get_dharmic_concepts(None, story) if not memory.relevant_concepts else memory.relevant_concepts[:7],
             user_stage=self._infer_user_stage(session),
             response_style=self._determine_response_style_from_memory(memory),
             emotion=story.emotional_state or 'unknown',
@@ -126,7 +129,8 @@ class ContextSynthesizer:
             mental_state=None,
             user_goal=story.unmet_needs[0] if story.unmet_needs else None,
             allowed_scriptures=LIFE_DOMAIN_TO_SCRIPTURES.get(
-                story.life_area, DEFAULT_SCRIPTURES
+                story.life_area, 
+                ['Hindu Temples'] + DEFAULT_SCRIPTURES if story.temple_interest else DEFAULT_SCRIPTURES
             ),
             guidance_type=EMOTION_TO_GUIDANCE_TYPE.get(
                 story.emotional_state, 'guidance'
@@ -173,12 +177,22 @@ class ContextSynthesizer:
                 return QueryType.PRACTICAL_ADVICE
             if 'understanding' in needs or 'meaning' in needs:
                 return QueryType.PHILOSOPHICAL
+        if story.temple_interest:
+            return QueryType.TEMPLE_GUIDANCE
         return QueryType.LIFE_GUIDANCE
 
-    def _get_dharmic_concepts(self, emotion) -> List[str]:
+    def _get_dharmic_concepts(self, emotion, story=None) -> List[str]:
+        concepts = []
         if emotion:
-            return EMOTION_TO_CONCEPTS.get(emotion.value, DEFAULT_CONCEPTS)
-        return DEFAULT_CONCEPTS
+            concepts.extend(EMOTION_TO_CONCEPTS.get(emotion.value, []))
+        
+        if story and story.temple_interest:
+            concepts.extend(EMOTION_TO_CONCEPTS['pilgrimage'])
+        
+        if not concepts:
+            return DEFAULT_CONCEPTS
+        
+        return list(dict.fromkeys(concepts)) # Remove duplicates
 
     def _infer_user_stage(self, session: SessionState) -> UserStage:
         text = " ".join(

@@ -30,10 +30,14 @@ class UserStory:
     age_group: str = ""
     gender: str = ""
     profession: str = ""
-    rashi: str = ""
-    gotra: str = ""
-    nakshatra: str = ""
+
+    # Temple related interest
+    temple_interest: Optional[str] = None
+
+    # Extended profiling
     preferred_deity: str = ""
+    location: str = ""
+    spiritual_interests: List[str] = field(default_factory=list)
     
     def to_dict(self) -> Dict:
         return {
@@ -45,10 +49,10 @@ class UserStory:
             "age_group": self.age_group,
             "gender": self.gender,
             "profession": self.profession,
-            "rashi": self.rashi,
-            "gotra": self.gotra,
-            "nakshatra": self.nakshatra,
-            "preferred_deity": self.preferred_deity
+            "temple_interest": self.temple_interest,
+            "preferred_deity": self.preferred_deity,
+            "location": self.location,
+            "spiritual_interests": self.spiritual_interests
         }
     
     @classmethod
@@ -64,10 +68,10 @@ class UserStory:
             age_group=data.get("age_group", ""),
             gender=data.get("gender", ""),
             profession=data.get("profession", ""),
-            rashi=data.get("rashi", ""),
-            gotra=data.get("gotra", ""),
-            nakshatra=data.get("nakshatra", ""),
-            preferred_deity=data.get("preferred_deity", "")
+            temple_interest=data.get("temple_interest"),
+            preferred_deity=data.get("preferred_deity", ""),
+            location=data.get("location", ""),
+            spiritual_interests=data.get("spiritual_interests", [])
         )
 
 
@@ -101,9 +105,6 @@ class ConversationMemory:
     user_email: str = ""
     user_phone: str = ""
     user_dob: str = ""
-    user_rashi: str = ""
-    user_gotra: str = ""
-    user_nakshatra: str = ""
     user_created_at: str = ""
 
     def to_dict(self) -> Dict:
@@ -119,9 +120,6 @@ class ConversationMemory:
             "user_email": self.user_email,
             "user_phone": self.user_phone,
             "user_dob": self.user_dob,
-            "user_rashi": self.user_rashi,
-            "user_gotra": self.user_gotra,
-            "user_nakshatra": self.user_nakshatra,
             "user_created_at": self.user_created_at
         }
     
@@ -141,9 +139,6 @@ class ConversationMemory:
             user_email=data.get("user_email", ""),
             user_phone=data.get("user_phone", ""),
             user_dob=data.get("user_dob", ""),
-            user_rashi=data.get("user_rashi", ""),
-            user_gotra=data.get("user_gotra", ""),
-            user_nakshatra=data.get("user_nakshatra", ""),
             user_created_at=data.get("user_created_at", "")
         )
         return memory
@@ -185,6 +180,18 @@ class ConversationMemory:
         if self.story.trigger_event:
             parts.append(f"It was triggered by {self.story.trigger_event}")
 
+        if self.story.temple_interest:
+            parts.append(f"They have shown interest in {self.story.temple_interest}")
+
+        if self.story.preferred_deity:
+            parts.append(f"Their preferred deity is {self.story.preferred_deity}")
+
+        if self.story.location:
+            parts.append(f"They are located in {self.story.location}")
+            
+        if self.story.spiritual_interests:
+            parts.append(f"They are interested in {', '.join(self.story.spiritual_interests)}")
+
         if self.story.unmet_needs:
             parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
 
@@ -211,14 +218,5 @@ class ConversationMemory:
 
         if self.story.profession:
             parts.append(f"working as {self.story.profession}")
-
-        if self.story.rashi:
-            parts.append(f"Rashi: {self.story.rashi}")
-
-        if self.story.nakshatra:
-            parts.append(f"Nakshatra: {self.story.nakshatra}")
-            
-        if self.story.gotra:
-            parts.append(f"Gotra: {self.story.gotra}")
 
         return ", ".join(parts) if parts else "anonymous seeker"
