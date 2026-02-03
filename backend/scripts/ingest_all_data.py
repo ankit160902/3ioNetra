@@ -160,22 +160,54 @@ class UniversalScriptureIngester:
         return verses
 
     def _extract_temple_as_verse(self, temple: Dict, state: str) -> Dict:
-        """Convert temple info to a verse-like structure for RAG"""
+        """Convert temple info to a verse-like structure for RAG with rich profiling"""
         name = temple.get('name')
         if not name:
             return None
         
-        # Combine all info fields for searchable text
+        # Combine all info fields for searchable text - making it VERY rich
         text_parts = []
-        if temple.get('info'): text_parts.append(temple['info'])
-        if temple.get('story'): text_parts.append(temple['story'])
-        if temple.get('architecture'): text_parts.append(temple['architecture'])
-        if temple.get('mention_in_scripture'): text_parts.append(temple['mention_in_scripture'])
+        
+        # Core Info
+        if name: text_parts.append(f"Temple Name: {name}")
+        if state: text_parts.append(f"State: {state}")
+        if temple.get('Location'): text_parts.append(f"Location: {temple['Location']}")
+        if temple.get('Main deity'): text_parts.append(f"Main Deity: {temple['Main deity']}")
+        if temple.get('Other deities'): text_parts.append(f"Other Deities: {temple['Other deities']}")
+        
+        # Summaries
+        if temple.get('info'): text_parts.append(f"Summary: {temple['info']}")
+        if temple.get('Significance'): text_parts.append(f"Significance: {temple['Significance']}")
+        
+        # Detailed sections
+        if temple.get('History'): text_parts.append(f"History: {temple['History']}")
+        if temple.get('Detailed History'): text_parts.append(f"Detailed History: {temple['Detailed History']}")
+        if temple.get('story'): text_parts.append(f"Spiritual Story: {temple['story']}")
+        
+        if temple.get('Architecture'): text_parts.append(f"Architecture: {temple['Architecture']}")
+        if temple.get('Detailed Architecture'): text_parts.append(f"Detailed Architecture: {temple['Detailed Architecture']}")
+        if temple.get('Key features of the architecture'): text_parts.append(f"Architectural Features: {temple['Key features of the architecture']}")
+        
+        # Scriptural
+        if temple.get('mention_in_scripture'): text_parts.append(f"Scriptural Mention: {temple['mention_in_scripture']}")
+        if temple.get('Scriptural References'): text_parts.append(f"Scriptural References: {temple['Scriptural References']}")
+        
+        # Visiting Guide
+        if temple.get('visiting_guide'): text_parts.append(f"Visiting Guide: {temple['visiting_guide']}")
+        if temple.get('1. Getting There'): text_parts.append(f"Getting There: {temple['1. Getting There']}")
+        if temple.get('2. Accommodation'): text_parts.append(f"Accommodation: {temple['2. Accommodation']}")
+        if temple.get('3. Things to Do'): text_parts.append(f"Things to Do: {temple['3. Things to Do']}")
+        if temple.get('4. Other things'): text_parts.append(f"Other Things: {temple['4. Other things']}")
+        if temple.get('5. Tips'): text_parts.append(f"Travel Tips: {temple['5. Tips']}")
+        
+        # Logistics
+        if temple.get('Timings'): text_parts.append(f"Timings: {temple['Timings']}")
+        if temple.get('Entry Fee'): text_parts.append(f"Entry Fee: {temple['Entry Fee']}")
+        if temple.get('Contact Information'): text_parts.append(f"Contact Information: {temple['Contact Information']}")
         
         combined_text = "\n\n".join(text_parts)
         
         if not combined_text:
-            # Fallback if text is empty but we have a name
             combined_text = f"Information about {name} temple in {state}."
 
         # Create a verse-like object
@@ -191,7 +223,9 @@ class UniversalScriptureIngester:
             'metadata': {
                 'state': state,
                 'name': name,
-                'visiting_guide': temple.get('visiting_guide')
+                'visiting_guide': temple.get('visiting_guide'),
+                'location': temple.get('Location'),
+                'main_deity': temple.get('Main deity')
             }
         }
         return verse
@@ -341,7 +375,7 @@ class UniversalScriptureIngester:
 
     def save_processed_data(self, verses: List[Dict], embeddings: np.ndarray):
         """Save processed verses and embeddings"""
-        output_file = self.processed_data_dir / "all_scriptures_processed.json"
+        output_file = self.processed_data_dir / "processed_data.json"
 
         # Convert embeddings to list for JSON serialization
         for i, verse in enumerate(verses):
@@ -359,30 +393,7 @@ class UniversalScriptureIngester:
                 }
             }, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"✓ Saved processed data to {output_file}")
-
-        # Save verses without embeddings for easy inspection
-        verses_only_file = self.processed_data_dir / "all_scriptures_verses.json"
-        with open(verses_only_file, 'w', encoding='utf-8') as f:
-            verses_copy = [{k: v for k, v in verse.items() if k != 'embedding'} for verse in verses]
-            json.dump(verses_copy, f, ensure_ascii=False, indent=2)
-
-        logger.info(f"✓ Saved verses (without embeddings) to {verses_only_file}")
-
-        # Create index by scripture
-        by_scripture = {}
-        for verse in verses:
-            scripture = verse.get('scripture', 'Unknown')
-            if scripture not in by_scripture:
-                by_scripture[scripture] = []
-            by_scripture[scripture].append(verse)
-
-        index_file = self.processed_data_dir / "scripture_index.json"
-        with open(index_file, 'w', encoding='utf-8') as f:
-            index_data = {scripture: len(verses) for scripture, verses in by_scripture.items()}
-            json.dump(index_data, f, indent=2)
-
-        logger.info(f"✓ Saved scripture index to {index_file}")
+        logger.info(f"✓ Saved consolidated processed data to {output_file}")
 
     def ingest_all(self):
         """Main ingestion pipeline"""
@@ -451,9 +462,7 @@ class UniversalScriptureIngester:
         logger.info(f"📊 Total verses processed: {len(all_verses)}")
         logger.info(f"📁 Output directory: {self.processed_data_dir}")
         logger.info(f"📄 Files created:")
-        logger.info(f"   • all_scriptures_processed.json (with embeddings)")
-        logger.info(f"   • all_scriptures_verses.json (without embeddings)")
-        logger.info(f"   • scripture_index.json (count by scripture)")
+        logger.info(f"   • processed_data.json (with embeddings)")
         logger.info("\n🎯 Data is ready for RAG pipeline!")
 
 

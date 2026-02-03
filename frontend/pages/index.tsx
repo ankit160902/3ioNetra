@@ -57,6 +57,12 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Clear messages when user changes (Session Isolation)
+  useEffect(() => {
+    setMessages([]);
+    setCurrentConversationId(null);
+  }, [user?.id]);
+
   // Load conversation history when authenticated
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -453,6 +459,7 @@ export default function Home() {
             phase={session.phase}
             turnCount={session.turnCount}
             maxTurns={6}
+            signalsCollected={session.signalsCollected}
           />
         )}
 

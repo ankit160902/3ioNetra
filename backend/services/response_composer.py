@@ -116,6 +116,18 @@ class ResponseComposer:
             profile['location'] = story.location
         if story.spiritual_interests:
             profile['spiritual_interests'] = story.spiritual_interests
+
+        # 🔥 Added nested spiritual profile fields
+        if story.rashi:
+            profile['rashi'] = story.rashi
+        if story.gotra:
+            profile['gotra'] = story.gotra
+        if story.nakshatra:
+            profile['nakshatra'] = story.nakshatra
+        if story.temple_visits:
+            profile['temple_visits'] = story.temple_visits
+        if story.purchase_history:
+            profile['purchase_history'] = story.purchase_history
             
         return profile
 

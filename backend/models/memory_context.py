@@ -39,6 +39,15 @@ class UserStory:
     location: str = ""
     spiritual_interests: List[str] = field(default_factory=list)
     
+    # 🔥 NEW Spiritual Profile
+    rashi: str = ""
+    gotra: str = ""
+    nakshatra: str = ""
+    
+    # 🔥 NEW History
+    temple_visits: List[str] = field(default_factory=list)
+    purchase_history: List[str] = field(default_factory=list)
+    
     def to_dict(self) -> Dict:
         return {
             "primary_concern": self.primary_concern,
@@ -52,7 +61,12 @@ class UserStory:
             "temple_interest": self.temple_interest,
             "preferred_deity": self.preferred_deity,
             "location": self.location,
-            "spiritual_interests": self.spiritual_interests
+            "spiritual_interests": self.spiritual_interests,
+            "rashi": self.rashi,
+            "gotra": self.gotra,
+            "nakshatra": self.nakshatra,
+            "temple_visits": self.temple_visits,
+            "purchase_history": self.purchase_history
         }
     
     @classmethod
@@ -71,7 +85,12 @@ class UserStory:
             temple_interest=data.get("temple_interest"),
             preferred_deity=data.get("preferred_deity", ""),
             location=data.get("location", ""),
-            spiritual_interests=data.get("spiritual_interests", [])
+            spiritual_interests=data.get("spiritual_interests", []),
+            rashi=data.get("rashi", ""),
+            gotra=data.get("gotra", ""),
+            nakshatra=data.get("nakshatra", ""),
+            temple_visits=data.get("temple_visits", []),
+            purchase_history=data.get("purchase_history", [])
         )
 
 
@@ -194,6 +213,18 @@ class ConversationMemory:
 
         if self.story.unmet_needs:
             parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
+
+        if self.story.rashi:
+            parts.append(f"Their Rashi is {self.story.rashi}")
+        
+        if self.story.gotra:
+            parts.append(f"Their Gotra is {self.story.gotra}")
+            
+        if self.story.temple_visits:
+            parts.append(f"They have previously visited: {', '.join(self.story.temple_visits)}")
+            
+        if self.story.purchase_history:
+            parts.append(f"They have purchased spiritual items like: {', '.join(self.story.purchase_history)}")
 
         if self.user_quotes:
             recent_quote = self.user_quotes[-1]["quote"]

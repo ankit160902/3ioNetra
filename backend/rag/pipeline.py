@@ -48,7 +48,7 @@ class RAGPipeline:
         """
         try:
             base_dir = Path(__file__).parent.parent
-            processed_path = base_dir / "data" / "processed" / "all_scriptures_processed.json"
+            processed_path = base_dir / "data" / "processed" / "processed_data.json"
 
             if not processed_path.exists():
                 logger.warning(

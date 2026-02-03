@@ -143,10 +143,12 @@ export function PhaseIndicatorCompact({
   phase,
   turnCount,
   maxTurns = 6,
+  signalsCollected = {},
 }: {
   phase: 'clarification' | 'synthesis' | 'answering' | 'listening' | 'guidance' | 'closure';
   turnCount: number;
   maxTurns?: number;
+  signalsCollected?: Record<string, string>;
 }) {
   const displayPhasesMap = {
     'listening': { label: 'Listening', description: 'Learning about you' },
@@ -179,9 +181,14 @@ export function PhaseIndicatorCompact({
       </div>
 
       {(phase === 'clarification' || phase === 'listening') && (
-        <span className="text-xs text-gray-500">
-          {turnCount}/{maxTurns}
-        </span>
+        <div className="flex flex-col items-end">
+          <span className="text-xs text-gray-500">
+            Turns: {turnCount}/{maxTurns}
+          </span>
+          <span className="text-[10px] text-orange-600 font-medium">
+            {Object.keys(signalsCollected).length} traits learned
+          </span>
+        </div>
       )}
     </div>
   );

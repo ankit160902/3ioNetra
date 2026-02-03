@@ -2,7 +2,7 @@ import logging
 import random
 from typing import Tuple, Optional, TYPE_CHECKING, Dict
 
-from models.session import SessionState, ConversationPhase
+from models.session import SessionState, ConversationPhase, SignalType
 from models.memory_context import ConversationMemory
 from llm.service import get_llm_service
 
@@ -141,6 +141,18 @@ class CompanionEngine:
             profile["location"] = story.location
         if story.spiritual_interests:
             profile["spiritual_interests"] = story.spiritual_interests
+        
+        # 🔥 Added nested spiritual profile fields
+        if story.rashi:
+            profile["rashi"] = story.rashi
+        if story.gotra:
+            profile["gotra"] = story.gotra
+        if story.nakshatra:
+            profile["nakshatra"] = story.nakshatra
+        if story.temple_visits:
+            profile["temple_visits"] = story.temple_visits
+        if story.purchase_history:
+            profile["purchase_history"] = story.purchase_history
 
         return profile
 
@@ -149,6 +161,20 @@ class CompanionEngine:
     ) -> str:
         summary = memory.get_memory_summary()
         return summary if summary else message[:150]
+
+    async def reconstruct_memory(self, session: SessionState, history: list) -> None:
+        """Reconstruct high-level memory from historical messages"""
+        if not history:
+            return
+            
+        logger.info(f"Reconstructing deep memory from {len(history)} past messages...")
+        
+        # Process messages in order to rebuild the story
+        for msg in history:
+            if msg.get("role") == "user":
+                self._update_memory(session.memory, session, msg.get("content", ""))
+            
+        logger.info(f"Memory reconstruction complete. Story concern: {session.memory.story.primary_concern[:50]}...")
 
     def _update_memory(
         self,
@@ -167,26 +193,34 @@ class CompanionEngine:
 
         if any(w in text for w in sadness):
             memory.story.emotional_state = "sadness"
+            session.add_signal(SignalType.EMOTION, "sadness", 0.8)
         elif any(w in text for w in anxiety):
             memory.story.emotional_state = "anxiety"
+            session.add_signal(SignalType.EMOTION, "anxiety", 0.8)
         elif any(w in text for w in anger):
             memory.story.emotional_state = "anger"
+            session.add_signal(SignalType.EMOTION, "anger", 0.8)
 
         if any(w in text for w in ["work", "job", "office"]):
             memory.story.life_area = "work"
+            session.add_signal(SignalType.LIFE_DOMAIN, "work", 0.9)
         elif any(w in text for w in ["relationship", "partner", "marriage"]):
             memory.story.life_area = "relationships"
+            session.add_signal(SignalType.LIFE_DOMAIN, "relationships", 0.9)
         elif any(w in text for w in ["family", "parents", "children"]):
             memory.story.life_area = "family"
+            session.add_signal(SignalType.LIFE_DOMAIN, "family", 0.9)
 
         # Temple and Pilgrimage detection
         temple_keywords = ["temple", "mandir", "visit", "trip", "pilgrimage", "architecture", "darshan", "puri", "kashi", "tirupati", "badrinath", "kedarnath", "dwarka", "rameswaram"]
         if any(w in text for w in temple_keywords):
             memory.story.temple_interest = message[:100]
+            session.add_signal(SignalType.INTENT, "temple_interest", 0.7)
             # Boost readiness if they are asking about temples
             memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
 
-        memory.add_user_quote(session.turn_count, message[:200])
+        # Longer quotes for better recall
+        memory.add_user_quote(session.turn_count, message[:500])
 
         if memory.story.emotional_state:
             memory.record_emotion(
@@ -194,12 +228,10 @@ class CompanionEngine:
                 memory.story.emotional_state,
                 "moderate",
             )
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.1)
 
-        # ✅ THIS IS NOW USED CORRECTLY
-        memory.readiness_for_wisdom = min(
-            1.0,
-            memory.readiness_for_wisdom + 0.2,
-        )
+        if len(message) > 100:
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.15)
 
 
 # ------------------------------------------------------------------

@@ -561,14 +561,19 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         if query.session_id:
             logger.info(f"🔍 Looking up session {query.session_id} in storage...")
             session = await session_manager.get_session(query.session_id)
+            
+            # 🔥 CRITICAL: Prevent session leakage between different users
+            if session and user and session.memory.user_id and session.memory.user_id != user.get('id'):
+                logger.warning(f"⚠️ Session ownership mismatch! User {user.get('id')} tried to access session of user {session.memory.user_id}. Force creating new session.")
+                session = None
+
             if not session:
-                logger.warning(f"❌ Session {query.session_id} not found or expired. Creating a new session to continue.")
+                logger.warning(f"❌ Session {query.session_id} not found, expired, or unauthorized. Creating a new session.")
                 session = await session_manager.create_session(
                     min_signals=settings.MIN_SIGNALS_THRESHOLD,
                     min_turns=settings.MIN_CLARIFICATION_TURNS,
                     max_turns=settings.MAX_CLARIFICATION_TURNS
                 )
-                logger.info(f"✅ Auto-recovered: Created new session {session.session_id} to replace missing {query.session_id}")
             else:
                 logger.info(f"✅ Found existing session {query.session_id}, turn_count={session.turn_count}")
         else:
@@ -606,9 +611,59 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             if user.get('spiritual_interests'):
                 story.spiritual_interests = user.get('spiritual_interests')
             
+            # 🔥 NEW Nested Profiling Data
+            if user.get('rashi'):
+                story.rashi = user.get('rashi')
+            if user.get('gotra'):
+                story.gotra = user.get('gotra')
+            if user.get('nakshatra'):
+                story.nakshatra = user.get('nakshatra')
+            if user.get('temple_visits'):
+                story.temple_visits = user.get('temple_visits')
+            if user.get('purchase_history'):
+                story.purchase_history = user.get('purchase_history')
+            
+            # 🔥 Pre-populate signals if they exist to move the progress bar
+            from models.session import SignalType
+            if user.get('name'):
+                session.add_signal(SignalType.USER_GOAL, f"Greet {user['name']}", 0.5)
+            if user.get('preferred_deity'):
+                session.add_signal(SignalType.INTENT, f"Devotee of {user['preferred_deity']}", 0.8)
+            if user.get('rashi'):
+                session.add_signal(SignalType.MENTAL_STATE, f"Rashi: {user['rashi']}", 0.8)
+            if user.get('temple_visits') and len(user['temple_visits']) > 0:
+                session.add_signal(SignalType.LIFE_DOMAIN, "Pilgrimage History", 0.7)
+            
+            # 🔥 PERSISTENCE: Load global conversation history and deep memory if this is a new session
+            if session.turn_count == 0:
+                try:
+                    storage = get_conversation_storage()
+                    # Pass empty string to get the user's global conversation doc
+                    past_convo = storage.get_conversation(user["id"], "")
+                    if past_convo and past_convo.get("messages"):
+                        past_messages = past_convo["messages"]
+                        # Prepend last 15 messages for context
+                        context_history = past_messages[-15:]
+                        
+                        session.conversation_history = context_history + session.conversation_history
+                        
+                        # Restore high-level story and memory from DB if available
+                        if past_convo.get("memory"):
+                            from models.memory_context import ConversationMemory
+                            session.memory = ConversationMemory.from_dict(past_convo["memory"])
+                            logger.info(f"Restored permanent memory story for user {user['id']}")
+                        else:
+                            # Reconstruct high-level memory context from history if no saved memory exists
+                            await companion_engine.reconstruct_memory(session, context_history)
+                        
+                        logger.info(f"Loaded {len(context_history)} past history messages for user {user['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to load past history in session: {e}")
+
             logger.info(
                 f"Session {session.session_id}: Refreshed user data "
-                f"(id={session.memory.user_id}, name={session.memory.user_name}, age_group={story.age_group})"
+                f"(id={session.memory.user_id}, name={session.memory.user_name}, "
+                f"rashi={story.rashi}, temples={len(story.temple_visits)})"
             )
         
         # Also populate from user_profile if provided in query
@@ -715,7 +770,8 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         user_id=user["id"],
                         conversation_id=session.session_id,
                         title=title,
-                        messages=session.conversation_history
+                        messages=session.conversation_history,
+                        memory=session.memory.to_dict()
                     )
                     logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
                 except Exception as e:
@@ -759,7 +815,8 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         user_id=user["id"],
                         conversation_id=session.session_id,
                         title=title,
-                        messages=session.conversation_history
+                        messages=session.conversation_history,
+                        memory=session.memory.to_dict()
                     )
                     logger.info(f"Auto-saved conversation {session.session_id} for user {user['id']}")
                 except Exception as e:
