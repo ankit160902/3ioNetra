@@ -31,8 +31,6 @@ export default function Home() {
   const language = 'en';
   const [isProcessing, setIsProcessing] = useState(false);
   const [useConversationFlow, setUseConversationFlow] = useState(true);
-  const [conversationHistory, setConversationHistory] = useState<ConversationSummary[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
 
   // Build user profile for personalization from authenticated user
@@ -63,52 +61,10 @@ export default function Home() {
     setCurrentConversationId(null);
   }, [user?.id]);
 
-  // Load conversation history when authenticated
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      loadConversationHistory();
-    }
-  }, [isAuthenticated, user]);
 
   // Initialize session when using conversation flow and authenticated
 
 
-  const loadConversationHistory = async () => {
-    try {
-      const response = await fetch(`${API_URL}/api/user/conversations`, {
-        headers: {
-          ...getAuthHeader(),
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setConversationHistory(data.conversations || []);
-      }
-    } catch (error) {
-      console.error('Failed to load conversation history:', error);
-    }
-  };
-
-  const loadConversation = async (conversationId: string) => {
-    try {
-      const response = await fetch(`${API_URL}/api/user/conversations/${conversationId}`, {
-        headers: {
-          ...getAuthHeader(),
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setMessages(data.messages.map((msg: any) => ({
-          ...msg,
-          timestamp: new Date(msg.timestamp),
-        })));
-        setCurrentConversationId(conversationId);
-        setShowHistory(false);
-      }
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-    }
-  };
 
   const saveConversation = async () => {
     if (!isAuthenticated || messages.length <= 1) return;
@@ -132,7 +88,6 @@ export default function Home() {
           })),
         }),
       });
-      loadConversationHistory();
     } catch (error) {
       console.error('Failed to save conversation:', error);
     }
@@ -377,48 +332,6 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Conversation History Button */}
-              <div className="relative">
-                <button
-                  onClick={() => setShowHistory(!showHistory)}
-                  className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors flex items-center gap-1"
-                  title="Conversation History"
-                >
-                  <History className="w-5 h-5" />
-                  <ChevronDown className="w-4 h-4" />
-                </button>
-
-                {/* History Dropdown */}
-                {showHistory && (
-                  <div className="absolute right-0 mt-2 w-72 bg-white rounded-lg shadow-lg border border-orange-100 z-50 max-h-96 overflow-y-auto">
-                    <div className="p-3 border-b border-orange-100">
-                      <p className="text-sm font-semibold text-gray-700">Recent Conversations</p>
-                    </div>
-                    {conversationHistory.length === 0 ? (
-                      <div className="p-4 text-center text-sm text-gray-500">
-                        No previous conversations
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-orange-50">
-                        {conversationHistory.map((conv) => (
-                          <button
-                            key={conv.id}
-                            onClick={() => loadConversation(conv.id)}
-                            className="w-full p-3 text-left hover:bg-orange-50 transition-colors"
-                          >
-                            <p className="text-sm font-medium text-gray-800 truncate">
-                              {conv.title}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {new Date(conv.created_at).toLocaleDateString()} - {conv.message_count} messages
-                            </p>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
 
               {/* New Conversation Button */}
               {messages.length > 0 && (
@@ -613,13 +526,6 @@ export default function Home() {
         </div>
       </main>
 
-      {/* Click outside to close history dropdown */}
-      {showHistory && (
-        <div
-          className="fixed inset-0 z-40"
-          onClick={() => setShowHistory(false)}
-        />
-      )}
     </>
   );
 }

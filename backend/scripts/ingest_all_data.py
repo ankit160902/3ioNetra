@@ -136,23 +136,55 @@ class UniversalScriptureIngester:
 
         return verses
 
+    def strip_markdown(self, text: str) -> str:
+        """Simple markdown stripper"""
+        if not text:
+            return ""
+        import re
+        # Remove bold/italic
+        text = re.sub(r'\*\*?(.*?)\*\*?', r'\1', text)
+        # Remove headers
+        text = re.sub(r'#+\s*(.*?)\s*#*', r'\1', text)
+        # Remove list markers
+        text = re.sub(r'^\s*[\-\*\+]\s+', '', text, flags=re.MULTILINE)
+        # Remove numbered list markers
+        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+        # Remove links [text](url) -> text
+        text = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', text)
+        # Remove images ![]()
+        text = re.sub(r'!\[.*?\]\(.*?\)', '', text)
+        # Remove backticks
+        text = text.replace('`', '')
+        # Clean extra whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        return text.strip()
+
     def parse_temples_file(self, file_path: Path) -> List[Dict]:
-        """Parse Hindu Temples JSON file"""
+        """Parse Hindu Temples JSON file (handles various formats)"""
         verses = []
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            if not isinstance(data, dict):
-                return []
-
-            for state, temples in data.items():
-                if not isinstance(temples, list):
-                    continue
-                for temple in temples:
-                    verse = self._extract_temple_as_verse(temple, state)
-                    if verse:
-                        verses.append(verse)
+            # Case 1: phpMyAdmin export format (list of objects)
+            if isinstance(data, list):
+                for obj in data:
+                    if isinstance(obj, dict) and obj.get('type') == 'table' and obj.get('name') == 'temples':
+                        temple_list = obj.get('data', [])
+                        for temple in temple_list:
+                            verse = self._extract_temple_as_verse(temple, temple.get('state', 'Unknown'))
+                            if verse:
+                                verses.append(verse)
+                
+            # Case 2: Dictionary format (state -> list of temples)
+            elif isinstance(data, dict):
+                for state, temples in data.items():
+                    if not isinstance(temples, list):
+                        continue
+                    for temple in temples:
+                        verse = self._extract_temple_as_verse(temple, state)
+                        if verse:
+                            verses.append(verse)
             
             logger.info(f"✓ Parsed {len(verses)} temples from {file_path.name}")
         except Exception as e:
@@ -165,47 +197,56 @@ class UniversalScriptureIngester:
         if not name:
             return None
         
-        # Combine all info fields for searchable text - making it VERY rich
+        # Combine all info fields for searchable text - support both old and new formats
         text_parts = []
         
         # Core Info
         if name: text_parts.append(f"Temple Name: {name}")
         if state: text_parts.append(f"State: {state}")
-        if temple.get('Location'): text_parts.append(f"Location: {temple['Location']}")
-        if temple.get('Main deity'): text_parts.append(f"Main Deity: {temple['Main deity']}")
-        if temple.get('Other deities'): text_parts.append(f"Other Deities: {temple['Other deities']}")
         
-        # Summaries
-        if temple.get('info'): text_parts.append(f"Summary: {temple['info']}")
-        if temple.get('Significance'): text_parts.append(f"Significance: {temple['Significance']}")
+        # Merge fields from both formats
+        location = temple.get('Location') or temple.get('full_address') or temple.get('city')
+        if location: text_parts.append(f"Location: {location}")
         
-        # Detailed sections
-        if temple.get('History'): text_parts.append(f"History: {temple['History']}")
-        if temple.get('Detailed History'): text_parts.append(f"Detailed History: {temple['Detailed History']}")
-        if temple.get('story'): text_parts.append(f"Spiritual Story: {temple['story']}")
+        deity = temple.get('Main deity')
+        if deity: text_parts.append(f"Main Deity: {deity}")
         
-        if temple.get('Architecture'): text_parts.append(f"Architecture: {temple['Architecture']}")
-        if temple.get('Detailed Architecture'): text_parts.append(f"Detailed Architecture: {temple['Detailed Architecture']}")
-        if temple.get('Key features of the architecture'): text_parts.append(f"Architectural Features: {temple['Key features of the architecture']}")
+        other_deities = temple.get('Other deities')
+        if other_deities: text_parts.append(f"Other Deities: {other_deities}")
+        
+        # Descriptions & History
+        # Format 1 keys: info, Significance, History, Detailed History, story, Architecture, ...
+        # Format 2 keys: history, significance, description, editorial_summary, ...
+        
+        summary = temple.get('info') or temple.get('description') or temple.get('editorial_summary')
+        if summary: text_parts.append(f"Summary: {summary}")
+        
+        significance = temple.get('Significance') or temple.get('significance')
+        if significance: text_parts.append(f"Significance: {significance}")
+        
+        history = temple.get('History') or temple.get('Detailed History') or temple.get('history')
+        if history: text_parts.append(f"History: {history}")
+        
+        story = temple.get('story')
+        if story: text_parts.append(f"Spiritual Story: {story}")
+        
+        architecture = temple.get('Architecture') or temple.get('Detailed Architecture') or temple.get('Key features of the architecture')
+        if architecture: text_parts.append(f"Architecture: {architecture}")
         
         # Scriptural
-        if temple.get('mention_in_scripture'): text_parts.append(f"Scriptural Mention: {temple['mention_in_scripture']}")
-        if temple.get('Scriptural References'): text_parts.append(f"Scriptural References: {temple['Scriptural References']}")
+        scriptural = temple.get('mention_in_scripture') or temple.get('Scriptural References')
+        if scriptural: text_parts.append(f"Scriptural References: {scriptural}")
         
-        # Visiting Guide
-        if temple.get('visiting_guide'): text_parts.append(f"Visiting Guide: {temple['visiting_guide']}")
-        if temple.get('1. Getting There'): text_parts.append(f"Getting There: {temple['1. Getting There']}")
-        if temple.get('2. Accommodation'): text_parts.append(f"Accommodation: {temple['2. Accommodation']}")
-        if temple.get('3. Things to Do'): text_parts.append(f"Things to Do: {temple['3. Things to Do']}")
-        if temple.get('4. Other things'): text_parts.append(f"Other Things: {temple['4. Other things']}")
-        if temple.get('5. Tips'): text_parts.append(f"Travel Tips: {temple['5. Tips']}")
+        # Visiting & Logistics
+        guide = temple.get('visiting_guide') or temple.get('transport_info')
+        if guide: text_parts.append(f"Visiting Info: {guide}")
         
-        # Logistics
-        if temple.get('Timings'): text_parts.append(f"Timings: {temple['Timings']}")
-        if temple.get('Entry Fee'): text_parts.append(f"Entry Fee: {temple['Entry Fee']}")
-        if temple.get('Contact Information'): text_parts.append(f"Contact Information: {temple['Contact Information']}")
-        
-        combined_text = "\n\n".join(text_parts)
+        timings = temple.get('Timings') or f"{temple.get('opening_time', '')} to {temple.get('closing_time', '')}".strip()
+        if timings and timings != "to": text_parts.append(f"Timings: {timings}")
+
+        # Combine and CLEAN markdown
+        raw_combined = "\n\n".join(text_parts)
+        combined_text = self.strip_markdown(raw_combined)
         
         if not combined_text:
             combined_text = f"Information about {name} temple in {state}."
@@ -223,9 +264,8 @@ class UniversalScriptureIngester:
             'metadata': {
                 'state': state,
                 'name': name,
-                'visiting_guide': temple.get('visiting_guide'),
-                'location': temple.get('Location'),
-                'main_deity': temple.get('Main deity')
+                'location': location,
+                'main_deity': deity
             }
         }
         return verse
@@ -238,14 +278,15 @@ class UniversalScriptureIngester:
         row_lower = {k.lower(): v for k, v in row.items() if v}
 
         # Extract fields
-        verse['chapter'] = row_lower.get('chapter') or row_lower.get('adhyaya') or row_lower.get('id', '').split('.')[0] if '.' in row_lower.get('id', '') else None
-        verse['verse'] = row_lower.get('verse') or row_lower.get('shloka') or row_lower.get('shloka_number')
+        verse['chapter'] = row_lower.get('book') or row_lower.get('mandala') or row_lower.get('kaanda') or row_lower.get('chapter') or row_lower.get('adhyaya')
+        verse['section'] = row_lower.get('section') or row_lower.get('sarg') or row_lower.get('sarga') or (row_lower.get('chapter') if 'kaanda' in row_lower or 'book' in row_lower else None)
+        verse['verse'] = row_lower.get('shloka') or row_lower.get('verse') or row_lower.get('shloka_number') or row_lower.get('sukta')
         
         # Priority for English content
         verse['text'] = row_lower.get('engmeaning') or row_lower.get('translation') or row_lower.get('english') or row_lower.get('text')
         
         # Original Sanskrit/Hindi
-        verse['sanskrit'] = row_lower.get('shloka') or row_lower.get('original') or row_lower.get('sanskrit')
+        verse['sanskrit'] = row_lower.get('shloka_text') or row_lower.get('original') or row_lower.get('sanskrit') or row_lower.get('shloka')
         
         verse['transliteration'] = row_lower.get('transliteration') or row_lower.get('iast')
         
@@ -257,7 +298,14 @@ class UniversalScriptureIngester:
         if verse.get('chapter') and verse.get('verse') and verse.get('text'):
             verse['scripture'] = self._infer_scripture(source)
             verse['source'] = source
-            verse['reference'] = f"{verse['scripture']} {verse['chapter']}.{verse['verse']}"
+            
+            # Construct more granular reference
+            ref = f"{verse['scripture']} {verse['chapter']}"
+            if verse.get('section') and str(verse['section']) != str(verse['chapter']):
+                ref += f" {verse['section']}"
+            ref += f".{verse['verse']}"
+            verse['reference'] = ref
+            
             verse['language'] = 'en'
             verse['topic'] = self._infer_topic(verse)
 
@@ -282,17 +330,36 @@ class UniversalScriptureIngester:
                         return str(val).strip() if isinstance(val, str) else str(val)
             return None
 
-        verse['chapter'] = safe_get(['chapter', 'adhyaya', 'book', 'mandala', 'kaanda'])
-        verse['verse'] = safe_get(['verse', 'shloka', 'shloka_number', 'verse_number'])
+        verse['chapter'] = safe_get(['book', 'mandala', 'kaanda', 'chapter', 'adhyaya'])
+        verse['section'] = safe_get(['section', 'sarg', 'sarga', 'chapter', 'adhyaya'])
+        verse['verse'] = safe_get(['shloka', 'verse', 'sukta', 'shloka_number', 'verse_number'])
         verse['text'] = safe_get(['text', 'translation', 'english', 'meaning', 'content'])
-        verse['sanskrit'] = safe_get(['shloka', 'sanskrit', 'original', 'devanagari'])
+        verse['sanskrit'] = safe_get(['shloka_text', 'sanskrit', 'original', 'devanagari', 'shloka'])
         verse['transliteration'] = safe_get(['transliteration', 'iast', 'romanized', 'transliteraion'])
+
+        # Fix section if it's the same as chapter
+        if verse.get('section') == verse.get('chapter'):
+            # Only if we have another candidate
+            if 'adhyaya' in item_lower and verse['chapter'] != item_lower['adhyaya']:
+                verse['section'] = item_lower['adhyaya']
+            elif 'chapter' in item_lower and verse['chapter'] != item_lower['chapter']:
+                verse['section'] = item_lower['chapter']
+            else:
+                 # Check if we should null it out to avoid redundancy in reference
+                 pass
 
         # Only return if we have essential fields
         if verse.get('chapter') and verse.get('verse') and verse.get('text'):
             verse['scripture'] = self._infer_scripture(source)
             verse['source'] = source
-            verse['reference'] = f"{verse['scripture']} {verse['chapter']}.{verse['verse']}"
+            
+            # Construct more granular reference
+            ref = f"{verse['scripture']} {verse['chapter']}"
+            if verse.get('section') and str(verse['section']) != str(verse['chapter']):
+                ref += f" {verse['section']}"
+            ref += f".{verse['verse']}"
+            verse['reference'] = ref
+            
             verse['language'] = 'en'
             verse['topic'] = self._infer_topic(verse)
 
@@ -308,7 +375,7 @@ class UniversalScriptureIngester:
             return 'Bhagavad Gita'
         elif 'mahabharata' in source_lower:
             return 'Mahabharata'
-        elif 'ramayana' in source_lower or 'balakanda' in source_lower or 'ayodhya' in source_lower:
+        elif any(k in source_lower for k in ['ramayana', 'balakanda', 'ayodhya', 'aranya', 'kishkindha', 'sundara', 'yudhha', 'uttara']):
             return 'Ramayana'
         elif 'rigveda' in source_lower:
             return 'Rig Veda'
@@ -325,7 +392,7 @@ class UniversalScriptureIngester:
 
     def _infer_topic(self, verse: Dict) -> str:
         """Infer topic from verse content"""
-        text = (verse.get('text', '') + ' ' + verse.get('meaning', '') + ' ' + verse.get('sanskrit', '')).lower()
+        text = ' '.join([str(verse.get(f, '')) for f in ['text', 'meaning', 'sanskrit'] if verse.get(f)]).lower()
 
         topics = {
             'Karma Yoga': ['action', 'duty', 'work', 'karma', 'perform', 'karm'],

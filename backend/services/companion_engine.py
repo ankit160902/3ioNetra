@@ -54,9 +54,9 @@ class CompanionEngine:
         # ------------------------------------------------------------------
         if is_ready:
             acknowledgements = [
-                "Thank you for sharing this so openly. Let me reflect and bring you wisdom from the scriptures.",
-                "I appreciate your honesty. I will now look into the ancient teachings for guidance.",
-                "Your words help me understand deeply. Let me draw from Dharma to respond thoughtfully.",
+                "Thank you for sharing. Let me reflect on this through the lens of Dharma.",
+                "I appreciate your honesty. I'm looking into the scriptures for guidance.",
+                "Your words touch me. Let me find a relevant verse to help guide us.",
             ]
             return random.choice(acknowledgements), True
 

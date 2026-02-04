@@ -59,11 +59,12 @@ ROUGH RESPONSE:
 
 Rebuild the response using this structure:
 
-1. Acknowledgment (1–2 lines)
-2. Scripture (quote with chapter.verse if available)
-3. Explanation (simple language)
-4. Practical guidance
-5. Gentle reflective question
+1. Brief acknowledgment
+2. Relevant Verse (optional)
+3. One sentence explanation
+4. Gentle question
+
+Max Length: 75 words.
 
 Rules:
 - Plain text
