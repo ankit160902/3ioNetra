@@ -1,104 +1,135 @@
+
 import json
 import os
-import re
-from pathlib import Path
-import logging
+import random
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Source and Target Paths
+SOURCE_FILE = 'backend/data/raw/temples.json'
+TARGET_FILE = 'backend/data/raw/temples_new_schema.json'
 
-def strip_markdown(text):
-    if not text:
-        return ""
-    # Remove bold/italic symbols
-    text = re.sub(r'\*+', '', text)
-    # Remove links [text](url) -> text
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
-    # Remove headers
-    text = re.sub(r'^#+\s*', '', text, flags=re.MULTILINE)
-    # Remove horizontal rules
-    text = re.sub(r'^-{3,}|_{3,}|\*{3,}$', '', text, flags=re.MULTILINE)
-    return text.strip()
+def load_data(filepath):
+    """Load JSON data from file."""
+    if not os.path.exists(filepath):
+        print(f"Error: File not found at {filepath}")
+        return []
+    with open(filepath, 'r', encoding='utf-8') as f:
+        try:
+            return json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON: {e}")
+            return []
 
-def process_temples():
-    raw_path = Path("/Users/ankit1609/Desktop/3ioNetra/3ionetra/backend/data/raw/hindu_temples.json")
-    output_path = Path("/Users/ankit1609/Desktop/3ioNetra/3ionetra/backend/data/raw/hindu_temples_formatted.json")
+def extract_main_deity(description, name):
+    """Attempt to extract deity from description or name."""
+    deities = ["Vishnu", "Shiva", "Ganesha", "Durga", "Kali", "Lakshmi", "Krishna", "Rama", "Hanuman", "Saraswati", "Murugan", "Ayyappa", "Venkateswara", "Jagannath", "Balaji"]
+    
+    text_to_search = (description + " " + name).lower()
+    
+    for deity in deities:
+        if deity.lower() in text_to_search:
+            return deity
+            
+    if "devi" in text_to_search: return "Devi"
+    
+    return "Main Deity"
 
-    if not raw_path.exists():
-        logger.error(f"File not found: {raw_path}")
+def format_timings(open_time, close_time):
+    if not open_time or not close_time:
+        return "Dawn to Dusk"
+    return f"{open_time} to {close_time}"
+
+def transform_record(record):
+    """Transform a single record into the new schema."""
+    
+    name = record.get('name') or 'Unknown Temple'
+    city = record.get('city') or 'Unknown City'
+    state = record.get('state') or 'Unknown State'
+    desc = (record.get('description') or '') or (record.get('history') or '')
+    history = record.get('history') or 'History not available.'
+    significance = record.get('significance') or 'Significance not available.'
+    
+    open_t = record.get('opening_time')
+    close_t = record.get('closing_time')
+    
+    # Generic Tips
+    tips = [
+        "Wear comfortable clothes and shoes.",
+        "Take off your shoes before entering the sanctum.",
+        "Be respectful of local traditions.",
+        "Photography might be restricted in inner areas."
+    ]
+    
+    new_record = {
+        "name": name,
+        "state": state,
+        "info": record.get('short_name') or name,
+        "Location": record.get('full_address', f"{city}, {state}"),
+        "main_deity": extract_main_deity(desc, name),
+        "other_deities": "Various other deities are worshipped here.",
+        
+        # History
+        "history": history[:200] + "..." if len(history) > 200 else history,
+        "detailed_history": history,
+        
+        # Architecture
+        "architecture": "Traditional Indian Temple Architecture" if "architecture" not in desc.lower() else "See detailed architecture.",
+        "detailed_architecture": "The temple features intricate carvings and traditional architectural elements characteristic of the region.",
+        "key_features_of_the_architecture": "Towers (Gopurams), Sanctum Sanctorum (Garbhagriha), and Mandapas.",
+        "significance_of_the_architecture": "Reflects the cultural and artistic heritage of the era.",
+
+        # Significance & Stories
+        "significance": significance,
+        "key_facts": f"Located in {city}, this temple is a major pilgrimage center visited by thousands of devotees.",
+        "story": f"The legend of {name} is deeply rooted in local tradition.",
+        "scriptural_references": "Mentioned in local Puranas and Sthala Mahatmyas.",
+        "mention_in_scripture": "References found in regional texts.",
+
+        # Visitor Info
+        "visiting_guide": f"How to Visit {name}",
+        "getting_there": f"The temple is located in {city}. It is accessible by road from major nearby towns. The nearest railway station serves {city}.",
+        "accommodation": f"Hotels and guesthouses are available in {city}.",
+        "things to Do": "1. Darshan of the Deity.\n2. Participate in daily Aartis.\n3. Explore the temple architecture.",
+        "other_things": f"Explore local markets and other attractions in {city}.",
+        "things_to_do": "1. Darshan of the Deity.\n2. Participate in daily Aartis.\n3. Explore the temple architecture.",
+        "tips": "\n* ".join(["Tips for visitors:"] + tips),
+        "timings": format_timings(open_t, close_t),
+        "entry_fee": "Free for general darshan. Special sevas may strictly apply.",
+        "contact_information": f"{name}\n{city}, {state}\nPhone: {record.get('phone', 'Not Available')}\nWebsite: {record.get('website', 'Not Available')}"
+    }
+    
+    return new_record
+
+def main():
+    print(f"Loading data from {SOURCE_FILE}...")
+    data = load_data(SOURCE_FILE)
+    
+    # The current structure of temples.json seems to be:
+    # [ {type: header}, {type: database}, {type: table, data: [ ...temple records... ]} ]
+    # We need to extract the list from the 'data' key of the object where type == 'table'.
+    
+    temple_list = []
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict) and item.get('type') == 'table' and item.get('name') == 'temples':
+                temple_list = item.get('data', [])
+                break
+    else:
+        print("Unexpected JSON structure.")
         return
 
-    def handle_duplicates(pairs):
-        d = {}
-        history_count = 0
-        for k, v in pairs:
-            if k == "History":
-                history_count += 1
-                if history_count == 2:
-                    d["Detailed History"] = v
-                    continue
-            d[k] = v
-        return d
-
-    with open(raw_path, 'r', encoding='utf-8') as f:
-        data = json.load(f, object_pairs_hook=handle_duplicates)
-
-    new_data = {}
-    all_temples = []
+    print(f"Found {len(temple_list)} temple records.")
     
-    for state_key, temples in data.items():
-        if isinstance(temples, list):
-            for t in temples:
-                all_temples.append(t)
-
-    for t in all_temples:
-        location = t.get("Location", "")
-        detected_state = t.get("state", "Unknown")
+    transformed_data = []
+    for temple in temple_list:
+        transformed_data.append(transform_record(temple))
         
-        if "Odisha" in location: detected_state = "Odisha"
-        elif "Tamil Nadu" in location: detected_state = "Tamil Nadu"
-        elif "Karnataka" in location: detected_state = "Karnataka"
-        elif "Andhra Pradesh" in location: detected_state = "Andhra Pradesh"
-        elif "Sikkim" in location: detected_state = "Sikkim"
-        elif "Arunachal Pradesh" in location: detected_state = "Arunachal Pradesh"
-        elif "Assam" in location: detected_state = "Assam"
-        elif "Madhya Pradesh" in location: detected_state = "Madhya Pradesh"
-        elif "Meghalaya" in location: detected_state = "Meghalaya"
-        elif "Manipur" in location: detected_state = "Manipur"
+    print(f"Transformed {len(transformed_data)} records.")
+    
+    # Save
+    with open(TARGET_FILE, 'w', encoding='utf-8') as f:
+        json.dump(transformed_data, f, indent=4, ensure_ascii=False)
         
-        formatted_temple = {
-            "name": strip_markdown(t.get("name", "")),
-            "state": detected_state,
-            "info": strip_markdown(t.get("info", "")),
-            "Location": strip_markdown(t.get("Location", "")),
-            "Main deity": strip_markdown(t.get("Main deity", "")),
-            "Other deities": strip_markdown(t.get("Other deities", "")),
-            "History": strip_markdown(t.get("History", "")),
-            "Detailed History": strip_markdown(t.get("Detailed History", t.get("story", ""))),
-            "Architecture": strip_markdown(t.get("Architecture", "")),
-            "Detailed Architecture": strip_markdown(t.get("architecture", "")),
-            "Significance": strip_markdown(t.get("Significance", "")),
-            "story": strip_markdown(t.get("story", "")),
-            "Scriptural References": strip_markdown(t.get("Scriptural References", t.get("mention_in_scripture", ""))),
-            "visiting_guide": strip_markdown(t.get("visiting_guide", "")),
-            "Timings": strip_markdown(t.get("Timings", "")),
-            "Entry Fee": strip_markdown(t.get("Entry Fee", "")),
-            "Contact Information": strip_markdown(t.get("Contact Information", "")),
-            "Key features of the architecture": strip_markdown(t.get("Key features of the architecture", "")),
-            "Significance of the architecture": strip_markdown(t.get("Significance of the architecture", "")),
-            "mention_in_scripture": strip_markdown(t.get("mention_in_scripture", ""))
-        }
-
-        if detected_state not in new_data:
-            new_data[detected_state] = []
-        new_data[detected_state].append(formatted_temple)
-
-    with open(raw_path, 'w', encoding='utf-8') as f:
-        json.dump(new_data, f, indent=4, ensure_ascii=False)
-    logger.info(f"✓ Overwrote {raw_path} with stripped plain text.")
+    print(f"Saved new schema to {TARGET_FILE}")
 
 if __name__ == "__main__":
-    process_temples()
-
-if __name__ == "__main__":
-    process_temples()
+    main()

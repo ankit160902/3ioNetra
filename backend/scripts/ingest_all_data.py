@@ -168,13 +168,21 @@ class UniversalScriptureIngester:
             
             # Case 1: phpMyAdmin export format (list of objects)
             if isinstance(data, list):
-                for obj in data:
-                    if isinstance(obj, dict) and obj.get('type') == 'table' and obj.get('name') == 'temples':
-                        temple_list = obj.get('data', [])
-                        for temple in temple_list:
-                            verse = self._extract_temple_as_verse(temple, temple.get('state', 'Unknown'))
-                            if verse:
-                                verses.append(verse)
+                # Check if it's a flat list of temples (New Schema)
+                if len(data) > 0 and isinstance(data[0], dict) and 'name' in data[0] and 'type' not in data[0]:
+                     for temple in data:
+                        verse = self._extract_temple_as_verse(temple, temple.get('state', 'Unknown'))
+                        if verse:
+                            verses.append(verse)
+                else:
+                    # Legacy PHPMyAdmin format
+                    for obj in data:
+                        if isinstance(obj, dict) and obj.get('type') == 'table' and obj.get('name') == 'temples':
+                            temple_list = obj.get('data', [])
+                            for temple in temple_list:
+                                verse = self._extract_temple_as_verse(temple, temple.get('state', 'Unknown'))
+                                if verse:
+                                    verses.append(verse)
                 
             # Case 2: Dictionary format (state -> list of temples)
             elif isinstance(data, dict):
@@ -224,7 +232,7 @@ class UniversalScriptureIngester:
         significance = temple.get('Significance') or temple.get('significance')
         if significance: text_parts.append(f"Significance: {significance}")
         
-        history = temple.get('History') or temple.get('Detailed History') or temple.get('history')
+        history = temple.get('History') or temple.get('Detailed History') or temple.get('detailed_history') or temple.get('history')
         if history: text_parts.append(f"History: {history}")
         
         story = temple.get('story')
@@ -251,22 +259,20 @@ class UniversalScriptureIngester:
         if not combined_text:
             combined_text = f"Information about {name} temple in {state}."
 
-        # Create a verse-like object
+        # Create a standardized verse-like object
+        import uuid
         verse = {
+            'id': str(uuid.uuid4()),
+            'type': 'temple',
+            'scripture': 'Hindu Temples',
+            'source': 'hindu_temples',
             'chapter': state,
             'verse': name,
             'text': combined_text,
-            'scripture': 'Hindu Temples',
-            'source': 'hindu_temples',
             'reference': f"Temple: {name} ({state})",
             'language': 'en',
             'topic': 'Temples and Pilgrimage',
-            'metadata': {
-                'state': state,
-                'name': name,
-                'location': location,
-                'main_deity': deity
-            }
+            'metadata': temple  # Store the FULL rich temple object
         }
         return verse
 
@@ -350,20 +356,35 @@ class UniversalScriptureIngester:
 
         # Only return if we have essential fields
         if verse.get('chapter') and verse.get('verse') and verse.get('text'):
-            verse['scripture'] = self._infer_scripture(source)
-            verse['source'] = source
+            import uuid
+            
+            # Standardized Verse Output
+            final_verse = {
+                'id': str(uuid.uuid4()),
+                'type': 'scripture',
+                'scripture': self._infer_scripture(source),
+                'source': source,
+                'chapter': verse.get('chapter'),
+                'section': verse.get('section', ''),
+                'verse_number': verse.get('verse'),
+                'text': verse.get('text'),
+                'sanskrit': verse.get('sanskrit', ''),
+                'meaning': verse.get('meaning', ''),
+                'transliteration': verse.get('transliteration', ''),
+                'language': 'en',
+                'embedding': [] # Placeholder
+            }
             
             # Construct more granular reference
-            ref = f"{verse['scripture']} {verse['chapter']}"
-            if verse.get('section') and str(verse['section']) != str(verse['chapter']):
-                ref += f" {verse['section']}"
-            ref += f".{verse['verse']}"
-            verse['reference'] = ref
+            ref = f"{final_verse['scripture']} {final_verse['chapter']}"
+            if final_verse['section'] and str(final_verse['section']) != str(final_verse['chapter']):
+                ref += f" {final_verse['section']}"
+            ref += f".{final_verse['verse_number']}"
+            final_verse['reference'] = ref
             
-            verse['language'] = 'en'
-            verse['topic'] = self._infer_topic(verse)
+            final_verse['topic'] = self._infer_topic(final_verse)
 
-            return {k: v for k, v in verse.items() if v}  # Remove None values
+            return final_verse
 
         return None
 
