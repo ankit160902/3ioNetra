@@ -749,6 +749,22 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Validate response
             response_text = await safety_validator.validate_response(response_text)
 
+            # Check if user needs professional help recommendation (addiction, mental health)
+            needs_help, help_type = safety_validator.check_needs_professional_help(session, query.message)
+            if needs_help:
+                # Check if we already mentioned professional help in this session
+                already_mentioned = any(
+                    'professional' in msg.get('content', '').lower() or
+                    'helpline' in msg.get('content', '').lower() or
+                    'therapist' in msg.get('content', '').lower()
+                    for msg in session.conversation_history
+                    if msg.get('role') == 'assistant'
+                )
+                response_text = safety_validator.append_professional_help(
+                    response_text, help_type, already_mentioned
+                )
+                logger.info(f"Appended {help_type} professional help resources to response")
+
             
             # Add to history
             session.add_message('assistant', response_text)

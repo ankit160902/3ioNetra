@@ -102,17 +102,44 @@ class CompanionEngine:
     def _assess_readiness(self, session: SessionState) -> bool:
         """
         Decide if we should transition to ANSWERING phase.
+        Requires more listening turns for emotionally intense situations.
         """
+        readiness = session.memory.readiness_for_wisdom
+        emotional_state = session.memory.story.emotional_state
+        
+        # High-intensity emotions require more listening before guidance
+        high_intensity_emotions = ['sadness', 'anger', 'anxiety', 'hopelessness', 'grief', 'despair']
+        requires_extra_listening = emotional_state in high_intensity_emotions
+        
+        # Minimum turns before guidance (more for emotional distress)
+        min_turns_for_guidance = 4 if requires_extra_listening else 3
+        
+        # Log the assessment
+        logger.info(
+            f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}, "
+            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}"
+        )
+        
+        # STRICT RULE: Require minimum turn count even if signals are collected
+        if session.turn_count < min_turns_for_guidance:
+             return False
+
+        # Ensure spacing between guidance turns (Oscillation Logic)
+        MIN_SPACING = 3
+        last_guidance = getattr(session, 'last_guidance_turn', 0) or 0
+        if last_guidance > 0 and (session.turn_count - last_guidance) < MIN_SPACING:
+            logger.info(
+                f"Session {session.session_id}: deferring guidance due to spacing "
+                f"(last={last_guidance}, current={session.turn_count}, needed={MIN_SPACING})"
+            )
+            return False
+
+        # Now check if we should force transition due to signal density/max turns
         if session.should_force_transition():
             logger.info(
                 f"Session {session.session_id}: forced wisdom after {session.turn_count} turns"
             )
             return True
-
-        readiness = session.memory.readiness_for_wisdom
-        logger.info(
-            f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}"
-        )
 
         return readiness >= 0.7
 

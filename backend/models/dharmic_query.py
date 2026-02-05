@@ -68,24 +68,36 @@ class DharmicQueryObject:
         """Build a search query for RAG retrieval"""
         query_parts = []
 
-        # Start with the core user query/intent
+        # 1. Boost Life Domain (Personalization)
+        # We front-load this to heavily weigh the context
+        if self.life_domain:
+            domain_map = {
+                "work": "career job workplace profession duty employment",
+                "family": "parents children siblings house relations domestic",
+                "relationships": "marriage partner love conflict divorce connection",
+                "financial": "money wealth debt economic poverty prosperity",
+                "health": "illness sickness body pain healing physical well-being",
+                "spiritual": "practice meditation sadhana devotion god faith",
+                "career": "job business success failure profession ambition",
+                "education": "studies exams learning student knowledge",
+            }
+            # Expand with synonyms for better RAG matching
+            keywords = domain_map.get(self.life_domain.lower(), self.life_domain)
+            query_parts.append(f"Context: {self.life_domain} ({keywords})")
+
+        # 2. Core user query
         if self.query:
             query_parts.append(self.query)
 
-        # Add the conversation summary to provide more semantic context for RAG
+        # 3. Add conversation summary for context
         if self.conversation_summary and len(self.conversation_summary) > 20:
-            # We add this to help the embedding model pick up on the broader story
             query_parts.append(self.conversation_summary)
 
-        # Add emotional context
+        # 4. Add emotional context
         if self.emotion and self.emotion != "unknown":
             query_parts.append(f"dealing with {self.emotion}")
 
-        # Add life domain context
-        if self.life_domain:
-            query_parts.append(f"regarding {self.life_domain}")
-
-        # Add dharmic concepts
+        # 5. Add dharmic concepts
         if self.dharmic_concepts:
             concepts = " ".join(self.dharmic_concepts[:3])
             query_parts.append(concepts)
