@@ -110,14 +110,25 @@ class CompanionEngine:
         # High-intensity emotions require more listening before guidance
         high_intensity_emotions = ['sadness', 'anger', 'anxiety', 'hopelessness', 'grief', 'despair']
         requires_extra_listening = emotional_state in high_intensity_emotions
+
+        # check if it is a direct question (user seeking answers)
+        last_msg = ""
+        if session.conversation_history and session.conversation_history[-1]["role"] == "user":
+            last_msg = session.conversation_history[-1]["content"]
         
-        # Minimum turns before guidance (more for emotional distress)
-        min_turns_for_guidance = 4 if requires_extra_listening else 3
+        is_direct_question = "?" in last_msg or any(w in last_msg.lower() for w in ["how", "what", "guide", "help", "solution"])
+
+        if requires_extra_listening:
+             # Even with direct questions, emotional cases need SOME listening
+             min_turns_for_guidance = 3 if is_direct_question else 4
+        else:
+             # Standard cases: 2 turns is enough if they ask questions
+             min_turns_for_guidance = 1 if is_direct_question else 2
         
         # Log the assessment
         logger.info(
             f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}, "
-            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}"
+            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}, direct_q={is_direct_question}"
         )
         
         # STRICT RULE: Require minimum turn count even if signals are collected
