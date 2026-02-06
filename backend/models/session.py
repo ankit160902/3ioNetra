@@ -73,6 +73,9 @@ class SessionState:
     
     # Oscillation control
     last_guidance_turn: int = -1  # Turn number when guidance was last given
+    
+    # Returning user detection
+    is_returning_user: bool = False  # True if past conversation history was loaded
 
     def to_dict(self) -> Dict:
         return {
@@ -87,6 +90,7 @@ class SessionState:
             "min_clarification_turns": self.min_clarification_turns,
             "max_clarification_turns": self.max_clarification_turns,
             "last_guidance_turn": self.last_guidance_turn,
+            "is_returning_user": self.is_returning_user,
             "memory": self.memory.to_dict() if self.memory else None
         }
 
@@ -113,6 +117,7 @@ class SessionState:
             min_clarification_turns=data.get("min_clarification_turns", 3),
             max_clarification_turns=data.get("max_clarification_turns", 6),
             last_guidance_turn=data.get("last_guidance_turn", -1),
+            is_returning_user=data.get("is_returning_user", False),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )
         return session

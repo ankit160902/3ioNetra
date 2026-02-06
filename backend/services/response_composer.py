@@ -24,6 +24,7 @@ class ResponseComposer:
         dharmic_query: DharmicQueryObject,
         memory: ConversationMemory,
         retrieved_verses: List[Dict],
+        conversation_history: List[Dict],
         reduce_scripture: bool = False,
         phase: Optional[ConversationPhase] = None,
         original_query: Optional[str] = None
@@ -33,6 +34,7 @@ class ResponseComposer:
         - synthesized dharmic query (for RAG context)
         - rich conversation memory
         - verses retrieved via RAG
+        - full conversation history (for context continuity)
         - current conversation phase
         - original user query (for natural response)
         """
@@ -64,7 +66,7 @@ class ResponseComposer:
             return await self.llm.generate_response(
                 query=llm_query,
                 context_docs=context_docs,
-                conversation_history=memory.conversation_history,
+                conversation_history=conversation_history, # Use the explicit history passed from session
                 user_profile=user_profile,
                 phase=phase,
                 memory_context=memory

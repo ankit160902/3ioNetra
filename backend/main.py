@@ -277,6 +277,12 @@ async def initialize_components_background():
         # Session Manager
         session_manager = get_session_manager()
         logger.info(f"✅ Session Manager initialized (TTL: {settings.SESSION_TTL_MINUTES} min)")
+        
+        # Alert if using non-persistent storage
+        from services.session_manager import InMemorySessionManager
+        if isinstance(session_manager, InMemorySessionManager):
+            logger.warning("⚠️ USING IN-MEMORY SESSION STORAGE. Sessions will be lost on restart.")
+
 
         # Context Synthesizer
         get_context_synthesizer()
@@ -568,7 +574,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 session = None
 
             if not session:
-                logger.warning(f"❌ Session {query.session_id} not found, expired, or unauthorized. Creating a new session.")
+                logger.info(f"ℹ️ Session {query.session_id} lookup failed (Not found/Expired). Auto-creating new session.")
                 session = await session_manager.create_session(
                     min_signals=settings.MIN_SIGNALS_THRESHOLD,
                     min_turns=settings.MIN_CLARIFICATION_TURNS,
@@ -647,16 +653,19 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         
                         session.conversation_history = context_history + session.conversation_history
                         
+                        # Mark as returning user so bot can acknowledge continuity
+                        session.is_returning_user = True
+                        
                         # Restore high-level story and memory from DB if available
                         if past_convo.get("memory"):
                             from models.memory_context import ConversationMemory
                             session.memory = ConversationMemory.from_dict(past_convo["memory"])
-                            logger.info(f"Restored permanent memory story for user {user['id']}")
+                            logger.info(f"✅ Restored permanent memory story for user {user['id']}")
                         else:
                             # Reconstruct high-level memory context from history if no saved memory exists
                             await companion_engine.reconstruct_memory(session, context_history)
                         
-                        logger.info(f"Loaded {len(context_history)} past history messages for user {user['id']}")
+                        logger.info(f"✅ Loaded {len(context_history)} past history messages for returning user {user['id']}")
                 except Exception as e:
                     logger.error(f"Failed to load past history in session: {e}")
 
@@ -708,6 +717,11 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         # Add user message to history
         session.add_message('user', query.message)
         session.turn_count += 1
+        
+        # Keep conversation history within manageable limits (e.g., last 30 messages)
+        # using a simple sliding window to avoid context window overflow
+        if len(session.conversation_history) > 30:
+            session.conversation_history = session.conversation_history[-30:]
 
         # Let the companion engine process the message
         # It will: analyze, build memory, and decide if ready for wisdom
@@ -741,6 +755,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 dharmic_query=dharmic_query,
                 memory=session.memory,
                 retrieved_verses=retrieved_docs,
+                conversation_history=session.conversation_history,
                 reduce_scripture=reduce_scripture,
                 phase=ConversationPhase.GUIDANCE,
                 original_query=query.message
