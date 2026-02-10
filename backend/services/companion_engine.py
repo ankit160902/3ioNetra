@@ -116,7 +116,13 @@ class CompanionEngine:
         if session.conversation_history and session.conversation_history[-1]["role"] == "user":
             last_msg = session.conversation_history[-1]["content"]
         
-        is_direct_question = "?" in last_msg or any(w in last_msg.lower() for w in ["how", "what", "guide", "help", "solution"])
+        # Enhanced detection for explicit guidance requests
+        guidance_keywords = [
+            "how", "what", "guide", "help", "solution", "suggest", "action", 
+            "advice", "tell me", "recommend", "should i", "way out", "way to",
+            "what can i do", "what do i do", "give me", "show me"
+        ]
+        is_direct_question = "?" in last_msg or any(w in last_msg.lower() for w in guidance_keywords)
 
         if requires_extra_listening:
              # Even with direct questions, emotional cases need SOME listening
@@ -136,14 +142,28 @@ class CompanionEngine:
              return False
 
         # Ensure spacing between guidance turns (Oscillation Logic)
+        # BUT: Allow override if user explicitly demands immediate guidance
         MIN_SPACING = 3
         last_guidance = getattr(session, 'last_guidance_turn', 0) or 0
+        
+        # Check for URGENT guidance requests that should bypass spacing
+        urgent_keywords = ["please guide", "suggest me", "tell me what", "give me some", "show me", "what should i"]
+        is_urgent_request = any(keyword in last_msg.lower() for keyword in urgent_keywords)
+        
         if last_guidance > 0 and (session.turn_count - last_guidance) < MIN_SPACING:
-            logger.info(
-                f"Session {session.session_id}: deferring guidance due to spacing "
-                f"(last={last_guidance}, current={session.turn_count}, needed={MIN_SPACING})"
-            )
-            return False
+            if is_urgent_request and is_direct_question:
+                # User is explicitly demanding guidance NOW - override spacing
+                logger.info(
+                    f"Session {session.session_id}: URGENT guidance request detected, "
+                    f"bypassing spacing requirement (last={last_guidance}, current={session.turn_count})"
+                )
+            else:
+                # Normal oscillation - enforce spacing
+                logger.info(
+                    f"Session {session.session_id}: deferring guidance due to spacing "
+                    f"(last={last_guidance}, current={session.turn_count}, needed={MIN_SPACING})"
+                )
+                return False
 
         # Now check if we should force transition due to signal density/max turns
         if session.should_force_transition():
