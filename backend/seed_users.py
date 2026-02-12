@@ -43,9 +43,9 @@ deities_list = ["Shiva", "Krishna", "Ganesha", "Durga", "Hanuman", "Lakshmi", "S
 rashis = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
 gotras = ["Bharadwaja", "Kashyapa", "Vashistha", "Vishvamitra", "Gautama", "Jamadagni", "Atri", "Agastya"]
 
-def create_mock_user(index):
-    first_name = first_names[index]
-    last_name = last_names[index]
+def create_mock_user(index, custom_first=None, custom_last=None):
+    first_name = custom_first if custom_first else first_names[index % len(first_names)]
+    last_name = custom_last if custom_last else last_names[index % len(last_names)]
     email = f"user{index+1}@example.com"
     password = f"Password{index+1}!"
     
@@ -103,7 +103,7 @@ def create_mock_user(index):
         "last_name": last_name,
         "date_of_birth": dob,
         "occupation": "professional",
-        "gender": "male" if index % 2 == 0 else "female",
+        "gender": "male", # Amit and Pratyush are typically male names
         "deities": [deity],
         
         "spiritual_profile": {
@@ -121,17 +121,28 @@ def create_mock_user(index):
 
 def seed_users():
     print("Cleanup: Removing existing mock users...")
-    emails_to_remove = [f"user{i+1}@example.com" for i in range(10)]
+    emails_to_remove = [f"user{i+1}@example.com" for i in range(12)]
     users_collection.delete_many({"email": {"$in": emails_to_remove}})
     
-    print("Seeding 10 users with correct hashing...")
+    print("Seeding 12 users (including Amit and Pratyush)...")
     users_to_insert = []
     creds = []
     
-    for i in range(10):
-        doc, email, pwd = create_mock_user(i)
+    # Specific users
+    specific_users = [
+        ("Amit", "Bharadwaj"),
+        ("Pratyush", "Ambuj")
+    ]
+    
+    for i in range(12):
+        if i < len(specific_users):
+            fname, lname = specific_users[i]
+            doc, email, pwd = create_mock_user(i, fname, lname)
+        else:
+            doc, email, pwd = create_mock_user(i)
+            
         users_to_insert.append(doc)
-        creds.append(f"Email: {email}, Password: {pwd}")
+        creds.append(f"Email: {email}, Password: {pwd}, Name: {doc['first_name']} {doc['last_name']}, ID: {doc['id']}")
     
     if users_to_insert:
         result = users_collection.insert_many(users_to_insert)

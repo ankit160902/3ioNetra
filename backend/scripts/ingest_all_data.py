@@ -103,28 +103,27 @@ class UniversalScriptureIngester:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Handle different JSON structures
-            if isinstance(data, list):
-                for idx, item in enumerate(data):
-                    if idx > 10000:  # Limit for performance
-                        break
-                    verse = self._extract_verse_from_dict(item, file_path.stem)
+            def extract_from_any(obj):
+                extracted = []
+                if isinstance(obj, list):
+                    for item in obj:
+                        extracted.extend(extract_from_any(item))
+                elif isinstance(obj, dict):
+                    verse = self._extract_verse_from_dict(obj, file_path.stem)
                     if verse:
-                        verses.append(verse)
-            elif isinstance(data, dict):
-                # Could be nested structure
-                for key, value in data.items():
-                    if isinstance(value, list):
-                        for idx, item in enumerate(value):
-                            if idx > 10000:  # Limit for performance
-                                break
-                            verse = self._extract_verse_from_dict(item, file_path.stem)
-                            if verse:
-                                verses.append(verse)
-                    elif isinstance(value, dict):
-                        verse = self._extract_verse_from_dict(value, file_path.stem)
-                        if verse:
-                            verses.append(verse)
+                        extracted.append(verse)
+                    else:
+                        # Check nested lists in dict values
+                        for val in obj.values():
+                            if isinstance(val, (list, dict)):
+                                extracted.extend(extract_from_any(val))
+                return extracted
+
+            verses = extract_from_any(data)
+            
+            # Limit for performance
+            if len(verses) > 10000 and "gita" not in file_path.name.lower():
+                verses = verses[:10000]
 
             if verses:
                 logger.info(f"✓ Parsed {len(verses)} verses from {file_path.name}")
@@ -297,11 +296,18 @@ class UniversalScriptureIngester:
         verse['transliteration'] = row_lower.get('transliteration') or row_lower.get('iast')
         
         # Add meaning/explanation
-        verse['meaning'] = row_lower.get('meaning') or row_lower.get('explanation') or row_lower.get('wordmeaning') or row_lower.get('hinmeaning')
+        verse['meaning'] = row_lower.get('meaning') or row_lower.get('explanation') or row_lower.get('wordmeaning') or row_lower.get('hinmeaning') or row_lower.get('meditation_guidance')
         verse['hindi'] = row_lower.get('hinmeaning') or row_lower.get('hindi')
 
+        # Handle Meditation Miniset specially if its columns are present
+        if 'meditation_guidance' in row_lower:
+            verse['text'] = f"Context: {row_lower.get('context', 'N/A')}\nGuidance: {row_lower.get('meditation_guidance')}\nTechniques: {row_lower.get('suggested_techniques', 'N/A')}"
+            verse['chapter'] = row_lower.get('meditation_style', 'General')
+            verse['verse'] = row_lower.get('user_experience_level', 'All levels')
+            verse['topic'] = 'Meditation'
+
         # Only return if we have essential fields
-        if verse.get('chapter') and verse.get('verse') and verse.get('text'):
+        if (verse.get('chapter') and verse.get('verse') and verse.get('text')) or 'meditation_guidance' in row_lower:
             verse['scripture'] = self._infer_scripture(source)
             verse['source'] = source
             
@@ -336,10 +342,11 @@ class UniversalScriptureIngester:
                         return str(val).strip() if isinstance(val, str) else str(val)
             return None
 
-        verse['chapter'] = safe_get(['book', 'mandala', 'kaanda', 'chapter', 'adhyaya'])
+        # Try to get chapter/section/verse with more candidates
+        verse['chapter'] = safe_get(['book', 'mandala', 'kaanda', 'chapter', 'adhyaya', 'theme', 'veda', 'samhita']) or source
         verse['section'] = safe_get(['section', 'sarg', 'sarga', 'chapter', 'adhyaya'])
-        verse['verse'] = safe_get(['shloka', 'verse', 'sukta', 'shloka_number', 'verse_number'])
-        verse['text'] = safe_get(['text', 'translation', 'english', 'meaning', 'content'])
+        verse['verse'] = safe_get(['shloka', 'verse', 'sukta', 'shloka_number', 'verse_number', 'verse_id', 'id', 'text']) or '1'
+        verse['text'] = safe_get(['text', 'translation', 'english', 'meaning', 'content', 'meditation'])
         verse['sanskrit'] = safe_get(['shloka_text', 'sanskrit', 'original', 'devanagari', 'shloka'])
         verse['transliteration'] = safe_get(['transliteration', 'iast', 'romanized', 'transliteraion'])
 
@@ -354,8 +361,8 @@ class UniversalScriptureIngester:
                  # Check if we should null it out to avoid redundancy in reference
                  pass
 
-        # Only return if we have essential fields
-        if verse.get('chapter') and verse.get('verse') and verse.get('text'):
+        # Essential field check - ensure at least some text and an identifier
+        if (verse.get('chapter') or source) and verse.get('text'):
             import uuid
             
             # Standardized Verse Output
@@ -408,6 +415,12 @@ class UniversalScriptureIngester:
             return 'Vedas'
         elif 'temples' in source_lower:
             return 'Hindu Temples'
+        elif 'yoga_sutras' in source_lower:
+            return 'Patanjali Yoga Sutras'
+        elif 'charaka_samhita' in source_lower:
+            return 'Charaka Samhita (Ayurveda)'
+        elif 'meditation' in source_lower:
+            return 'Meditation and Mindfulness'
         else:
             return 'Sanatan Scriptures'
 
@@ -430,6 +443,8 @@ class UniversalScriptureIngester:
             'Wealth': ['wealth', 'money', 'prosperity', 'success'],
             'Love': ['love', 'affection', 'compassion', 'prem', 'sneh'],
             'War': ['war', 'battle', 'fight', 'yuddh', 'yudh'],
+            'Health & Ayurveda': ['health', 'disease', 'medicine', 'ayurveda', 'dosha', 'vata', 'pitta', 'kapha', 'herb', 'cure', 'healing'],
+            'Yoga & Meditation': ['yoga', 'asana', 'meditation', 'breath', 'pranayama', 'dhyana', 'mindfulness', 'concentration'],
         }
 
         for topic, keywords in topics.items():

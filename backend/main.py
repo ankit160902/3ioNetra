@@ -28,6 +28,7 @@ from rag.vector_store import get_vector_store
 
 from llm.service import get_llm_service
 from llm.formatter import get_refiner, get_reformatter
+from services.panchang_service import get_panchang_service
 
 # Setup logging
 logging.basicConfig(
@@ -306,6 +307,14 @@ async def initialize_components_background():
         else:
             logger.info("Companion Engine using templates")
         
+        # Initialize Panchang Service
+        logger.info("Initializing Panchang Service...")
+        panchang_service = get_panchang_service()
+        if panchang_service.available:
+            logger.info("✅ Panchang Service initialized successfully")
+        else:
+            logger.warning("Panchang Service not available")
+        
         # Connect RAG pipeline to Companion Engine for spiritually-informed responses
         if rag_pipeline:
             companion_engine.set_rag_pipeline(rag_pipeline)
@@ -474,6 +483,36 @@ async def generate_embeddings(text: str):
 
     except Exception as e:
         logger.error(f"Error generating embeddings: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# PANCHANG ENDPOINTS
+# ============================================================================
+
+@app.get("/api/panchang/today")
+async def get_today_panchang(lat: float = 28.6139, lon: float = 77.2090, tz: float = 5.5):
+    """
+    Get current Panchang for the given location.
+    """
+    try:
+        from datetime import datetime
+        panchang_service = get_panchang_service()
+        if not panchang_service.available:
+            raise HTTPException(status_code=503, detail="Panchang service unavailable")
+
+        result = panchang_service.get_panchang(datetime.now(), latitude=lat, longitude=lon, timezone_offset=tz)
+        if "error" in result:
+             raise HTTPException(status_code=500, detail=result["error"])
+             
+        # Add special information
+        result["special_info"] = panchang_service.get_special_day_info(result)
+        
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting panchang: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

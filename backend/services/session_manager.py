@@ -160,10 +160,9 @@ def get_session_manager() -> SessionManager:
                 _session_manager = MongoSessionManager(ttl)
                 logger.info("✅ Using MongoDB session storage")
             except Exception as e:
-                logger.error(f"❌ FATAL: MongoDB initialization failed: {e}")
-                # Critical: Do not fallback to memory if DB is explicitly configured.
-                # This prevents silent data loss in production environments.
-                raise e
+                logger.error(f"⚠️ MongoDB initialization failed: {e}")
+                logger.warning("🔄 FALLBACK: Using in-memory session storage. Data will not persist.")
+                _session_manager = InMemorySessionManager(ttl)
         else:
             logger.info("ℹ️ Using in-memory session storage")
             _session_manager = InMemorySessionManager(ttl)

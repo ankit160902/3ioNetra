@@ -30,17 +30,22 @@ def get_mongo_client():
             mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
 )
         
-        _mongo_client = MongoClient(mongo_uri)
-        _db = _mongo_client[settings.DATABASE_NAME
-]
+        _mongo_client = MongoClient(
+            mongo_uri, 
+            serverSelectionTimeoutMS=5000, 
+            connectTimeoutMS=5000
+        )
+        _db = _mongo_client[settings.DATABASE_NAME]
         
-        # Create indexes
-        _db.users.create_index("email", unique=True)
-        _db.tokens.create_index("token", unique=True)
-        _db.tokens.create_index("expires_at", expireAfterSeconds=0)
-        _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
-        
-        logger.info("MongoDB connection established")
+        # Create indexes with error handling to avoid crashes on configuration conflicts
+        try:
+            _db.users.create_index("email", unique=True)
+            _db.tokens.create_index("token", unique=True)
+            _db.tokens.create_index("expires_at", expireAfterSeconds=0)
+            _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
+            logger.info("MongoDB connection established and indexes verified")
+        except Exception as e:
+            logger.warning(f"⚠️ Index creation partially failed: {e}. This usually happens if an index already exists with different options.")
     
     return _db
 

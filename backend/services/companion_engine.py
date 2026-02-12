@@ -5,6 +5,7 @@ from typing import Tuple, Optional, TYPE_CHECKING, Dict
 from models.session import SessionState, ConversationPhase, SignalType
 from models.memory_context import ConversationMemory
 from llm.service import get_llm_service
+from services.panchang_service import get_panchang_service
 
 if TYPE_CHECKING:
     from rag.pipeline import RAGPipeline
@@ -25,6 +26,7 @@ class CompanionEngine:
     def __init__(self, rag_pipeline: Optional["RAGPipeline"] = None) -> None:
         self.llm = get_llm_service()
         self.rag_pipeline = rag_pipeline
+        self.panchang = get_panchang_service()
         self.available = self.llm.available
         logger.info(f"CompanionEngine initialized (LLM available={self.available})")
 
@@ -82,7 +84,7 @@ class CompanionEngine:
                 query=message,
                 context_docs=context_docs,
                 conversation_history=session.conversation_history,
-                user_profile=self._build_user_profile(session.memory),
+                user_profile=self._build_user_profile(session.memory, session),
                 phase=ConversationPhase.CLARIFICATION,
                 memory_context=session.memory,
             )
@@ -174,8 +176,20 @@ class CompanionEngine:
 
         return readiness >= 0.7
 
-    def _build_user_profile(self, memory: ConversationMemory) -> Dict:
+    def _build_user_profile(self, memory: ConversationMemory, session: Optional[SessionState] = None) -> Dict:
         profile = {}
+        
+        # Add current Panchang context if available
+        if self.panchang.available:
+            from datetime import datetime
+            # Use Delhi as default for now, could be improved with user location
+            p_data = self.panchang.get_panchang(datetime.now())
+            if "error" not in p_data:
+                profile["current_panchang"] = {
+                    "tithi": p_data["tithi"],
+                    "nakshatra": p_data["nakshatra"],
+                    "special_day": self.panchang.get_special_day_info(p_data)
+                }
 
         if memory.user_name:
             profile["name"] = memory.user_name
