@@ -415,17 +415,20 @@ class UniversalScriptureIngester:
             return 'Vedas'
         elif 'temples' in source_lower:
             return 'Hindu Temples'
-        elif 'yoga_sutras' in source_lower:
+        elif 'yoga_sutras' in source_lower or 'yoga' in source_lower:
             return 'Patanjali Yoga Sutras'
         elif 'charaka_samhita' in source_lower:
             return 'Charaka Samhita (Ayurveda)'
         elif 'meditation' in source_lower:
             return 'Meditation and Mindfulness'
+        elif 'panchanga' in source_lower or 'panchang' in source_lower:
+            return 'Panchang'
         else:
             return 'Sanatan Scriptures'
 
     def _infer_topic(self, verse: Dict) -> str:
-        """Infer topic from verse content"""
+        """Infer topic from verse content using regex for word boundaries"""
+        import re
         text = ' '.join([str(verse.get(f, '')) for f in ['text', 'meaning', 'sanskrit'] if verse.get(f)]).lower()
 
         topics = {
@@ -448,7 +451,8 @@ class UniversalScriptureIngester:
         }
 
         for topic, keywords in topics.items():
-            if any(keyword in text for keyword in keywords):
+            pattern = r'\b(' + '|'.join(map(re.escape, keywords)) + r')\b'
+            if re.search(pattern, text):
                 return topic
 
         return 'Spiritual Wisdom'
@@ -468,7 +472,10 @@ class UniversalScriptureIngester:
                 verse.get('meaning', ''),
             ]
             combined_text = ' '.join([p for p in text_parts if p])
-            texts.append(combined_text[:1000])  # Limit length
+            
+            # Normalize text: strip whitespace, replace newlines (matches RAGPipeline)
+            clean_text = combined_text.strip().replace("\n", " ")
+            texts.append(clean_text[:1000])  # Limit length
 
         logger.info(f"Generating embeddings for {len(texts)} verses...")
         embeddings = self.embedding_model.encode(texts, convert_to_tensor=False, show_progress_bar=True)
@@ -477,16 +484,18 @@ class UniversalScriptureIngester:
         return embeddings
 
     def save_processed_data(self, verses: List[Dict], embeddings: np.ndarray):
-        """Save processed verses and embeddings"""
+        """Save processed verses and embeddings atomically"""
         output_file = self.processed_data_dir / "processed_data.json"
+        temp_file = self.processed_data_dir / "processed_data.json.tmp"
 
         # Convert embeddings to list for JSON serialization
         for i, verse in enumerate(verses):
             verse['embedding'] = embeddings[i].tolist()
 
-        # Save as JSON
-        with open(output_file, 'w', encoding='utf-8') as f:
+        # Save as JSON to temp file
+        with open(temp_file, 'w', encoding='utf-8') as f:
             json.dump({
+
                 'verses': verses,
                 'metadata': {
                     'total_verses': len(verses),
@@ -495,6 +504,9 @@ class UniversalScriptureIngester:
                     'scriptures': sorted(list(set(v.get('scripture', 'Unknown') for v in verses)))
                 }
             }, f, ensure_ascii=False, indent=2)
+
+        import shutil
+        shutil.move(str(temp_file), str(output_file))
 
         logger.info(f"✓ Saved consolidated processed data to {output_file}")
 

@@ -16,6 +16,31 @@ export interface Citation {
   score: number;
 }
 
+export interface SourceReference {
+  scripture: string;
+  reference: string;
+  context_text: string;
+  relevance_score: number;
+}
+
+export interface Product {
+  name: string;
+  category: string;
+  amount: number;
+  currency: string;
+  description?: string;
+  image_url?: string;
+  product_url?: string;
+}
+
+export interface FlowMetadata {
+  detected_domain: string | null;
+  emotional_state: string | null;
+  topics?: string[];
+  readiness_score: number;
+  guidance_type: string | null;
+}
+
 export interface ConversationalResponse {
   session_id: string;
   phase: 'listening' | 'clarification' | 'answering' | 'synthesis' | 'guidance' | 'closure';
@@ -24,6 +49,9 @@ export interface ConversationalResponse {
   turn_count: number;
   is_complete: boolean;
   citations?: Citation[];
+  sources?: SourceReference[];
+  recommended_products?: Product[];
+  flow_metadata?: FlowMetadata;
 }
 
 export interface SessionState {

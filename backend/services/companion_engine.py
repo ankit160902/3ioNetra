@@ -6,6 +6,9 @@ from models.session import SessionState, ConversationPhase, SignalType
 from models.memory_context import ConversationMemory
 from llm.service import get_llm_service
 from services.panchang_service import get_panchang_service
+from services.intent_agent import get_intent_agent
+from services.memory_service import get_memory_service
+from services.product_service import get_product_service
 
 if TYPE_CHECKING:
     from rag.pipeline import RAGPipeline
@@ -27,11 +30,15 @@ class CompanionEngine:
         self.llm = get_llm_service()
         self.rag_pipeline = rag_pipeline
         self.panchang = get_panchang_service()
+        self.intent_agent = get_intent_agent()
+        self.memory_service = get_memory_service(rag_pipeline)
+        self.product_service = get_product_service()
         self.available = self.llm.available
         logger.info(f"CompanionEngine initialized (LLM available={self.available})")
 
     def set_rag_pipeline(self, rag_pipeline: "RAGPipeline") -> None:
         self.rag_pipeline = rag_pipeline
+        self.memory_service.set_rag_pipeline(rag_pipeline)
         logger.info("RAG pipeline connected to CompanionEngine")
 
     # ------------------------------------------------------------------
@@ -42,14 +49,40 @@ class CompanionEngine:
         self,
         session: SessionState,
         message: str,
-    ) -> Tuple[str, bool]:
+    ) -> Tuple[str, bool, List[Dict], List[str], List[Dict]]:
         """
         Returns:
-            (assistant_text, is_ready_for_wisdom)
+            (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products)
         """
-        self._update_memory(session.memory, session, message)
+        turn_topics = self._update_memory(session.memory, session, message)
 
-        is_ready = self._assess_readiness(session)
+        # 🚀 LLM-based Intent & Context Analysis
+        # We perform this here to get high-fidelity signals for this turn
+        analysis = await self.intent_agent.analyze_intent(message, session.memory.get_memory_summary())
+        
+        # 1. Update session signals from LLM analysis
+        if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
+            session.memory.story.life_area = analysis["life_domain"]
+            session.add_signal(SignalType.LIFE_DOMAIN, analysis["life_domain"], 0.95)
+            
+        if analysis.get("emotion") and analysis["emotion"] != "neutral":
+            session.memory.story.emotional_state = analysis["emotion"]
+            session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
+
+        # 2. Store in Long-Term Memory if it's a significant shared experience
+        # (Using a simple heuristic: long message or high urgency)
+        if len(message) > 100 or analysis.get("urgency") in ["high", "crisis"]:
+            if hasattr(session, "user_id") and session.user_id:
+                # We store in background (implicitly async)
+                import asyncio
+                asyncio.create_task(self.memory_service.store_memory(session.user_id, message))
+
+        # 3. Retrieve relevant long-term memories to enhance the prompt
+        past_memories = []
+        if hasattr(session, "user_id") and session.user_id:
+            past_memories = await self.memory_service.retrieve_relevant_memories(session.user_id, message)
+
+        is_ready = self._assess_readiness(session) or analysis.get("intent") == "SEEKING_GUIDANCE"
 
         # ------------------------------------------------------------------
         # Ready for wisdom → return short acknowledgement only
@@ -58,43 +91,78 @@ class CompanionEngine:
             acknowledgements = [
                 "Thank you for sharing. Let me reflect on this through the lens of Dharma.",
                 "I appreciate your honesty. I'm looking into the scriptures for guidance.",
-                "Your words touch me. Let me find a relevant verse to help guide us.",
+                "I hear you deeply. Please give me a moment to gather wisdom for your situation.",
+                "Namaste. Your words have touched me. I am seeking the right dharmic path for you."
             ]
-            return random.choice(acknowledgements), True
+            import random
+            
+            # Fetch products if product inquiry detected
+            products = []
+            is_product_inquiry = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+            
+            if is_product_inquiry:
+                products = await self.product_service.search_products(message)
+            
+            # Fallback to recommended products only in guidance phase if no specific ones found
+            if not products:
+                products = await self.product_service.get_recommended_products()
+
+            return random.choice(acknowledgements), True, [], turn_topics, products
 
         # ------------------------------------------------------------------
-        # Listening / clarification phase
+        # Not ready → generate empathetic follow-up
         # ------------------------------------------------------------------
-        if self.llm.available:
+        if self.available:
             context_docs = []
 
             if self.rag_pipeline and self.rag_pipeline.available:
                 try:
-                    search_query = self._build_listening_query(message, session.memory)
-                    context_docs = await self.rag_pipeline.search(
-                        query=search_query,
-                        scripture_filter=None,
-                        language="en",
-                        top_k=3,
-                    )
+                    # Skip RAG for panchang queries to avoid irrelevant verses
+                    panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
+                    if any(k in message.lower() for k in panchang_keywords):
+                        logger.info("Skipping RAG for Panchang-related query in listening phase")
+                        context_docs = []
+                    else:
+                        search_query = self._build_listening_query(message, session.memory)
+                        context_docs = await self.rag_pipeline.search(
+                            query=search_query,
+                            scripture_filter=None,
+                            language="en",
+                            top_k=3,
+                        )
                 except Exception as e:
                     logger.warning(f"Listening-phase RAG failed: {e}")
+
+            # Build user profile and inject past memories
+            user_profile = self._build_user_profile(session.memory, session)
+            if past_memories:
+                user_profile["past_memories"] = past_memories
 
             reply = await self.llm.generate_response(
                 query=message,
                 context_docs=context_docs,
                 conversation_history=session.conversation_history,
-                user_profile=self._build_user_profile(session.memory, session),
+                user_profile=user_profile,
                 phase=ConversationPhase.CLARIFICATION,
                 memory_context=session.memory,
             )
 
-            return reply, False
+            # Check for products in listening phase ONLY if explicitly a product inquiry
+            products = []
+            is_product_inquiry = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+
+            if is_product_inquiry:
+                products = await self.product_service.search_products(message)
+
+            return reply, False, context_docs, turn_topics, products
 
         # Fallback (no LLM)
         return (
             "I’m here with you. Could you tell me a little more about what feels most heavy right now?",
             False,
+            [],
+            turn_topics,
+            []
         )
 
     # ------------------------------------------------------------------
@@ -126,12 +194,17 @@ class CompanionEngine:
         ]
         is_direct_question = "?" in last_msg or any(w in last_msg.lower() for w in guidance_keywords)
 
-        if requires_extra_listening:
-             # Even with direct questions, emotional cases need SOME listening
-             min_turns_for_guidance = 3 if is_direct_question else 4
+        if is_direct_question:
+             # Check if it's a substantive question (not just "what?")
+             is_detailed = len(last_msg.split()) > 4
+             
+             if is_detailed and not requires_extra_listening:
+                 logger.info(f"Session {session.session_id}: Direct detailed question detected, bypassing turn count.")
+                 return True
+             
+             min_turns_for_guidance = 3 if requires_extra_listening else 1
         else:
-             # Standard cases: 2 turns is enough if they ask questions
-             min_turns_for_guidance = 1 if is_direct_question else 2
+             min_turns_for_guidance = 4 if requires_extra_listening else 2
         
         # Log the assessment
         logger.info(
@@ -248,51 +321,113 @@ class CompanionEngine:
             
         logger.info(f"Memory reconstruction complete. Story concern: {session.memory.story.primary_concern[:50]}...")
 
-    def _update_memory(
-        self,
-        memory: ConversationMemory,
-        session: SessionState,
-        message: str,
-    ) -> None:
-        text = message.lower().strip()
+    def _update_memory(self, memory: ConversationMemory, session: SessionState, text: str) -> List[str]:
+        """Extract signals and update narrative story"""
+        text = text.lower().strip()
+        
+        # Track topics detected IN THIS TURN specifically
+        turn_topics = []
 
-        if not memory.story.primary_concern and len(message) > 10:
-            memory.story.primary_concern = message[:200]
+        if not memory.story.primary_concern and len(text) > 10:
+            memory.story.primary_concern = text[:200]
 
-        sadness = ["sad", "low", "lonely", "depressed", "tired", "hurt"]
-        anxiety = ["anxious", "worried", "stressed", "overwhelmed"]
-        anger = ["angry", "frustrated", "irritated"]
+        # ------------------------------------------------------------------
+        # RICH SIGNAL DETECTION
+        # ------------------------------------------------------------------
+        
+        # Use regex for strict word boundaries
+        import re
+        def has_word(keywords, text):
+            pattern = r'\b(' + '|'.join(map(re.escape, keywords)) + r')\b'
+            return bool(re.search(pattern, text))
+            
+        # 1. EMOTIONAL STATES (Expanded)
+        emotions = {
+            "Sadness & Grief": ["sad", "low", "lonely", "depressed", "hurt", "grief", "despair", "mourning", "loss", "crying", "tears", "heavy", "hopeless"],
+            "Anxiety & Fear": ["anxious", "anxiety", "worried", "stressed", "overwhelmed", "panic", "fear", "scared", "nervous", "tension", "uneasy", "restless"],
+            "Anger & Frustration": ["angry", "frustrated", "irritated", "furious", "mad", "stupid", "annoying", "rage", "resentment", "hate"],
+            "Confusion & Doubt": ["confused", "lost", "doubt", "uncertain", "directionless", "stuck", "don't know", "unsure", "clarity"],
+            "Gratitude & Peace": ["happy", "grateful", "peace", "calm", "content", "blessed", "thankful", "joy", "serene", "better"],
+        }
+        
+        is_negated = "not " in text or "don't " in text or "dont " in text or "no " in text
 
-        if any(w in text for w in sadness):
-            memory.story.emotional_state = "sadness"
-            session.add_signal(SignalType.EMOTION, "sadness", 0.8)
-        elif any(w in text for w in anxiety):
-            memory.story.emotional_state = "anxiety"
-            session.add_signal(SignalType.EMOTION, "anxiety", 0.8)
-        elif any(w in text for w in anger):
-            memory.story.emotional_state = "anger"
-            session.add_signal(SignalType.EMOTION, "anger", 0.8)
+        for label, keywords in emotions.items():
+            if has_word(keywords, text) and not is_negated:
+                memory.story.emotional_state = label
+                session.add_signal(SignalType.EMOTION, label, 0.85)
+                if label not in turn_topics:
+                    turn_topics.append(label)
+                if label not in memory.story.detected_topics:
+                    memory.story.detected_topics.append(label)
 
-        if any(w in text for w in ["work", "job", "office"]):
-            memory.story.life_area = "work"
-            session.add_signal(SignalType.LIFE_DOMAIN, "work", 0.9)
-        elif any(w in text for w in ["relationship", "partner", "marriage"]):
-            memory.story.life_area = "relationships"
-            session.add_signal(SignalType.LIFE_DOMAIN, "relationships", 0.9)
-        elif any(w in text for w in ["family", "parents", "children"]):
-            memory.story.life_area = "family"
-            session.add_signal(SignalType.LIFE_DOMAIN, "family", 0.9)
+        # 2. LIFE DOMAINS (Drastically Expanded)
+        domains = {
+            "Career & Finance": ["work", "job", "office", "career", "boss", "colleague", "promotion", "salary", "money", "finance", "debt", "business", "startup", "interview", "hiring"],
+            "Relationships": ["relationship", "partner", "marriage", "wife", "husband", "dating", "boyfriend", "girlfriend", "breakup", "divorce", "love", "crush", "ex"],
+            "Family": ["family", "parents", "children", "mother", "father", "son", "daughter", "sister", "brother", "kids", "mom", "dad", "grandparents", "home"],
+            "Physical Health": ["diet", "health", "digestion", "tired", "sleep", "body", "pain", "disease", "symptom", "weight", "exercise", "energy", "fatigue", "sick"],
+            "Ayurveda & Wellness": ["ayurveda", "dosha", "pitta", "kapha", "vata", "herbs", "remedy", "cleanse", "routine", "dinacharya", "oil", "massage"],
+            "Yoga Practice": ["yoga", "asana", "posture", "flexibility", "strength", "surya", "namaskar", "hatha", "vinyasa"],
+            "Meditation & Mind": ["meditation", "focus", "mind", "concentration", "mindfulness", "dhyana", "awareness", "stillness", "thoughts", "distraction", "mental"],
+            "Spiritual Growth": ["dharma", "karma", "god", "soul", "spirit", "enlightenment", "purpose", "meaning", "faith", "prayer", "devotion", "bhakti", "divine", "sacred", "scripture", "gita"],
+            "Panchang & Astrology": ["panchang", "tithi", "nakshatra", "muhurat", "shubh", "calendar", "festival", "vedic astrology", "jyotish"],
+            "Self-Improvement": ["discipline", "growth", "learning", "habits", "productivity", "goals", "confidence", "motivation", "success", "failure", "study"],
+        }
 
-        # Temple and Pilgrimage detection
-        temple_keywords = ["temple", "mandir", "visit", "trip", "pilgrimage", "architecture", "darshan", "puri", "kashi", "tirupati", "badrinath", "kedarnath", "dwarka", "rameswaram"]
-        if any(w in text for w in temple_keywords):
-            memory.story.temple_interest = message[:100]
-            session.add_signal(SignalType.INTENT, "temple_interest", 0.7)
-            # Boost readiness if they are asking about temples
+        found_domain = False
+        for label, keywords in domains.items():
+            if has_word(keywords, text):
+                memory.story.life_area = label
+                session.add_signal(SignalType.LIFE_DOMAIN, label, 0.9)
+                found_domain = True
+                if label not in turn_topics:
+                    turn_topics.append(label)
+                if label not in memory.story.detected_topics:
+                    memory.story.detected_topics.append(label)
+        
+        # Fallback if no specific domain found but text is substantial
+        if not found_domain and len(text.split()) > 5:
+             # Just leave detected domain as is, or set to "General Life" if empty
+             if not memory.story.life_area:
+                 memory.story.life_area = "General Life"
+                 session.add_signal(SignalType.LIFE_DOMAIN, "General Life", 0.5)
+                 if "General Life" not in turn_topics:
+                     turn_topics.append("General Life")
+
+        # 3. SPECIAL INTENTS
+        temple_keywords = ["temple", "mandir", "pilgrimage", "shrine", "darshan", "puri", "kashi", "tirupati", "badrinath", "kedarnath", "dwarka", "rameswaram", "somnath", "visit"]
+        if has_word(temple_keywords, text):
+            memory.story.temple_interest = text[:100]
+            session.add_signal(SignalType.INTENT, "Temple & Pilgrimage", 0.8)
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.35)
+            
+        breathing_keywords = ["breath", "breathing", "pranayama", "inhale", "exhale", "lungs", "air"]
+        if has_word(breathing_keywords, text):
+            session.add_signal(SignalType.INTENT, "Pranayama (Breathwork)", 0.8)
+            # Tag as Yoga Practice if not already set
+            if not found_domain:
+                memory.story.life_area = "Yoga Practice"
+                session.add_signal(SignalType.LIFE_DOMAIN, "Yoga Practice", 0.9)
+
+        # 4. PRODUCT & SERVICE INTENTS
+        # Explicit detection: Look for purchase intent or specific product questions
+        buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "available"]
+        product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal"]
+        
+        is_explicit_product_inquiry = False
+        if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text)):
+            is_explicit_product_inquiry = True
+
+        if is_explicit_product_inquiry:
+            session.add_signal(SignalType.INTENT, "Product Inquiry", 0.9)
+            if "Product Inquiry" not in turn_topics:
+                turn_topics.append("Product Inquiry")
+            # Boost readiness as user is asking for specific items
             memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
 
         # Longer quotes for better recall
-        memory.add_user_quote(session.turn_count, message[:500])
+        memory.add_user_quote(session.turn_count, text[:500])
 
         if memory.story.emotional_state:
             memory.record_emotion(
@@ -300,10 +435,18 @@ class CompanionEngine:
                 memory.story.emotional_state,
                 "moderate",
             )
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.1)
-
-        if len(message) > 100:
             memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.15)
+        
+        # Boost readiness for long messages
+        if len(text) > 100:
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.2)
+        
+        # Boost readiness for direct "how to" or specific questions
+        wellness_query_keywords = ["how do i", "what is", "routine", "technique", "practice", "method", "steps"]
+        if any(w in text for w in wellness_query_keywords) and "?" in text:
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
+
+        return turn_topics
 
 
 # ------------------------------------------------------------------

@@ -48,6 +48,9 @@ class UserStory:
     temple_visits: List[str] = field(default_factory=list)
     purchase_history: List[str] = field(default_factory=list)
     
+    # Topics detected over time
+    detected_topics: List[str] = field(default_factory=list)
+    
     def to_dict(self) -> Dict:
         return {
             "primary_concern": self.primary_concern,
@@ -66,7 +69,8 @@ class UserStory:
             "gotra": self.gotra,
             "nakshatra": self.nakshatra,
             "temple_visits": self.temple_visits,
-            "purchase_history": self.purchase_history
+            "purchase_history": self.purchase_history,
+            "detected_topics": self.detected_topics
         }
     
     @classmethod
@@ -90,7 +94,8 @@ class UserStory:
             gotra=data.get("gotra", ""),
             nakshatra=data.get("nakshatra", ""),
             temple_visits=data.get("temple_visits", []),
-            purchase_history=data.get("purchase_history", [])
+            purchase_history=data.get("purchase_history", []),
+            detected_topics=data.get("detected_topics", [])
         )
 
 

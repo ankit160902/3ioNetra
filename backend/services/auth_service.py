@@ -32,8 +32,9 @@ def get_mongo_client():
         
         _mongo_client = MongoClient(
             mongo_uri, 
-            serverSelectionTimeoutMS=5000, 
-            connectTimeoutMS=5000
+            serverSelectionTimeoutMS=20000, 
+            connectTimeoutMS=20000,
+            socketTimeoutMS=20000
         )
         _db = _mongo_client[settings.DATABASE_NAME]
         

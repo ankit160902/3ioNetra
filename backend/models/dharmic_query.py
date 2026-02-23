@@ -14,6 +14,7 @@ class QueryType(str, Enum):
     LIFE_GUIDANCE = "life_guidance"
     CRISIS_SUPPORT = "crisis_support"
     TEMPLE_GUIDANCE = "temple_guidance"
+    PANCHANG = "panchang"
 
 
 class UserStage(str, Enum):

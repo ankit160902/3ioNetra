@@ -59,6 +59,7 @@ class SessionState:
     Tracks signals, conversation history, and phase transitions.
     """
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: Optional[str] = None
     phase: ConversationPhase = ConversationPhase.LISTENING
     turn_count: int = 0
     signals_collected: Dict[SignalType, Signal] = field(default_factory=dict)
@@ -80,6 +81,7 @@ class SessionState:
     def to_dict(self) -> Dict:
         return {
             "session_id": self.session_id,
+            "user_id": self.user_id,
             "phase": self.phase.value,
             "turn_count": self.turn_count,
             "signals_collected": {st.value: s.to_dict() for st, s in self.signals_collected.items()},
@@ -107,6 +109,7 @@ class SessionState:
 
         session = cls(
             session_id=data["session_id"],
+            user_id=data.get("user_id"),
             phase=ConversationPhase(data["phase"]),
             turn_count=data["turn_count"],
             signals_collected=signals,

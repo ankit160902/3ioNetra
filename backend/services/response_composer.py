@@ -8,6 +8,7 @@ from models.dharmic_query import DharmicQueryObject
 from models.memory_context import ConversationMemory
 from models.session import SessionState, ConversationPhase
 from llm.service import get_llm_service
+from services.panchang_service import get_panchang_service
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ class ResponseComposer:
 
     def __init__(self):
         self.llm = get_llm_service()
+        self.panchang = get_panchang_service()
         self.available = self.llm.available
         logger.info(f"ResponseComposer initialized (LLM available={self.available})")
 
@@ -27,7 +29,9 @@ class ResponseComposer:
         conversation_history: List[Dict],
         reduce_scripture: bool = False,
         phase: Optional[ConversationPhase] = None,
-        original_query: Optional[str] = None
+        original_query: Optional[str] = None,
+        user_id: Optional[str] = None,
+        past_memories: List[str] = None
     ) -> str:
         """
         Compose a response using:
@@ -61,6 +65,10 @@ class ResponseComposer:
 
         # Build user profile from memory
         user_profile = self._build_user_profile(memory)
+
+        # Inject past memories into profile
+        if past_memories:
+            user_profile["past_memories"] = past_memories
 
         if self.llm.available:
             return await self.llm.generate_response(
@@ -118,6 +126,17 @@ class ResponseComposer:
             profile['location'] = story.location
         if story.spiritual_interests:
             profile['spiritual_interests'] = story.spiritual_interests
+
+        # Add current Panchang context for relevant guidance
+        if self.panchang.available:
+            from datetime import datetime
+            p_data = self.panchang.get_panchang(datetime.now())
+            if "error" not in p_data:
+                profile["current_panchang"] = {
+                    "tithi": p_data["tithi"],
+                    "nakshatra": p_data["nakshatra"],
+                    "special_day": self.panchang.get_special_day_info(p_data)
+                }
 
         # 🔥 Added nested spiritual profile fields
         if story.rashi:

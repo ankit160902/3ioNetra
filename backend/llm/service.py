@@ -128,6 +128,13 @@ Anti-Formulaic Rules:
 When you share a Temple (Kshetra) or Verse (Shloka):
 - Do it when it naturally fits the conversation.
 - Present it conversationally: "This reminds me of..." or "There's a verse that speaks to this..."
+- CRITICAL: Wrap the ACTUAL VERSE or SHLOKA text (and its citation) in [VERSE]...[/VERSE] tags.
+- Use the format:
+  Introductory text...
+  [VERSE]
+  "Verse text here" — Citation (Reference)
+  [/VERSE]
+  Explanation and actionable steps...
 - Keep explanations brief and heartfelt.
 - ALWAYS connect it to actionable steps they can take.
 
@@ -199,6 +206,10 @@ FINAL RULE: Respond in plain text ONLY. Do NOT use markdown symbols like asteris
         # Spiritual seeking / Struggle / Happiness signals
         if any(word in query_lower for word in ["peace", "purpose", "meaning", "dharma", "karma", "meditation", "sad", "sadness", "struggle", "lost", "confused", "happy", "happiness", "joy"]):
             context.spiritual_seeking = True
+
+        # Panchang signals
+        if any(word in query_lower for word in ["panchang", "tithi", "nakshatra", "astrology", "calendar", "today's day", "festivals", "shubh muhurat"]):
+            context.spiritual_seeking = True # Treat as spiritual seeking for phase transition
         
         # Analyze conversation history
         if conversation_history:
@@ -312,6 +323,19 @@ FINAL RULE: Respond in plain text ONLY. Do NOT use markdown symbols like asteris
                 has_data = True
             if user_profile.get('temple_visits'):
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
+                has_data = True
+            
+            # 🗓️ Current Panchang Context
+            if user_profile.get('current_panchang'):
+                p = user_profile.get('current_panchang')
+                profile_parts.append(f"   • CURRENT PANCHANG (Today): Tithi: {p.get('tithi')}, Nakshatra: {p.get('nakshatra')}, Info: {p.get('special_day')}")
+                has_data = True
+            
+            # 🧠 Semantic Long-Term Memories
+            if user_profile.get('past_memories'):
+                profile_parts.append("\n   RELEVANT PAST CONTEXT (from your history):")
+                for i, mem in enumerate(user_profile.get('past_memories'), 1):
+                    profile_parts.append(f"   {i}. \"{mem}\"")
                 has_data = True
             
             if has_data:
@@ -526,7 +550,11 @@ Your priority is to BE WITH the user, not to gather data.
 - Frame it conversationally: "You know, there's a beautiful teaching that speaks to this..."
 - Don't wait for perfect information. Real friends share insights when they arise.
 
-5. REMEMBER:
+6. PANCHANG DATA:
+- If the user asks about today's panchang, tithi, or nakshatra, use the "CURRENT PANCHANG" data provided in their profile above.
+- Respond directly with the details: "Today is {tithi} with {nakshatra} nakshatra."
+
+7. REMEMBER:
 - You're having a conversation, not conducting an assessment
 - Presence > Questions
 - Acknowledgment > Probing
@@ -570,9 +598,15 @@ Now share ACTIONABLE wisdom that helps them move forward, like a friend offering
 - Then briefly mention spiritual support (verse/temple) as an anchor
 
 4. HOW TO SHARE WISDOM:
-- VERSE: Citation, brief meaning, and HOW to apply it (under 80 words total)
-- TEMPLE: Name, significance, and why visiting might help their specific situation
-- PRACTICAL: Specific actions, boundaries, conversations they should have
+- VERSE: Citation and brief intro, then the ACTUAL VERSE wrapped in [VERSE]...[/VERSE] tags, then the meaning and HOW to apply it.
+- FORMAT:
+  Introductory sentence...
+  [VERSE]
+  "Verse text in Sanskrit/Hindi/English" — Source reference
+  [/VERSE]
+  Practical application...
+- TEMPLE: Name, significance, and why visiting might help their specific situation.
+- PRACTICAL: Specific actions, boundaries, conversations they should have.
 
 5. CRITICAL - END WITH PRESENCE, NOT QUESTIONS:
 - After sharing wisdom, just BE there
@@ -590,7 +624,10 @@ Now share ACTIONABLE wisdom that helps them move forward, like a friend offering
 ✗ "Perhaps reflecting on your situation..." (vague)
 ✗ "I'm reminded of the Kalighat temple..." (without practical connection)
 
-7. LENGTH:
+8. PANCHANG & ASTROLOGY:
+- Use the provided "CURRENT PANCHANG" if they ask about the day's significance.
+
+9. LENGTH:
 - 80-120 words when giving actionable guidance
 - Include both PRACTICAL steps and SPIRITUAL wisdom
 - If they need more, they'll ask

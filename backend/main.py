@@ -22,8 +22,9 @@ from services.safety_validator import get_safety_validator
 from services.response_composer import get_response_composer
 from services.companion_engine import get_companion_engine
 from services.auth_service import get_auth_service, get_conversation_storage
+from models.dharmic_query import QueryType
 
-from rag.pipeline import RAGPipeline
+# Cleaned up imports
 from rag.vector_store import get_vector_store
 
 from llm.service import get_llm_service
@@ -124,6 +125,23 @@ class ConversationalQuery(BaseModel):
     user_profile: Optional[UserProfileContext] = None  # Pre-populated from auth
 
 
+class SourceReference(BaseModel):
+    """Individual source reference with confidence scoring"""
+    scripture: str  # e.g. "Bhagavad Gita", "Charaka Samhita"
+    reference: str  # e.g. "Chapter 2, Verse 47"
+    context_text: str  # Relevant snippet from the source
+    relevance_score: float  # 0.0 - 1.0 cosine similarity
+
+
+class FlowMetadata(BaseModel):
+    """Conversation analytics for flow monitoring"""
+    detected_domain: Optional[str] = None  # e.g. "wellness", "work", "yoga"
+    emotional_state: Optional[str] = None
+    topics: List[str] = []  # Added topics list
+    readiness_score: float = 0.0
+    guidance_type: Optional[str] = None  # e.g. "comfort", "clarity", "guidance"
+
+
 class ConversationalResponse(BaseModel):
     """Response from conversational endpoint"""
     session_id: str
@@ -133,6 +151,9 @@ class ConversationalResponse(BaseModel):
     turn_count: int
     is_complete: bool  # True when in answering phase
     citations: Optional[List[dict]] = None
+    sources: Optional[List[SourceReference]] = None  # Source transparency
+    recommended_products: Optional[List[dict]] = None
+    flow_metadata: Optional[FlowMetadata] = None  # Conversation analytics
 
 
 # ============================================================================
@@ -228,7 +249,11 @@ async def initialize_components_background():
         if settings.DATABASE_PASSWORD:
             mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
         
-        client = MongoClient(mongo_uri)
+        client = MongoClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=20000,
+            connectTimeoutMS=20000
+        )
         db = client[settings.DATABASE_NAME]
         
         try:
@@ -315,6 +340,14 @@ async def initialize_components_background():
         else:
             logger.warning("Panchang Service not available")
         
+        # Initialize Memory Service & Intent Agent
+        from services.memory_service import get_memory_service
+        from services.intent_agent import get_intent_agent
+        
+        memory_service = get_memory_service(rag_pipeline)
+        intent_agent = get_intent_agent()
+        logger.info("✅ Long-Term Memory Service & Intent Agent initialized")
+
         # Connect RAG pipeline to Companion Engine for spiritually-informed responses
         if rag_pipeline:
             companion_engine.set_rag_pipeline(rag_pipeline)
@@ -679,6 +712,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             if user.get('temple_visits') and len(user['temple_visits']) > 0:
                 session.add_signal(SignalType.LIFE_DOMAIN, "Pilgrimage History", 0.7)
             
+            # Set user_id for long-term memory tracking
+            session.user_id = user['id']
+            
             # 🔥 PERSISTENCE: Load global conversation history and deep memory if this is a new session
             if session.turn_count == 0:
                 try:
@@ -764,9 +800,10 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 
         # Let the companion engine process the message
         # It will: analyze, build memory, and decide if ready for wisdom
-        companion_response, is_ready_for_wisdom = await companion_engine.process_message(
+        result = await companion_engine.process_message(
             session, query.message
         )
+        companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products = result
 
         logger.info(f"Session {session.session_id}: turn={session.turn_count}, memory_readiness={session.memory.readiness_for_wisdom:.2f}, ready={is_ready_for_wisdom}")
 
@@ -780,15 +817,26 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             search_query = dharmic_query.build_search_query()
 
             # Retrieve relevant verses
-            retrieved_docs = await rag_pipeline.search(
-                query=search_query,
-                scripture_filter=None,
-                language=query.language,
-                top_k=5
-            )
+            if dharmic_query.query_type == QueryType.PANCHANG:
+                logger.info(f"Session {session.session_id}: Skipping scripture RAG for Panchang query")
+                retrieved_docs = []
+            else:
+                retrieved_docs = await rag_pipeline.search(
+                    query=search_query,
+                    scripture_filter=dharmic_query.allowed_scriptures,
+                    language=query.language,
+                    top_k=5
+                )
 
             # Check if we should reduce scripture density
             reduce_scripture = safety_validator.should_reduce_scripture_density(session)
+
+            # Retrieve past memories for Guidance phase too
+            from services.memory_service import get_memory_service
+            memory_service = get_memory_service()
+            past_memories = []
+            if session.user_id:
+                past_memories = await memory_service.retrieve_relevant_memories(session.user_id, query.message)
 
             response_text = await response_composer.compose_with_memory(
                 dharmic_query=dharmic_query,
@@ -797,7 +845,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 conversation_history=session.conversation_history,
                 reduce_scripture=reduce_scripture,
                 phase=ConversationPhase.GUIDANCE,
-                original_query=query.message
+                original_query=query.message,
+                user_id=session.user_id,
+                past_memories=past_memories
             )
 
             # Validate response
@@ -859,6 +909,37 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 for doc in retrieved_docs[:2]
             ]
 
+            # Build source references with full transparency
+            sources = [
+                SourceReference(
+                    scripture=doc.get('scripture', 'Unknown'),
+                    reference=doc.get('reference', ''),
+                    context_text=doc.get('text', '')[:300],
+                    relevance_score=round(doc.get('score', 0), 4)
+                )
+                for doc in retrieved_docs
+                if doc.get('score', 0) > 0.1  # Only include meaningfully relevant sources
+            ]
+
+            # Append Generative AI Source
+            sources.append(
+                SourceReference(
+                    scripture="Gemini AI (Google)",
+                    reference="Model: gemini-2.0-flash",
+                    context_text="Generated response synthesizing conversation history, emotional context, and retrieved wisdom.",
+                    relevance_score=1.00
+                )
+            )
+
+            # Build flow metadata
+            flow_meta = FlowMetadata(
+                detected_domain=session.memory.story.life_area,
+                emotional_state=session.memory.story.emotional_state,
+                topics=turn_topics,
+                readiness_score=round(session.memory.readiness_for_wisdom, 2),
+                guidance_type=dharmic_query.guidance_type if hasattr(dharmic_query, 'guidance_type') else None
+            )
+
             return ConversationalResponse(
                 session_id=session.session_id,
                 phase=ConversationPhaseEnum.guidance,
@@ -866,7 +947,10 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 signals_collected=session.get_signals_summary(),
                 turn_count=session.turn_count,
                 is_complete=True,
-                citations=citations
+                citations=citations,
+                sources=sources,
+                recommended_products=recommended_products,
+                flow_metadata=flow_meta
             )
 
         else:
@@ -892,13 +976,46 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 except Exception as e:
                     logger.error(f"Failed to auto-save conversation: {e}")
 
+            # Build flow metadata for listening phase
+            flow_meta = FlowMetadata(
+                detected_domain=session.memory.story.life_area,
+                emotional_state=session.memory.story.emotional_state,
+                topics=turn_topics,
+                readiness_score=round(session.memory.readiness_for_wisdom, 2),
+            )
+            
+            # Construct sources for listening phase (Context Docs + Gemini)
+            listening_sources = [
+                SourceReference(
+                    scripture=doc.get('scripture', 'Unknown'),
+                    reference=doc.get('reference', ''),
+                    context_text=doc.get('text', '')[:300],
+                    relevance_score=round(doc.get('score', 0), 4)
+                )
+                for doc in context_docs_used
+                if doc.get('score', 0) > 0.1
+            ]
+            
+            # Add Gemini as the primary generator
+            listening_sources.append(
+                SourceReference(
+                    scripture="Gemini AI (Google)",
+                    reference="Model: gemini-2.0-flash",
+                    context_text="Empathetic response generated based on your shared thoughts and feelings.",
+                    relevance_score=1.00
+                )
+            )
+
             return ConversationalResponse(
                 session_id=session.session_id,
                 phase=ConversationPhaseEnum.listening,
                 response=companion_response,
                 signals_collected=session.get_signals_summary(),
                 turn_count=session.turn_count,
-                is_complete=False
+                is_complete=False,
+                flow_metadata=flow_meta,
+                sources=listening_sources,
+                recommended_products=recommended_products
             )
 
     except HTTPException:
@@ -973,6 +1090,50 @@ async def delete_session(session_id: str):
     except Exception as e:
         logger.error(f"Error deleting session: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# TEXT-TO-SPEECH ENDPOINT
+# ============================================================================
+
+class TTSRequest(BaseModel):
+    """Request body for TTS synthesis"""
+    text: str
+    lang: str = "hi"  # Default to Hindi for verse reading
+
+
+@app.post("/api/tts")
+async def text_to_speech(request: TTSRequest):
+    """
+    Convert text to speech audio (MP3).
+    Uses gTTS with Indian Hindi female voice for authentic Sanskrit/Hindi reading.
+    """
+    from services.tts_service import get_tts_service
+
+    tts = get_tts_service()
+
+    if not tts.available:
+        raise HTTPException(status_code=503, detail="TTS service unavailable")
+
+    if not request.text or not request.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    # Limit text length to prevent abuse
+    text = request.text[:5000]
+
+    audio_buffer = tts.synthesize(text, lang=request.lang)
+
+    if audio_buffer is None:
+        raise HTTPException(status_code=500, detail="TTS synthesis failed")
+
+    return StreamingResponse(
+        audio_buffer,
+        media_type="audio/mpeg",
+        headers={
+            "Content-Disposition": "inline; filename=tts_output.mp3",
+            "Cache-Control": "public, max-age=3600",
+        }
+    )
 
 
 # ============================================================================

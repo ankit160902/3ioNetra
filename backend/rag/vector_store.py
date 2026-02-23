@@ -1,3 +1,4 @@
+
 """
 Minimal vector store shim.
 
