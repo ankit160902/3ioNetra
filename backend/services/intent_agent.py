@@ -23,9 +23,12 @@ class IntentAgent:
     1. "intent": One of [GREETING, SEEKING_GUIDANCE, EXPRESSING_EMOTION, ASKING_INFO, ASKING_PANCHANG, PRODUCT_SEARCH, CLOSURE, OTHER]
     2. "emotion": The primary emotion detected (e.g., sadness, anxiety, joy, neutral, etc.)
     3. "life_domain": The relevant life area (e.g., career, family, health, relationships, spiritual, unknown)
-    4. "entities": A dictionary of extracted entities like {{"name": "...", "deity": "...", "location": "..."}}
+    4. "entities": A dictionary of extracted entities like {{"name": "...", "deity": "...", "location": "...", "ritual": "Satyanarayan Puja", "item": "puja thali"}}. Extract specific nouns related to spiritual practices.
     5. "urgency": One of [low, normal, high, crisis]
-    6. "summary": A very brief 1-sentence summary of what the user is actually asking or saying.
+    6. "summary": A very brief 1-sentence summary of what the user is actually asking or saying. Use the context to resolve pronouns like "it", "this", or "same".
+    7. "needs_direct_answer": boolean - True if the user asked a specific factual or "how-to" question that requires a direct answer rather than just empathy.
+    8. "recommend_products": boolean - True if the user explicitly asks for a product/service, where to buy something, or if a specific spiritual tool or service (like a mala, astrology consultation, specific puja, or incense) is a practical solution to their query.
+    9. "product_search_keywords": List of strings - If recommend_products is true, identify 3-4 precise keywords for the product database. CRITICAL: Resolve references using context. If the user asks for "essentials for same" and the context is "Satyanarayan Puja", the keywords MUST include "Satyanarayan" and specific puja items.
 
     Respond ONLY with the JSON object.
     """
@@ -43,7 +46,7 @@ class IntentAgent:
         
         try:
             # We use a lower temperature for classification tasks
-            response_text = await self.llm.client.models.generate_content(
+            response_text = self.llm.client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=prompt,
                 config={
@@ -58,7 +61,7 @@ class IntentAgent:
                 raw_text = raw_text.replace("```json", "", 1).replace("```", "", 1).strip()
             
             data = json.loads(raw_text)
-            logger.info(f"LLM Intent Analysis: {data['intent']} | {data['emotion']}")
+            logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
             return data
             
         except Exception as e:
@@ -76,7 +79,7 @@ class IntentAgent:
             intent = "SEEKING_GUIDANCE"
         elif any(w in message_lower for w in ["panchang", "tithi", "nakshatra"]):
             intent = "ASKING_PANCHANG"
-        elif any(w in message_lower for w in ["bye", "thanks", "thank you", "ok"]):
+        elif any(w in message_lower for w in ["bye", "thanks", "thank you", "ok", "no", "nothing"]):
             intent = "CLOSURE"
 
         return {
@@ -85,7 +88,10 @@ class IntentAgent:
             "life_domain": "unknown",
             "entities": {},
             "urgency": "normal",
-            "summary": message[:100]
+            "summary": message[:100],
+            "needs_direct_answer": "?" in message or any(w in message_lower for w in ["how", "what", "where", "why"]),
+            "recommend_products": any(w in message_lower for w in ["buy", "price", "shop", "product", "astro", "consult", "astrologer"]),
+            "product_search_keywords": []
         }
 
 _intent_agent = None

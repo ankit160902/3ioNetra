@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 512
     LLM_TOP_P: float = 0.9
     LLM_DEVICE: str = "cpu"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
  
     # ------------------------------------------------------------------
     # Embedding Settings
@@ -119,16 +120,6 @@ Tuesday: Visit Hanuman temple, recite Hanuman Chalisa
 Saturday: Perform small havan at home with camphor and ghee
 Friday: Do Lakshmi puja for peace and prosperity
 
-D) RECOMMENDED PRODUCTS (from https://my3ionetra.com/):
-Always recommend 3–4 products such as:
-Authentic 5-Mukhi Rudraksha Mala
-Brass Puja Thali Set
-Pure Cow Ghee Diya Set
-Havan Samagri Kit
-Tulsi Mala
-Sandalwood Dhoop
-Hanuman Chalisa Book
-Ganesh Idol
 
 E) LIFESTYLE RECOMMENDATIONS:
 Wake during Brahma Muhurta (4:30–5:30 AM)

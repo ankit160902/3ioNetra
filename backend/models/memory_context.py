@@ -232,12 +232,16 @@ class ConversationMemory:
             parts.append(f"They have purchased spiritual items like: {', '.join(self.story.purchase_history)}")
 
         if self.user_quotes:
-            recent_quote = self.user_quotes[-1]["quote"]
-            # Only add if significant
-            if len(recent_quote) > 20:
-                parts.append(f"They recently mentioned: \"{recent_quote}\"")
+            # Provide up to 3 recent significant quotes *before* the current one
+            # (Assuming the current one was just added as the last item)
+            past_quotes = [q["quote"] for q in self.user_quotes[-4:-1] if len(q["quote"]) > 10]
+            if past_quotes:
+                parts.append(f"Earlier in this conversation they mentioned: {'; '.join(past_quotes)}")
+            
+            # If there's only one quote (current turn), don't add it as "previously mentioned"
+            # The LLM gets the current message separately anyway.
 
-        return ". ".join(parts) if parts else ""
+        return ". ".join(parts) if parts else "This is the start of the conversation."
 
     def get_user_context_string(self) -> str:
         """Get a string describing the user for personalization"""

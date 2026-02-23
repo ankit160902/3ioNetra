@@ -21,12 +21,31 @@ class LongTermMemoryService:
 
     async def store_memory(self, user_id: str, text: str):
         """Summarize and store a new anchor memory for the user"""
+        if self.db is None:
+            logger.warning("Long-term memory storage skipped: Database not connected")
+            return
+
         if not self.rag_pipeline:
             logger.warning("RAG pipeline not connected to MemoryService")
             return
 
         try:
-            # Generate embedding for the memory snippet
+            # Check for existing memory with same text to avoid redundancy
+            user_conv = self.db.conversations.find_one(
+                {"user_id": user_id, "vectorized_memory.text": text},
+                {"vectorized_memory.$": 1}
+            )
+            
+            if user_conv:
+                # Update timestamp for existing memory
+                self.db.conversations.update_one(
+                    {"user_id": user_id, "vectorized_memory.text": text},
+                    {"$set": {"vectorized_memory.$.created_at": datetime.utcnow().isoformat()}}
+                )
+                logger.info(f"Refreshed timestamp for existing memory anchor")
+                return
+
+            # Generate embedding for the new memory snippet
             embedding = await self.rag_pipeline.generate_embeddings(text)
             
             memory_doc = {
@@ -35,18 +54,21 @@ class LongTermMemoryService:
                 "created_at": datetime.utcnow().isoformat()
             }
 
-            # Append to user's vectorized_memory in MongoDB
+            # Append to user's vectorized_memory
             self.db.conversations.update_one(
                 {"user_id": user_id},
                 {"$push": {"vectorized_memory": memory_doc}},
                 upsert=True
             )
-            logger.info(f"Stored long-term memory for user {user_id}")
+            logger.info(f"Stored new long-term semantic memory for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to store long-term memory: {e}")
 
     async def retrieve_relevant_memories(self, user_id: str, query: str, top_k: int = 3) -> List[str]:
         """Retrieve semantically similar past memories"""
+        if self.db is None:
+            return []
+
         if not self.rag_pipeline:
             return []
 
@@ -68,13 +90,16 @@ class LongTermMemoryService:
             for mem in memories:
                 mem_vec = np.array(mem["embedding"])
                 similarity = np.dot(query_vec, mem_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(mem_vec))
-                results.append((mem["text"], similarity))
+                
+                # Format memory with date
+                date_str = mem.get("created_at", "").split("T")[0]
+                results.append((f"[{date_str}]: {mem['text']}", similarity))
 
             # Sort by similarity
             results.sort(key=lambda x: x[1], reverse=True)
             
             # Return top_k
-            return [text for text, score in results[:top_k] if score > 0.6] # Threshold 0.6
+            return [text for text, score in results[:top_k] if score > 0.55] # Slightly lower threshold for broader recall
             
         except Exception as e:
             logger.error(f"Failed to retrieve relevant memories: {e}")

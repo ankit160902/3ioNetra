@@ -35,7 +35,7 @@ def get_gemini_client():
 class ResponseFormatter:
     def __init__(self):
         self.client = get_gemini_client()
-        self.model = self.client.models.get("gemini-2.0-flash")
+        self.model = self.client.models.get(settings.GEMINI_MODEL)
         self.available = True
         logger.info("ResponseFormatter ready")
 
@@ -136,7 +136,7 @@ Do not repeat verses verbatim unless necessary.
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=settings.GEMINI_MODEL,
                 contents=prompt,
             )
             return response.text.strip()
@@ -163,7 +163,7 @@ class QueryRefiner:
 
             self.client = genai.Client(api_key=api_key)
             self.model = self.client.models.get(
-                model="gemini-2.0-flash"
+                model=settings.GEMINI_MODEL
             )
             self.available = True
             logger.info("✅ QueryRefiner ready with Gemini")
@@ -188,7 +188,7 @@ Return only 3–6 keyword phrase.
 
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=settings.GEMINI_MODEL,
                 contents=prompt,
             )
             return response.text.strip()

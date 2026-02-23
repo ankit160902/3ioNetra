@@ -241,30 +241,21 @@ async def initialize_components_background():
     """Background task to initialize heavy components"""
     global rag_pipeline
     
-    # Fix MongoDB index issue (run once to clean up)
+    # Use resilient MongoDB client initialization
+    from services.auth_service import get_mongo_client
     try:
-        from pymongo import MongoClient
-        mongo_uri = settings.MONGODB_URI
-
-        if settings.DATABASE_PASSWORD:
-            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
-        
-        client = MongoClient(
-            mongo_uri,
-            serverSelectionTimeoutMS=20000,
-            connectTimeoutMS=20000
-        )
-        db = client[settings.DATABASE_NAME]
-        
-        try:
-            db.conversations.drop_index("conversation_id_1")
-            logger.info("✅ Dropped old conversation_id_1 index")
-        except:
-            logger.info("conversation_id_1 index doesn't exist (already cleaned)")
-        
-        client.close()
+        db = get_mongo_client()
+        if db is not None:
+             # Dropping old index if necessary, but doing it through the resilient client
+             try:
+                 db.conversations.drop_index("conversation_id_1")
+                 logger.info("✅ Dropped old conversation_id_1 index")
+             except:
+                 pass
+        else:
+            logger.warning("🕒 MongoDB not available on startup, will retry in background later.")
     except Exception as e:
-        logger.warning(f"Could not drop index: {e}")
+        logger.warning(f"Secondary MongoDB check failed: {e}")
 
     try:
         # Initialize RAG Pipeline
@@ -803,7 +794,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         result = await companion_engine.process_message(
             session, query.message
         )
-        companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products = result
+        companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase = result
 
         logger.info(f"Session {session.session_id}: turn={session.turn_count}, memory_readiness={session.memory.readiness_for_wisdom:.2f}, ready={is_ready_for_wisdom}")
 
@@ -925,7 +916,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             sources.append(
                 SourceReference(
                     scripture="Gemini AI (Google)",
-                    reference="Model: gemini-2.0-flash",
+                    reference=f"Model: {settings.GEMINI_MODEL}",
                     context_text="Generated response synthesizing conversation history, emotional context, and retrieved wisdom.",
                     relevance_score=1.00
                 )
@@ -949,7 +940,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                 is_complete=True,
                 citations=citations,
                 sources=sources,
-                recommended_products=recommended_products,
+                recommended_products=recommended_products if recommended_products else None,
                 flow_metadata=flow_meta
             )
 
@@ -1000,22 +991,28 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             listening_sources.append(
                 SourceReference(
                     scripture="Gemini AI (Google)",
-                    reference="Model: gemini-2.0-flash",
+                    reference=f"Model: {settings.GEMINI_MODEL}",
                     context_text="Empathetic response generated based on your shared thoughts and feelings.",
                     relevance_score=1.00
                 )
             )
 
+            # Determine current phase enum for return
+            res_phase = ConversationPhaseEnum.listening
+            if active_phase == ConversationPhase.CLOSURE:
+                res_phase = ConversationPhaseEnum.closure
+                session.phase = ConversationPhase.CLOSURE
+            
             return ConversationalResponse(
                 session_id=session.session_id,
-                phase=ConversationPhaseEnum.listening,
+                phase=res_phase,
                 response=companion_response,
                 signals_collected=session.get_signals_summary(),
                 turn_count=session.turn_count,
                 is_complete=False,
                 flow_metadata=flow_meta,
                 sources=listening_sources,
-                recommended_products=recommended_products
+                recommended_products=recommended_products if recommended_products else None
             )
 
     except HTTPException:

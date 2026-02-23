@@ -21,18 +21,26 @@ class ProductService:
         return products
 
     async def search_products(self, query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search products by name or category using simple text search"""
-        # Clean and split the query into tokens
+        """Search products by name or category with precision"""
         import re
+        # Tokenize and clean
         tokens = re.findall(r'\w+', query_text.lower())
-        # Filter out common short words
-        stop_words = {'i', 'want', 'to', 'buy', 'a', 'the', 'is', 'for', 'in', 'of', 'and', 'my'}
-        keywords = [t for t in tokens if t not in stop_words and len(t) > 2]
+        stop_words = {'i', 'want', 'to', 'buy', 'a', 'the', 'is', 'for', 'in', 'of', 'and', 'my', 'with', 'give', 'me', 'some', 'any', 'essentials', 'requirements', 'needed', 'please', 'take', 'help', 'from', 'book'}
+        # Use a list to maintain order but deduplicate
+        seen = set()
+        keywords = []
+        for t in tokens:
+            if t not in stop_words and len(t) > 2 and t not in seen:
+                keywords.append(t)
+                seen.add(t)
         
         if not keywords:
             return []
 
-        # Build regex that matches any of the keywords
+        # Strategy:
+        # 1. Broad OR search across name, category, and description
+        # 2. Ranking: We'll fetch a larger set and rank by term match density and variety
+        
         regex_pattern = "|".join(keywords)
         
         query = {
@@ -43,12 +51,58 @@ class ProductService:
                 {"description": {"$regex": regex_pattern, "$options": "i"}}
             ]
         }
-        cursor = self.collection.find(query).limit(limit)
-        products = []
+        
+        # Increase limit to 50 to ensure we find specific items in a large catalog
+        cursor = self.collection.find(query).limit(50) 
+        raw_products = []
         for doc in cursor:
             doc["_id"] = str(doc["_id"])
-            products.append(doc)
-        return products
+            raw_products.append(doc)
+            
+        # Re-rank based on keyword match density and multi-term boosting
+        def calculate_score(product):
+            score = 0
+            matched_keywords = 0
+            name_lower = product.get("name", "").lower()
+            cat_lower = product.get("category", "").lower()
+            desc_lower = product.get("description", "").lower()
+            
+            for kw in keywords:
+                has_match = False
+                if kw in name_lower:
+                    score += 15 # Even higher weight for name
+                    has_match = True
+                if kw in cat_lower:
+                    score += 5  
+                    has_match = True
+                if kw in desc_lower:
+                    score += 1  
+                    has_match = True
+                
+                if has_match:
+                    matched_keywords += 1
+
+            # Multi-term boost: significantly reward products that match more of the search terms
+            # This ensures "Rudraksha Mala" ranks higher than a generic "Mala" when searching for both.
+            if matched_keywords > 1:
+                score *= (1 + matched_keywords) 
+
+            # Category Boosts
+            # 1. Physical products boost
+            physical_categories = ["Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home"]
+            if product.get("category") in physical_categories:
+                score += 15
+
+            # 2. Spiritual Services and Astrology boost
+            service_categories = ["ASTROLOGY", "Astro List", "Puja", "Seva", "Ank Shastra"]
+            if product.get("category") in service_categories:
+                score += 20 
+
+            return score
+
+        # Sort by score descending
+        sorted_products = sorted(raw_products, key=calculate_score, reverse=True)
+        return sorted_products[:limit]
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
         """Get recommended products, optionally filtered by category"""

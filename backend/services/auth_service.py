@@ -19,36 +19,54 @@ _db = None
 
 
 def get_mongo_client():
-    """Get or create MongoDB client"""
+    """Get or create MongoDB client (Resilient Version)"""
     global _mongo_client, _db
-    if _mongo_client is None:
+    
+    if _mongo_client is not None:
+        return _db
+
+    try:
         # Construct MongoDB URI with authentication
         mongo_uri = settings.MONGODB_URI
+        if not mongo_uri:
+            logger.warning("MONGODB_URI not found in settings")
+            return None
 
         if settings.DATABASE_PASSWORD:
-            # Replace password placeholder if exists
-            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD
-)
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
         
+        # Increase connection robustness for slow DNS environments
         _mongo_client = MongoClient(
             mongo_uri, 
-            serverSelectionTimeoutMS=20000, 
-            connectTimeoutMS=20000,
-            socketTimeoutMS=20000
+            serverSelectionTimeoutMS=10000, # Reduced but more frequent retries
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
+            retryWrites=True
         )
+        
+        # Access database
         _db = _mongo_client[settings.DATABASE_NAME]
         
-        # Create indexes with error handling to avoid crashes on configuration conflicts
+        # Test connection with a simple command to catch DNS issues early
+        _mongo_client.admin.command('ping')
+        
+        # Create indexes with error handling
         try:
             _db.users.create_index("email", unique=True)
             _db.tokens.create_index("token", unique=True)
             _db.tokens.create_index("expires_at", expireAfterSeconds=0)
             _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
-            logger.info("MongoDB connection established and indexes verified")
+            logger.info("✅ MongoDB connection established and indexes verified")
         except Exception as e:
-            logger.warning(f"⚠️ Index creation partially failed: {e}. This usually happens if an index already exists with different options.")
-    
-    return _db
+            logger.warning(f"⚠️ Index creation partially failed: {e}")
+            
+        return _db
+
+    except Exception as e:
+        logger.error(f"❌ Critical MongoDB connection failure: {e}")
+        _mongo_client = None
+        _db = None
+        return None
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -125,6 +143,10 @@ class AuthService:
         purchase_history: list = None
     ) -> Optional[Dict[str, Any]]:
         """Register a new user with nested schema support"""
+        if self.db is None: 
+            logger.error("AuthService: Database not connected")
+            return None
+        
         email_lower = email.lower()
 
         if self.db.users.find_one({"email": email_lower}):
@@ -173,6 +195,7 @@ class AuthService:
 
     def login_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """Login an existing user"""
+        if self.db is None: return None
         email_lower = email.lower()
         user = self.db.users.find_one({"email": email_lower})
         if not user or not _verify_password(password, user["password_hash"], user["password_salt"]):
@@ -186,6 +209,7 @@ class AuthService:
 
     def _create_token(self, user_id: str) -> str:
         """Create and store a new token for user"""
+        if self.db is None: return ""
         token = _generate_token()
         token_doc = {
             "token": token,
@@ -198,6 +222,7 @@ class AuthService:
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify token and return flattened user info"""
+        if self.db is None: return None
         token_doc = self.db.tokens.find_one({"token": token})
         if not token_doc or datetime.utcnow() > token_doc["expires_at"]:
             return None
@@ -240,6 +265,7 @@ class AuthService:
 
     def logout_user(self, token: str) -> bool:
         """Logout user by invalidating token"""
+        if self.db is None: return False
         result = self.db.tokens.delete_one({"token": token})
         return result.deleted_count > 0
 
@@ -258,6 +284,7 @@ class ConversationStorage:
         memory: Optional[Dict] = None
     ) -> str:
         """Add unique messages and persistent memory to user's global history"""
+        if self.db is None: return ""
         
         # Find user's conversation document
         user_conversation = self.db.conversations.find_one({"user_id": user_id})
@@ -325,6 +352,7 @@ class ConversationStorage:
 
     def get_conversations_list(self, user_id: str, limit: int = 20) -> list:
         """Get user's conversation (returns single document)"""
+        if self.db is None: return []
         conversation = self.db.conversations.find_one({"user_id": user_id})
         
         if not conversation:
@@ -341,6 +369,7 @@ class ConversationStorage:
 
     def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Get user's complete conversation history"""
+        if self.db is None: return None
         conversation = self.db.conversations.find_one({"user_id": user_id})
 
         if conversation:
@@ -352,6 +381,7 @@ class ConversationStorage:
 
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete user's entire conversation history"""
+        if self.db is None: return False
         result = self.db.conversations.delete_one({"user_id": user_id})
 
         if result.deleted_count > 0:

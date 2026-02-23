@@ -49,10 +49,10 @@ class CompanionEngine:
         self,
         session: SessionState,
         message: str,
-    ) -> Tuple[str, bool, List[Dict], List[str], List[Dict]]:
+    ) -> Tuple[str, bool, List[Dict], List[str], List[Dict], ConversationPhase]:
         """
         Returns:
-            (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products)
+            (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase)
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
@@ -69,20 +69,61 @@ class CompanionEngine:
             session.memory.story.emotional_state = analysis["emotion"]
             session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
 
-        # 2. Store in Long-Term Memory if it's a significant shared experience
-        # (Using a simple heuristic: long message or high urgency)
-        if len(message) > 100 or analysis.get("urgency") in ["high", "crisis"]:
+        # 2. Enrich story with extracted entities and summary
+        entities = analysis.get("entities", {})
+        if entities.get("deity"):
+            session.memory.story.preferred_deity = entities["deity"]
+        if entities.get("ritual"):
+            # Update primary concern to specifically mention the ritual if it's the main topic
+            session.memory.story.primary_concern = f"Performing {entities['ritual']}"
+        
+        # If the primary concern is currently generic, use the LLM's summary
+        if len(session.memory.story.primary_concern) < 15 and analysis.get("summary"):
+            session.memory.story.primary_concern = analysis["summary"]
+
+        # 3. Store in Long-Term Memory if it's a significant shared experience
+        # (Using a simple heuristic: long message, high urgency, or significant topic update)
+        is_significant_update = (
+            len(message) > 100 or 
+            analysis.get("urgency") in ["high", "crisis"] or
+            (analysis.get("entities", {}).get("ritual")) or
+            (analysis.get("life_domain") and analysis.get("life_domain") != "unknown")
+        )
+        
+        if is_significant_update:
             if hasattr(session, "user_id") and session.user_id:
-                # We store in background (implicitly async)
+                logger.info(f"💾 Preserving semantic memory anchor for user {session.user_id} (Reason: significant update)")
                 import asyncio
-                asyncio.create_task(self.memory_service.store_memory(session.user_id, message))
+                # Use analysis summary if available for better semantic indexing
+                mem_anchor = analysis.get("summary", message)
+                asyncio.create_task(self.memory_service.store_memory(session.user_id, mem_anchor))
 
         # 3. Retrieve relevant long-term memories to enhance the prompt
         past_memories = []
         if hasattr(session, "user_id") and session.user_id:
             past_memories = await self.memory_service.retrieve_relevant_memories(session.user_id, message)
 
-        is_ready = self._assess_readiness(session) or analysis.get("intent") == "SEEKING_GUIDANCE"
+        # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
+        intent = analysis.get("intent")
+        
+        # We go to guidance if:
+        # a) Normal readiness threshold (0.7) met
+        # b) User explicitly asked for guidance/info (analysis says needs_direct_answer)
+        # c) The intent is explicitly SEEKING_GUIDANCE or ASKING_PANCHANG
+        is_direct_ask = analysis.get("needs_direct_answer", False) or \
+                        analysis.get("recommend_products", False) or \
+                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"]
+        
+        # Determine current phase for LLM response
+        current_phase = ConversationPhase.CLARIFICATION
+        if intent == "CLOSURE":
+            current_phase = ConversationPhase.CLOSURE
+        
+        # Only consider being ready for wisdom if NOT a closure signal
+        if intent == "CLOSURE":
+            is_ready = False
+        else:
+            is_ready = self._assess_readiness(session) or is_direct_ask
 
         # ------------------------------------------------------------------
         # Ready for wisdom → return short acknowledgement only
@@ -94,20 +135,40 @@ class CompanionEngine:
                 "I hear you deeply. Please give me a moment to gather wisdom for your situation.",
                 "Namaste. Your words have touched me. I am seeking the right dharmic path for you."
             ]
+            
+            # If it's a direct ask, we might want a slightly more urgent acknowledgement or none
+            if is_direct_ask:
+                acknowledgements = [
+                    "I understand your question. Let me provide the specific guidance for this.",
+                    "That's a very clear request. I'm gathering the relevant wisdom for you right now.",
+                    "I see what you are seeking. Let me look that up for you."
+                ]
+
             import random
             
-            # Fetch products if product inquiry detected
+            # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic
+            # Only recommend products IF:
+            # 1. The LLM analysis explicitly says 'recommend_products' is True
+            # 2. OR it's a specific PRODUCT_SEARCH intent
             products = []
-            is_product_inquiry = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+            should_recommend = analysis.get("recommend_products", False) or analysis.get("intent") == "PRODUCT_SEARCH"
             
-            if is_product_inquiry:
-                products = await self.product_service.search_products(message)
-            
-            # Fallback to recommended products only in guidance phase if no specific ones found
-            if not products:
-                products = await self.product_service.get_recommended_products()
+            if should_recommend:
+                # Use precise keywords if available from LLM analysis
+                search_terms = " ".join(analysis.get("product_search_keywords", []))
+                if not search_terms:
+                    search_terms = message
+                
+                logger.info(f"Producing selective product recommendations for query terms: {search_terms}")
+                products = await self.product_service.search_products(search_terms)
+                
+                # Only if the user explicitly asked for products AND none were found, show general ones
+                if not products and analysis.get("intent") == "PRODUCT_SEARCH":
+                    products = await self.product_service.get_recommended_products()
+            else:
+                logger.info("Skipping product recommendations as not specifically requested or relevant.")
 
-            return random.choice(acknowledgements), True, [], turn_topics, products
+            return random.choice(acknowledgements), True, [], turn_topics, products, ConversationPhase.GUIDANCE
 
         # ------------------------------------------------------------------
         # Not ready → generate empathetic follow-up
@@ -143,26 +204,35 @@ class CompanionEngine:
                 context_docs=context_docs,
                 conversation_history=session.conversation_history,
                 user_profile=user_profile,
-                phase=ConversationPhase.CLARIFICATION,
+                phase=current_phase,
                 memory_context=session.memory,
             )
 
-            # Check for products in listening phase ONLY if explicitly a product inquiry
+            # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase)
             products = []
-            is_product_inquiry = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+            should_recommend = analysis.get("recommend_products", False) or analysis.get("intent") == "PRODUCT_SEARCH"
 
-            if is_product_inquiry:
-                products = await self.product_service.search_products(message)
+            if should_recommend:
+                # Use precise keywords if available from LLM analysis
+                search_terms = " ".join(analysis.get("product_search_keywords", []))
+                if not search_terms:
+                    search_terms = message
+                    
+                logger.info(f"Producing selective product recommendations in listening phase for: {search_terms}")
+                products = await self.product_service.search_products(search_terms)
+                
+                if not products and analysis.get("intent") == "PRODUCT_SEARCH":
+                    products = await self.product_service.get_recommended_products()
 
-            return reply, False, context_docs, turn_topics, products
+            return reply, False, context_docs, turn_topics, products, current_phase
 
         # Fallback (no LLM)
         return (
             "I’m here with you. Could you tell me a little more about what feels most heavy right now?",
             False,
+            [] if "turn_topics" not in locals() else turn_topics,
             [],
-            turn_topics,
-            []
+            ConversationPhase.LISTENING
         )
 
     # ------------------------------------------------------------------
