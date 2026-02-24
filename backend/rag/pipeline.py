@@ -35,6 +35,9 @@ class RAGPipeline:
         self._embedding_model = None  # lazy‑loaded
         self._llm = get_llm_service()
 
+    def __bool__(self) -> bool:
+        return self.available
+
     # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------

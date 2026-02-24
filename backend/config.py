@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # API Settings
     # ------------------------------------------------------------------
     API_TITLE: str = "3ioNetra Spiritual Companion API"
-    API_VERSION: str = "1.0.0"
+    API_VERSION: str = "1.1.3"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
     DEBUG: bool = True
@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # System Prompt
     # ------------------------------------------------------------------
-    SYSTEM_PROMPT: str = """You are a practical spiritual wellness guide from 3rd Eye Netra (https://my3ionetra.com/).
+    SYSTEM_PROMPT: str = """You are a practical spiritual wellness guide from 3ioNetra (https://my3ionetra.com/).
 You help people solve life problems through Sanatan Dharma practices and recommend authentic spiritual products.
 
 YOUR MISSION:

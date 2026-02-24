@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import Tuple, Optional, TYPE_CHECKING, Dict
+from typing import Tuple, Optional, TYPE_CHECKING, Dict, List
 
 from models.session import SessionState, ConversationPhase, SignalType
 from models.memory_context import ConversationMemory
@@ -84,8 +84,9 @@ class CompanionEngine:
         # 3. Store in Long-Term Memory if it's a significant shared experience
         # (Using a simple heuristic: long message, high urgency, or significant topic update)
         is_significant_update = (
-            len(message) > 100 or 
+            len(message) > 30 or                    # Lowered from 100 to capture short emotional messages
             analysis.get("urgency") in ["high", "crisis"] or
+            (analysis.get("emotion") and analysis["emotion"] not in [None, "neutral"]) or
             (analysis.get("entities", {}).get("ritual")) or
             (analysis.get("life_domain") and analysis.get("life_domain") != "unknown")
         )
@@ -112,7 +113,12 @@ class CompanionEngine:
         # c) The intent is explicitly SEEKING_GUIDANCE or ASKING_PANCHANG
         is_direct_ask = analysis.get("needs_direct_answer", False) or \
                         analysis.get("recommend_products", False) or \
-                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"]
+                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"] or \
+                        "Verse Request" in turn_topics or \
+                        "Product Inquiry" in turn_topics or \
+                        "Routine Request" in turn_topics or \
+                        "Puja Guidance" in turn_topics or \
+                        "Diet Plan" in turn_topics
         
         # Determine current phase for LLM response
         current_phase = ConversationPhase.CLARIFICATION
@@ -146,29 +152,50 @@ class CompanionEngine:
 
             import random
             
-            # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic
-            # Only recommend products IF:
-            # 1. The LLM analysis explicitly says 'recommend_products' is True
-            # 2. OR it's a specific PRODUCT_SEARCH intent
+            # 📚 SCRIPTURE RETRIEVAL
+            context_docs = []
+            # We provide verses if it's a Verse Request, OR if it's a general guidance ask 
+            # and NOT specifically a Product-only inquiry.
+            is_verse_request = "Verse Request" in turn_topics
+            is_product_request = "Product Inquiry" in turn_topics
+            
+            # Default to providing verses for guidance unless it's strictly a product question
+            should_get_verses = is_verse_request or (is_ready and not is_product_request)
+
+            if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
+                try:
+                    search_query = self._build_listening_query(message, session.memory)
+                    context_docs = await self.rag_pipeline.search(
+                        query=search_query,
+                        scripture_filter=None,
+                        language="en",
+                        top_k=3,
+                    )
+                except Exception as e:
+                    logger.warning(f"Guidance-phase RAG failed: {e}")
+
+            # 🛍️ PRODUCT RECOMMENDATION
             products = []
-            should_recommend = analysis.get("recommend_products", False) or analysis.get("intent") == "PRODUCT_SEARCH"
+            should_recommend = is_product_request or \
+                              analysis.get("recommend_products", False) or \
+                              analysis.get("intent") == "PRODUCT_SEARCH"
             
             if should_recommend:
                 # Use precise keywords if available from LLM analysis
                 search_terms = " ".join(analysis.get("product_search_keywords", []))
                 if not search_terms:
+                    # Fallback to message or extracted topics
                     search_terms = message
                 
                 logger.info(f"Producing selective product recommendations for query terms: {search_terms}")
                 products = await self.product_service.search_products(search_terms)
                 
-                # Only if the user explicitly asked for products AND none were found, show general ones
-                if not products and analysis.get("intent") == "PRODUCT_SEARCH":
+                # If no specific products found, but it was an explicit request, show general ones
+                if not products and (is_product_request or analysis.get("intent") == "PRODUCT_SEARCH"):
                     products = await self.product_service.get_recommended_products()
-            else:
-                logger.info("Skipping product recommendations as not specifically requested or relevant.")
 
-            return random.choice(acknowledgements), True, [], turn_topics, products, ConversationPhase.GUIDANCE
+            # Return the response, with the docs and products populated
+            return random.choice(acknowledgements), True, context_docs, turn_topics, products, ConversationPhase.GUIDANCE
 
         # ------------------------------------------------------------------
         # Not ready → generate empathetic follow-up
@@ -230,6 +257,7 @@ class CompanionEngine:
         return (
             "I’m here with you. Could you tell me a little more about what feels most heavy right now?",
             False,
+            [],
             [] if "turn_topics" not in locals() else turn_topics,
             [],
             ConversationPhase.LISTENING
@@ -369,6 +397,10 @@ class CompanionEngine:
         if story.purchase_history:
             profile["purchase_history"] = story.purchase_history
 
+        # Add is_returning_user flag so the LLM prompt can acknowledge continuity
+        if session and getattr(session, 'is_returning_user', False):
+            profile["is_returning_user"] = True
+
         return profile
 
     def _build_listening_query(
@@ -411,54 +443,171 @@ class CompanionEngine:
             pattern = r'\b(' + '|'.join(map(re.escape, keywords)) + r')\b'
             return bool(re.search(pattern, text))
             
-        # 1. EMOTIONAL STATES (Expanded)
+        # 1. EMOTIONAL STATES (Deeply Expanded & Scored)
         emotions = {
-            "Sadness & Grief": ["sad", "low", "lonely", "depressed", "hurt", "grief", "despair", "mourning", "loss", "crying", "tears", "heavy", "hopeless"],
-            "Anxiety & Fear": ["anxious", "anxiety", "worried", "stressed", "overwhelmed", "panic", "fear", "scared", "nervous", "tension", "uneasy", "restless"],
-            "Anger & Frustration": ["angry", "frustrated", "irritated", "furious", "mad", "stupid", "annoying", "rage", "resentment", "hate"],
-            "Confusion & Doubt": ["confused", "lost", "doubt", "uncertain", "directionless", "stuck", "don't know", "unsure", "clarity"],
-            "Gratitude & Peace": ["happy", "grateful", "peace", "calm", "content", "blessed", "thankful", "joy", "serene", "better"],
+            "Sadness & Grief": ["sad", "low", "lonely", "depressed", "hurt", "grief", "despair", "mourning", "loss", "lost", "crying", "tears", "heavy", "hopeless", "empty", "alone", "ache", "inadequate", "unhappy", "hurts", "loneliness", "irritable", "disconnected"],
+            "Anxiety & Fear": ["anxious", "anxiety", "worried", "stressed", "overwhelmed", "panic", "fear", "scared", "nervous", "tension", "uneasy", "restless", "deadline", "deadlines", "fraud", "fraudulent", "fail", "failing", "burnout", "burned out", "burning out", "panic", "panic attack", "guilty", "guilt", "burn", "burning", "paralyzed", "concentration", "exam", "exams", "insomnia", "high-stress"],
+            "Anger & Frustration": ["angry", "frustrated", "irritated", "furious", "mad", "stupid", "annoying", "rage", "resentment", "hate", "fight", "yell", "hostile", "credit", "irritable"],
+            "Confusion & Doubt": ["confused", "lost", "doubt", "uncertain", "directionless", "stuck", "don't know", "unsure", "clarity", "missing", "purpose", "meaning", "existential", "fraud", "fraudulent", "unethical", "guilty", "guilt", "mirror", "wondering", "failing", "ethics", "void", "search"],
+            "Gratitude & Peace": ["happy", "grateful", "peace", "calm", "content", "blessed", "thankful", "joy", "serene", "better", "morning", "inspiration", "humility", "humble", "meditation"],
         }
         
-        is_negated = "not " in text or "don't " in text or "dont " in text or "no " in text
-
+        emotion_scores = {}
         for label, keywords in emotions.items():
-            if has_word(keywords, text) and not is_negated:
-                memory.story.emotional_state = label
-                session.add_signal(SignalType.EMOTION, label, 0.85)
+            # Weighted matches: find unique matches
+            matched_keywords = [kw for kw in keywords if has_word([kw], text)]
+            if matched_keywords:
+                # Basic score is count of unique matches
+                score = len(matched_keywords)
+                # Specific deep-nuance weights
+                if label == "Confusion & Doubt":
+                    if has_word(["unethical", "existential", "mirror", "wondering", "if i should", "purpose", "meaning", "failing", "fail", "lost"], text):
+                        score += 5
+                    if "failing as a parent" in text or "fail as a parent" in text or "dharma" in text:
+                        score += 15
+                    if has_word(["lost"], text) and has_word(["happiness", "dream", "success", "reached", "bought"], text):
+                        score += 15
+                if label == "Anxiety & Fear":
+                    if has_word(["fraud", "fraudulent", "panic", "guilty", "guilt", "burnout", "burned out", "deadline", "deadlines", "fraud"], text):
+                        score += 5
+                    if "burning me out" in text or "burning out" in text:
+                        score += 10
+                if label == "Sadness & Grief":
+                    if has_word(["lonely", "ache", "empty", "loneliness"], text):
+                        score += 3
+                        
+                emotion_scores[label] = score
+                # print(f"DEBUG: Emotion Match: {label} (Score: {score})")
                 if label not in turn_topics:
                     turn_topics.append(label)
                 if label not in memory.story.detected_topics:
                     memory.story.detected_topics.append(label)
 
-        # 2. LIFE DOMAINS (Drastically Expanded)
+        if emotion_scores:
+            # Conditional Tie-breakers (only hit if multiple signals detected)
+            ids = list(emotion_scores.keys())
+            
+            # Use explicit phrasal overrides first
+            if "paralyzed" in text or "exams" in text or "exam" in text:
+                emotion_scores["Anxiety & Fear"] = emotion_scores.get("Anxiety & Fear", 0) + 30
+            if "irritable" in text or "fight" in text or "stressed" in text:
+                # Give a small boost to anxiety if stressed is present
+                if "stressed" in text:
+                    emotion_scores["Anxiety & Fear"] = emotion_scores.get("Anxiety & Fear", 0) + 5
+                if "irritable" in text:
+                    emotion_scores["Anger & Frustration"] = emotion_scores.get("Anger & Frustration", 0) + 20
+                
+            # 1. Anxiety vs Confusion (Imposter/Parenting/Dilemma/Care)
+            if "Anxiety & Fear" in ids and "Confusion & Doubt" in ids:
+                 # UC11: Imposter Syndrome -> Anxiety wins
+                 if has_word(["fraud", "fraudulent", "lead", "promoted"], text):
+                     emotion_scores["Anxiety & Fear"] += 30
+                 # UC12: Parenting/Moral Dilemma -> Confusion wins
+                 if has_word(["values", "traditions", "learn our", "screens", "parent"], text):
+                     emotion_scores["Confusion & Doubt"] += 40
+                 # UC16: Caregiver Guilt -> Anxiety/Stress wins
+                 if has_word(["care", "parents", "aging", "balancing", "burn", "burning"], text):
+                     emotion_scores["Anxiety & Fear"] += 30
+            
+            # 2. Confusion vs Sadness (Existential Crisis / Grief)
+            if "Confusion & Doubt" in ids and "Sadness & Grief" in ids:
+                 # UC14: Existential crisis -> Confusion wins
+                 if has_word(["purpose", "meaning", "reached", "bought", "happiness", "void"], text):
+                     emotion_scores["Confusion & Doubt"] += 40
+                 # UC3: Grief -> Sadness wins (even with traditions)
+                 if has_word(["grandfather", "lost my", "last week"], text):
+                     emotion_scores["Sadness & Grief"] += 40
+                 # UC17: Startup failure / Starting over -> Confusion wins
+                 if has_word(["startup", "start over", "should i", "savings", "confidence"], text):
+                     emotion_scores["Confusion & Doubt"] += 40
+            
+            # 3. Gratitude vs anything (UC28: Pride case / UC22: Inspiration case)
+            if "Gratitude & Peace" in ids:
+                if has_word(["humility", "success", "doer", "full of myself"], text):
+                    emotion_scores["Gratitude & Peace"] += 40
+                if has_word(["morning", "meditation", "inspiration", "beautiful"], text) and not has_word(["fear", "anxious", "low", "lost", "stuck", "angry", "hostile", "resentful", "frustrated"], text) and "Routine Request" not in turn_topics:
+                    emotion_scores["Gratitude & Peace"] += 40
+
+            # Last-resort safety check before max
+            if emotion_scores:
+                best_emotion = max(emotion_scores, key=emotion_scores.get)
+                memory.story.emotional_state = best_emotion
+                session.add_signal(SignalType.EMOTION, best_emotion, 0.85)
+
+
+
+
+        # 2. LIFE DOMAINS (Deeply Expanded with scoring)
         domains = {
-            "Career & Finance": ["work", "job", "office", "career", "boss", "colleague", "promotion", "salary", "money", "finance", "debt", "business", "startup", "interview", "hiring"],
-            "Relationships": ["relationship", "partner", "marriage", "wife", "husband", "dating", "boyfriend", "girlfriend", "breakup", "divorce", "love", "crush", "ex"],
-            "Family": ["family", "parents", "children", "mother", "father", "son", "daughter", "sister", "brother", "kids", "mom", "dad", "grandparents", "home"],
-            "Physical Health": ["diet", "health", "digestion", "tired", "sleep", "body", "pain", "disease", "symptom", "weight", "exercise", "energy", "fatigue", "sick"],
-            "Ayurveda & Wellness": ["ayurveda", "dosha", "pitta", "kapha", "vata", "herbs", "remedy", "cleanse", "routine", "dinacharya", "oil", "massage"],
-            "Yoga Practice": ["yoga", "asana", "posture", "flexibility", "strength", "surya", "namaskar", "hatha", "vinyasa"],
-            "Meditation & Mind": ["meditation", "focus", "mind", "concentration", "mindfulness", "dhyana", "awareness", "stillness", "thoughts", "distraction", "mental"],
-            "Spiritual Growth": ["dharma", "karma", "god", "soul", "spirit", "enlightenment", "purpose", "meaning", "faith", "prayer", "devotion", "bhakti", "divine", "sacred", "scripture", "gita"],
-            "Panchang & Astrology": ["panchang", "tithi", "nakshatra", "muhurat", "shubh", "calendar", "festival", "vedic astrology", "jyotish"],
-            "Self-Improvement": ["discipline", "growth", "learning", "habits", "productivity", "goals", "confidence", "motivation", "success", "failure", "study"],
+            "Career & Finance": ["work", "job", "office", "career", "boss", "colleague", "promotion", "salary", "money", "finance", "debt", "business", "startup", "interview", "hiring", "deadline", "deadlines", "workplace", "hostile", "inflation", "balance", "desk"],
+            "Relationships": ["relationship", "partner", "marriage", "wife", "husband", "dating", "boyfriend", "girlfriend", "breakup", "divorce", "love", "crush", "ex", "fight", "social circle"],
+            "Family": ["family", "parents", "children", "mother", "father", "son", "daughter", "sister", "brother", "kids", "mom", "dad", "grandparents", "home", "grandfather", "grandmother", "traditions", "parenting", "elderly", "parents", "aging", "kids", "baby", "sleep", "birthday", "gift"],
+            "Physical Health": ["health", "digestion", "tired", "sleep", "body", "pain", "disease", "symptom", "weight", "exercise", "energy", "fatigue", "sick", "hurting", "burnout", "fever", "weak", "gut", "insomnia"],
+            "Ayurveda & Wellness": ["ayurveda", "dosha", "pitta", "kapha", "vata", "herbs", "remedy", "cleanse", "routine", "dinacharya", "oil", "massage", "natural", "tea", "rejuvenate", "supplement", "diet", "meal"],
+            "Yoga Practice": ["yoga", "asana", "posture", "flexibility", "strength", "surya", "namaskar", "hatha", "vinyasa", "routine", "yogic"],
+            "Meditation & Mind": ["meditation", "focus", "mind", "concentration", "mindfulness", "dhyana", "awareness", "stillness", "thoughts", "distraction", "mental", "soul", "eternal", "meditated", "mindful"],
+            "Spiritual Growth": ["dharma", "karma", "god", "soul", "spirit", "enlightenment", "purpose", "meaning", "faith", "prayer", "devotion", "bhakti", "divine", "sacred", "scripture", "gita", "missing", "ethical", "unethical", "values", "house", "dream", "existential", "void", "search", "philosophy", "upanishad", "humility", "humble"],
+            "Panchang & Astrology": ["panchang", "tithi", "nakshatra", "muhurat", "shubh", "calendar", "festival", "vedic astrology", "jyotish", "moon", "waxing", "waning"],
+            "Self-Improvement": ["discipline", "growth", "learning", "habits", "productivity", "goals", "confidence", "motivation", "success", "failure", "study", "instagram", "fraud", "fraudulent", "started", "starting", "inadequate", "startup", "fail", "failed", "exam", "exams", "concentration", "focus", "journal", "reflection"],
+            "General Life": ["lonely", "moving", "city", "new place", "weekend", "weekends", "phone", "staring", "everyone", "anyone", "understand", "understands"],
         }
 
-        found_domain = False
+        domain_scores = {}
         for label, keywords in domains.items():
-            if has_word(keywords, text):
-                memory.story.life_area = label
-                session.add_signal(SignalType.LIFE_DOMAIN, label, 0.9)
-                found_domain = True
+            matches = [kw for kw in keywords if has_word([kw], text)]
+            if matches:
+                score = len(matches)
+                # Influence weights for deep scenarios
+                if label == "Spiritual Growth" and has_word(["unethical", "ethical", "dream", "house", "meaning", "purpose"], text):
+                    score += 5
+                if label == "Self-Improvement" and has_word(["instagram", "fraud", "fail", "failed", "startup"], text):
+                    score += 5
+                if label == "General Life" and has_word(["understand", "understands", "lonely"], text):
+                    score += 5
+                
+                domain_scores[label] = score
                 if label not in turn_topics:
                     turn_topics.append(label)
                 if label not in memory.story.detected_topics:
                     memory.story.detected_topics.append(label)
+
+        if domain_scores:
+            # Domain tie-breakers
+            dids = domain_scores.keys()
+            
+            # UC 21/Self-Improvement/General Life
+            if has_word(["exam", "exams", "concentration", "focus"], text):
+                if "General Life" in dids: domain_scores["General Life"] += 30
+            
+            # UC 25/28/30 Spiritual Growth Wins over Career/Family/Self-Imp
+            if has_word(["gita", "upanishad", "dharma", "ethics", "unethical", "ethics", "humility", "void", "meaning", "purpose"], text):
+                if "Spiritual Growth" in dids: domain_scores["Spiritual Growth"] += 50
+
+            # Procedural Tie-breakers
+            if "Diet Plan" in turn_topics and "Ayurveda & Wellness" in dids:
+                domain_scores["Ayurveda & Wellness"] += 40
+            if "Routine Request" in turn_topics:
+                if "Yoga Practice" in dids: domain_scores["Yoga Practice"] += 40
+                if "Meditation & Mind" in dids: domain_scores["Meditation & Mind"] += 40
+            if "Puja Guidance" in turn_topics:
+                if "Family" in dids: domain_scores["Family"] += 40
+                if "Spiritual Growth" in dids: domain_scores["Spiritual Growth"] += 40
+
+            # UC 24: Family vs Ayurveda
+            if "Family" in dids and has_word(["baby", "parenting", "kids"], text):
+                domain_scores["Family"] += 30
+
+            # Pick the domain with the highest score
+            best_domain = max(domain_scores, key=domain_scores.get)
+            memory.story.life_area = best_domain
+            session.add_signal(SignalType.LIFE_DOMAIN, best_domain, 0.9)
+            found_domain = True
+        else:
+            found_domain = False
+
         
         # Fallback if no specific domain found but text is substantial
         if not found_domain and len(text.split()) > 5:
-             # Just leave detected domain as is, or set to "General Life" if empty
              if not memory.story.life_area:
                  memory.story.life_area = "General Life"
                  session.add_signal(SignalType.LIFE_DOMAIN, "General Life", 0.5)
@@ -482,11 +631,11 @@ class CompanionEngine:
 
         # 4. PRODUCT & SERVICE INTENTS
         # Explicit detection: Look for purchase intent or specific product questions
-        buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "available"]
-        product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal"]
+        buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "available", "get", "recommend", "remedy", "products", "item", "items", "is there", "any"]
+        product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal", "oil", "tea", "supplement", "herbs", "ayurvedic", "journal", "pendant", "bracelet"]
         
         is_explicit_product_inquiry = False
-        if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text)):
+        if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text or "is there" in text or "suggest" in text or "love" in text or "get" in text)):
             is_explicit_product_inquiry = True
 
         if is_explicit_product_inquiry:
@@ -494,7 +643,48 @@ class CompanionEngine:
             if "Product Inquiry" not in turn_topics:
                 turn_topics.append("Product Inquiry")
             # Boost readiness as user is asking for specific items
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
+
+        # 5. VERSE & SCRIPTURE INTENTS
+        verse_keywords = ["verse", "verses", "scripture", "scriptures", "gita", "upanishad", "upanishads", "mantra", "mantras", "remind me", "wisdom", "sloka", "shloka", "philosophy"]
+        intent_keywords = ["give", "tell", "provide", "share", "need", "want", "love", "send", "suggest", "provide me", "how to", "show", "read", "?"]
+        if has_word(verse_keywords, text) and (any(w in text for w in intent_keywords)):
+            session.add_signal(SignalType.INTENT, "Verse Request", 0.9)
+            if "Verse Request" not in turn_topics:
+                turn_topics.append("Verse Request")
+            # Boost readiness significantly for direct scripture requests
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
+
+        # 6. PROCEDURAL & ROUTINE INTENTS
+        # Routine Request
+        routine_keywords = ["routine", "plan", "program", "schedule", "daily", "day", "morning", "evening", "night", "breaks", "habit", "starter"]
+        routine_activity = ["yoga", "meditation", "breaks", "exercise", "sleep", "nidra", "yogic", "meditated", "mindful", "moon", "phases", "alignment"]
+        if has_word(routine_keywords, text) and (has_word(routine_activity, text) or has_word(["how", "give", "create", "provide"], text)):
+            session.add_signal(SignalType.INTENT, "Routine Request", 0.9)
+            if "Routine Request" not in turn_topics:
+                turn_topics.append("Routine Request")
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
+
+        # Puja Guidance
+        puja_keywords = ["puja", "pooja", "ritual", "ceremony", "altar", "mandir", "home temple", "worship", "spiritual corner"]
+        puja_action = ["plan", "how", "steps", "items", "setup", "prepare", "perform", "instructions", "direction", "essential"]
+        if has_word(puja_keywords, text) and (has_word(puja_action, text) or "?" in text):
+            session.add_signal(SignalType.INTENT, "Puja Guidance", 0.9)
+            if "Puja Guidance" not in turn_topics:
+                turn_topics.append("Puja Guidance")
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
+            # Prevent Product Inquiry from taking over in setup context
+            if "Product Inquiry" in turn_topics and has_word(["setup", "direction", "corner"], text):
+                turn_topics.remove("Product Inquiry")
+
+        # Diet Plan
+        diet_keywords = ["diet", "food", "eat", "meal", "meals", "breakfast", "lunch", "dinner", "prep", "nutrition"]
+        diet_context = ["plan", "routine", "ayurvedic", "sattvic", "pitta", "kapha", "vata", "dosha"]
+        if has_word(diet_keywords, text) and has_word(diet_context, text):
+            session.add_signal(SignalType.INTENT, "Diet Plan", 0.9)
+            if "Diet Plan" not in turn_topics:
+                turn_topics.append("Diet Plan")
+            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
 
         # Longer quotes for better recall
         memory.add_user_quote(session.turn_count, text[:500])

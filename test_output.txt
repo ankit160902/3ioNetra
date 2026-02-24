@@ -1,0 +1,38 @@
+WARNING:root:jyotishganit or skyfield not available. Panchang features will be disabled.
+WARNING:llm.service:Gemini API key not provided
+WARNING:services.auth_service:MONGODB_URI not found in settings
+WARNING:services.auth_service:MONGODB_URI not found in settings
+================================================================================
+SPIRITUAL COMPANION - REAL LIFE USE CASE TEST SUITE
+================================================================================
+
+--- Testing Use Case 1: Career & Stress ---
+User Message: "I've been working 12-hour days and I still feel like I'm falling behind. I'm so stressed and I can't sleep thinking about my deadlines."
+Traceback (most recent call last):
+  File "/Users/ankit1609/Desktop/3ioNetra/3ionetra/test_use_cases.py", line 370, in <module>
+    asyncio.run(main())
+    ~~~~~~~~~~~^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/runners.py", line 204, in run
+    return runner.run(main)
+           ~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/runners.py", line 127, in run
+    return self._loop.run_until_complete(task)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.2/Frameworks/Python.framework/Versions/3.14/lib/python3.14/asyncio/base_events.py", line 719, in run_until_complete
+    return future.result()
+           ~~~~~~~~~~~~~^^
+  File "/Users/ankit1609/Desktop/3ioNetra/3ionetra/test_use_cases.py", line 350, in main
+    res = await run_use_case(engine, use_case)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ankit1609/Desktop/3ioNetra/3ionetra/test_use_cases.py", line 262, in run_use_case
+    assistant_text, is_ready, docs, topics, products, active_phase = await engine.process_message(
+                                                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        session, use_case['message']
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/Users/ankit1609/Desktop/3ioNetra/3ionetra/backend/services/companion_engine.py", line 57, in process_message
+    turn_topics = self._update_memory(session.memory, session, message)
+  File "/Users/ankit1609/Desktop/3ioNetra/3ionetra/backend/services/companion_engine.py", line 516, in _update_memory
+    best_emotion = max(emotion_scores, key=emotion_scores.get)
+ValueError: max() iterable argument is empty

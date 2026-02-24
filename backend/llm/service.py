@@ -329,11 +329,10 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
             else:
                 logger.warning("user_profile provided but no data fields found!")
         
-        # Detect returning user from conversation history
-        is_returning_user = False
-        if conversation_history and len(conversation_history) > 3:
-            # Check if there are past messages beyond the current conversation
-            # (indicated by session separators or significant history)
+        # Detect returning user — prefer the explicit flag from user_profile,
+        # then fall back to checking for session separator strings in history
+        is_returning_user = bool(user_profile.get("is_returning_user", False)) if user_profile else False
+        if not is_returning_user and conversation_history and len(conversation_history) > 3:
             is_returning_user = any(
                 "New Session" in msg.get("content", "")
                 for msg in conversation_history

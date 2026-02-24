@@ -717,9 +717,15 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                         # Prepend last 15 messages for context
                         context_history = past_messages[-15:]
                         
-                        session.conversation_history = context_history + session.conversation_history
+                        # Insert a clear separator so the LLM knows there is a
+                        # time gap between the loaded history and the new session
+                        separator = {
+                            "role": "system",
+                            "content": "=== New Session (Returning User — previous conversation loaded above) ==="
+                        }
+                        session.conversation_history = context_history + [separator] + session.conversation_history
                         
-                        # Mark as returning user so bot can acknowledge continuity
+                        # Mark as returning user so companion and LLM can acknowledge continuity
                         session.is_returning_user = True
                         
                         # Restore high-level story and memory from DB if available
@@ -822,12 +828,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Check if we should reduce scripture density
             reduce_scripture = safety_validator.should_reduce_scripture_density(session)
 
-            # Retrieve past memories for Guidance phase too
-            from services.memory_service import get_memory_service
-            memory_service = get_memory_service()
+            # past_memories are already retrieved by companion_engine and injected
+            # into the user_profile. Do NOT retrieve again here to avoid duplicate DB calls.
             past_memories = []
-            if session.user_id:
-                past_memories = await memory_service.retrieve_relevant_memories(session.user_id, query.message)
 
             response_text = await response_composer.compose_with_memory(
                 dharmic_query=dharmic_query,

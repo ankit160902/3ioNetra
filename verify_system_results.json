@@ -1,0 +1,208 @@
+{
+  "score": "37/40",
+  "pass": 37,
+  "warn": 2,
+  "fail": 1,
+  "results": [
+    {
+      "label": "MongoDB client",
+      "status": "\u2705 PASS",
+      "detail": "Connected to DB: spiritual_voice_bot"
+    },
+    {
+      "label": "Collections",
+      "status": "\u2705 PASS",
+      "detail": "['sessions', 'conversations', 'tokens', 'products', 'users']"
+    },
+    {
+      "label": "  sessions count",
+      "status": "\u2705 PASS",
+      "detail": "147 documents"
+    },
+    {
+      "label": "  conversations count",
+      "status": "\u2705 PASS",
+      "detail": "0 documents"
+    },
+    {
+      "label": "  users count",
+      "status": "\u2705 PASS",
+      "detail": "12 documents"
+    },
+    {
+      "label": "  products count",
+      "status": "\u2705 PASS",
+      "detail": "250 documents"
+    },
+    {
+      "label": "MongoDB read/write roundtrip",
+      "status": "\u2705 PASS",
+      "detail": ""
+    },
+    {
+      "label": "Panchang available",
+      "status": "\u274c FAIL",
+      "detail": "Not available \u2014 ephem may need restart"
+    },
+    {
+      "label": "TTS available",
+      "status": "\u2705 PASS",
+      "detail": ""
+    },
+    {
+      "label": "TTS English",
+      "status": "\u2705 PASS",
+      "detail": "21120 bytes"
+    },
+    {
+      "label": "TTS Hindi",
+      "status": "\u2705 PASS",
+      "detail": "22848 bytes"
+    },
+    {
+      "label": "Auth DB",
+      "status": "\u2705 PASS",
+      "detail": ""
+    },
+    {
+      "label": "Token generation",
+      "status": "\u2705 PASS",
+      "detail": "Length: 43"
+    },
+    {
+      "label": "Token stored in DB",
+      "status": "\u2705 PASS",
+      "detail": "user_id=verify_test_7929fc82, expires=2026-03-26 07:04:11.379000"
+    },
+    {
+      "label": "Registered users",
+      "status": "\u2705 PASS",
+      "detail": "12 in DB"
+    },
+    {
+      "label": "User schema sample",
+      "status": "\u2705 PASS",
+      "detail": "{'email': 'user1@example.com', 'first_name': 'Amit', 'spiritual_profile': {'rashi': 'Virgo', 'gothra': 'Jamadagni', 'nak"
+    },
+    {
+      "label": "Conversations in DB",
+      "status": "\u26a0\ufe0f  WARN",
+      "detail": "0 conversations"
+    },
+    {
+      "label": "Conversation docs",
+      "status": "\u26a0\ufe0f  WARN",
+      "detail": "No conversations saved yet \u2014 needs at least one real chat session"
+    },
+    {
+      "label": "Products in DB",
+      "status": "\u2705 PASS",
+      "detail": "250 products"
+    },
+    {
+      "label": "Sample product",
+      "status": "\u2705 PASS",
+      "detail": "{'name': 'Shrinathji 3D box small', 'category': 'Spiritual Home', 'is_active': True}"
+    },
+    {
+      "label": "Active products",
+      "status": "\u2705 PASS",
+      "detail": "250 active"
+    },
+    {
+      "label": "Search: 'Rudraksha Mala'",
+      "status": "\u2705 PASS",
+      "detail": "5 results \u2014 'Sacred Ebony Wood & Rudraksha Mala with Gold-Toned Links'"
+    },
+    {
+      "label": "Search: 'Puja items'",
+      "status": "\u2705 PASS",
+      "detail": "5 results \u2014 'Satyanarayan Puja online - Shri Mangal Dev Grah Mandir'"
+    },
+    {
+      "label": "Search: 'Spiritual books'",
+      "status": "\u2705 PASS",
+      "detail": "5 results \u2014 'Divine Karungali Mala (Sacred Ebony Wood Mala for Protection & Spiritual Power)'"
+    },
+    {
+      "label": "Recommended products fallback",
+      "status": "\u2705 PASS",
+      "detail": "4 returned"
+    },
+    {
+      "label": "Crisis 'I want to kill myself'",
+      "status": "\u2705 PASS",
+      "detail": "detected=True expected=True"
+    },
+    {
+      "label": "Crisis 'I don't want to live anymore'",
+      "status": "\u2705 PASS",
+      "detail": "detected=True expected=True"
+    },
+    {
+      "label": "Crisis 'I want to end my life'",
+      "status": "\u2705 PASS",
+      "detail": "detected=True expected=True"
+    },
+    {
+      "label": "Crisis 'I feel hopeless and tired'",
+      "status": "\u2705 PASS",
+      "detail": "detected=False expected=False"
+    },
+    {
+      "label": "Crisis 'Tell me about meditation'",
+      "status": "\u2705 PASS",
+      "detail": "detected=False expected=False"
+    },
+    {
+      "label": "Addiction detection",
+      "status": "\u2705 PASS",
+      "detail": "needs_help=True, type=addiction"
+    },
+    {
+      "label": "Mental health detection",
+      "status": "\u2705 PASS",
+      "detail": "needs_help=True, type=mental_health"
+    },
+    {
+      "label": "Scripture density reduce (hopelessness+severe)",
+      "status": "\u2705 PASS",
+      "detail": "should_reduce=True"
+    },
+    {
+      "label": "Response validation (banned patterns)",
+      "status": "\u2705 PASS",
+      "detail": "Modified: This situation happened because a challenging situation and you are facing a dif"
+    },
+    {
+      "label": "Professional help append",
+      "status": "\u2705 PASS",
+      "detail": ""
+    },
+    {
+      "label": "RAG pipeline",
+      "status": "\u2705 PASS",
+      "detail": "Initialized"
+    },
+    {
+      "label": "RAG: 'Bhagavad Gita / karma'",
+      "status": "\u2705 PASS",
+      "detail": "3 results | top='Bhagavad Gita 2.\u0928\u0947\u0939\u093e\u092d\u093f\u0915\u094d\u0930\u092e\u0928\u093e\u0936\u094b\u093d\u0938\u094d\u0924\u093f \u092a\u094d\u0930\u0924\u094d\u092f\u0935\u093e\u092f\u094b \u0928 \u0935' score=0.687"
+    },
+    {
+      "label": "RAG: 'Ayurveda'",
+      "status": "\u2705 PASS",
+      "detail": "3 results | top='Charaka Samhita (Ayurveda) charaka_samhita_sutrast' score=0.470"
+    },
+    {
+      "label": "RAG: 'Temple'",
+      "status": "\u2705 PASS",
+      "detail": "3 results | top='Temple: Venkateswara Swamy Temple (Andhra Pradesh)' score=0.797"
+    },
+    {
+      "label": "RAG: 'Grief/emotional'",
+      "status": "\u2705 PASS",
+      "detail": "3 results | top='Meditation and Mindfulness cope with grief.1' score=0.543"
+    }
+  ]
+}

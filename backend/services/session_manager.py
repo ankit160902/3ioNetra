@@ -83,13 +83,18 @@ class MongoSessionManager(SessionManager):
         from services.auth_service import get_mongo_client
 
         self.db = get_mongo_client()
-        self.collection = self.db.sessions
         self._ttl_seconds = ttl_minutes * 60
-
-        self._ensure_indexes()
+        
+        if self.db is not None:
+            self.collection = self.db.sessions
+            self._ensure_indexes()
+        else:
+            self.collection = None
+            logger.warning("MongoSessionManager: Database connection failed. Operations will be no-ops.")
         logger.info(f"MongoSessionManager initialized (TTL={ttl_minutes}m)")
 
     def _ensure_indexes(self):
+        # This method is only called if self.db is not None, so self.collection is guaranteed to exist.
         indexes = self.collection.index_information()
 
         if "session_id_1" not in indexes:
@@ -112,6 +117,7 @@ class MongoSessionManager(SessionManager):
         return session
 
     async def get_session(self, session_id: str) -> Optional[SessionState]:
+        if self.collection is None: return None
         doc = self.collection.find_one({"session_id": session_id})
         if not doc:
             return None
@@ -125,6 +131,7 @@ class MongoSessionManager(SessionManager):
         return session
 
     async def update_session(self, session: SessionState) -> None:
+        if self.collection is None: return
         session.last_activity = datetime.utcnow()
         data = session.to_dict()
 
@@ -135,6 +142,7 @@ class MongoSessionManager(SessionManager):
         )
 
     async def delete_session(self, session_id: str) -> None:
+        if self.collection is None: return
         self.collection.delete_one({"session_id": session_id})
 
 

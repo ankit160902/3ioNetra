@@ -1,0 +1,409 @@
+WARNING:root:jyotishganit or skyfield not available. Panchang features will be disabled.
+WARNING:llm.service:Gemini API key not provided
+WARNING:services.auth_service:MONGODB_URI not found in settings
+WARNING:services.auth_service:MONGODB_URI not found in settings
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+WARNING:services.memory_service:Long-term memory storage skipped: Database not connected
+================================================================================
+SPIRITUAL COMPANION - REAL LIFE USE CASE TEST SUITE
+================================================================================
+
+--- Testing Use Case 1: Career & Stress ---
+User Message: "I've been working 12-hour days and I still feel like I'm falling behind. I'm so stressed and I can't sleep thinking about my deadlines."
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Career & Finance (Expected: Career & Finance)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 2: Relationship Issues ---
+User Message: "My partner and I haven't been talking for days after a huge fight. I feel so lost and I don't know if this relationship is worth saving anymore."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Relationships (Expected: Relationships)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 3: Grief & Loss ---
+User Message: "I lost my grandfather last week. He was the one who taught me everything about our traditions. Everything feels so empty now."
+Detected Emotion: Sadness & Grief (Expected: Sadness & Grief)
+Detected Domain: Family (Expected: Family)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 4: Health & Wellness ---
+User Message: "I've been feeling very sluggish lately, almost heavy after every meal. Are there any Ayurvedic suggestions or routines I should follow?"
+Detected Emotion: Sadness & Grief (Expected: None)
+Detected Domain: Ayurveda & Wellness (Expected: Physical Health)
+Detected Intent: Diet Plan (Expected: None)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 5: Spiritual Inquiry ---
+User Message: "I've been successful in my career, but I still feel like something is missing. I want to understand what my true purpose (dharma) is."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 6: Managing Anger ---
+User Message: "I'm so frustrated with my roommate. They never clean up, and I'm tired of being the only one holding things together. I just want to yell at them."
+Detected Emotion: Anger & Frustration (Expected: Anger & Frustration)
+Detected Domain: Physical Health (Expected: None)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 7: Modern Loneliness ---
+User Message: "I just moved to a new city for work. I don't know anyone here, and I spend my weekends just staring at my phone. It's really lonely."
+Detected Emotion: Sadness & Grief (Expected: Sadness & Grief)
+Detected Domain: General Life (Expected: General Life)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 8: Seeking Rituals ---
+User Message: "I want to start my day with more intention. Do you have any advice on morning rituals or what I should check in the Panchang today?"
+Detected Emotion: Gratitude & Peace (Expected: None)
+Detected Domain: Panchang & Astrology (Expected: Panchang & Astrology)
+Detected Intent: Product Inquiry (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 9: Yoga & Mind ---
+User Message: "My back has been hurting from sitting all day. Can you recommend some simple yoga asanas or a meditation technique to help me focus?"
+Detected Emotion: Gratitude & Peace (Expected: None)
+Detected Domain: Meditation & Mind (Expected: Yoga Practice)
+Detected Intent: Routine Request (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 10: Gratitude & Progress ---
+User Message: "I finally finished my big project and spent a wonderful weekend with my family. I feel so grateful and at peace today."
+Detected Emotion: Gratitude & Peace (Expected: Gratitude & Peace)
+Detected Domain: Family (Expected: Family)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 11: Imposter Syndrome ---
+User Message: "I just got promoted to Senior Lead, but I feel like I'm a fraud. Everyone thinks I'm smart, but I'm just waiting for them to realize I don't know what I'm doing. It's making me so anxious."
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Self-Improvement (Expected: Self-Improvement)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 12: Parenting & Discipline ---
+User Message: "I want my kids to learn our values, but they're so absorbed in their screens. Every time I try to talk about traditions, we end up fighting. I feel like I'm failing as a parent."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Family (Expected: Family)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 13: Toxic Workplace ---
+User Message: "My boss constantly takes credit for my work and creates a hostile environment. I try to stay calm, but I'm starting to feel resentful and angry every morning."
+Detected Emotion: Anger & Frustration (Expected: Anger & Frustration)
+Detected Domain: Career & Finance (Expected: Career & Finance)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 14: Post-Success Existential Crisis ---
+User Message: "I finally bought my dream house and reached my financial goals, but I feel more empty than ever. I thought this was what happiness looks like, but I just feel lost."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 15: Social Media Envy ---
+User Message: "I see everyone on Instagram living their 'best life'—traveling, looking perfect—and I just feel so inadequate and unhappy with my own simple life. I know it's filtered, but it still hurts."
+Detected Emotion: Sadness & Grief (Expected: Sadness & Grief)
+Detected Domain: Self-Improvement (Expected: Self-Improvement)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 16: Dealing with Elder Care ---
+User Message: "My parents are aging and need constant help. I love them, but balancing my work, my own kids, and their needs is burning me out. I feel guilty for even feeling tired."
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Family (Expected: Family)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 17: Recovering from Failure ---
+User Message: "My startup just failed after three years of hard work. I've lost my savings and my confidence. I don't know how to start over or even if I should."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Self-Improvement (Expected: Self-Improvement)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 18: Conflict of Values ---
+User Message: "My friends are involved in some business practices that I find unethical. If I speak up, I'll lose my social circle. If I don't, I can't look at myself in the mirror."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 19: Loneliness in a Crowded Room ---
+User Message: "I'm surrounded by people all day—colleagues, family—but I feel like no one truly understands me. It's a deep, quiet ache that I can't quite explain."
+Detected Emotion: Sadness & Grief (Expected: Sadness & Grief)
+Detected Domain: General Life (Expected: General Life)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I’m here with you. Could you tell me a little more about what feels most heavy right now?...
+Status: ✅ PASS
+
+--- Testing Use Case 20: Financial Anxiety vs. Faith ---
+User Message: "I'm constantly worried about inflation and my future. I try to bank on my faith, but every time I see my bank balance, I panic. How do I find balance between planning and trusting?"
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Career & Finance (Expected: Career & Finance)
+Detected Intent: NONE (Expected: None)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 21: The Anxious Student (Hybrid) ---
+User Message: "I have my final exams next week and I'm paralyzed by fear. I can't focus. I need some Gita wisdom to calm my mind, and also is there any natural remedy to improve concentration?"
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 22: Seeking Daily Inspiration (Verse-Only) ---
+User Message: "Today is a beautiful morning. I want to start my meditation with a powerful verse from the Upanishads or Gita about the eternal nature of the soul. Just give me the verse and its meaning."
+Detected Emotion: Gratitude & Peace (Expected: Gratitude & Peace)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: Routine Request (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 23: Physical Fatigue (Product-Only) ---
+User Message: "I'm working long hours in front of a screen and my eyes are burning, and I feel so drained by the evening. I don't need a lecture, just tell me what Ayurvedic products can help me rejuvenate."
+Detected Emotion: Anxiety & Fear (Expected: None)
+Detected Domain: Ayurveda & Wellness (Expected: Physical Health)
+Detected Intent: Product Inquiry (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 24: New Parent Sleep Deprivation (Hybrid) ---
+User Message: "The baby isn't sleeping and neither am I. I feel so irritable and disconnected. Can you share something from the scriptures about patience and maybe a soothing oil or tea I can use?"
+Detected Emotion: Anger & Frustration (Expected: Anger & Frustration)
+Detected Domain: Family (Expected: Family)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 25: Moral Dilemma at Work (Verse-Only) ---
+User Message: "I'm being pressured to overlook a safety violation at my plant. It's my job vs my ethics. I need a verse that talks about Dharma and standing for the truth, even when it's hard."
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 26: Looking for a Gift (Product-Only) ---
+User Message: "My mother's birthday is coming up. She loves traditional rituals and natural scents. What are some premium spiritual or wellness products I can get for her?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Family (Expected: Family)
+Detected Intent: Product Inquiry (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 27: Recovering from Illness (Hybrid) ---
+User Message: "I'm slowly recovering from a fever but my digestion is still very weak. I feel so weak physically and mentally. I'd love a healing mantra or verse, and a supplement for gut health."
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Physical Health (Expected: Physical Health)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 28: Dealing with Success & Pride (Verse-Only) ---
+User Message: "Everything is going so well with my new business that I'm starting to feel a bit too full of myself. I need a reminder from the scriptures about humility and who the real 'doer' is."
+Detected Emotion: Gratitude & Peace (Expected: Gratitude & Peace)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 29: Office Setup Wellness (Product-Only) ---
+User Message: "I'm setting up my new home office. I want it to have a spiritual and calming vibe. What products do you suggest for the desk or the room atmosphere?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Career & Finance (Expected: Career & Finance)
+Detected Intent: Product Inquiry (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 30: Mid-Life Crisis (Hybrid) ---
+User Message: "I've done it all—kids are grown, career is stable—but I feel a void. I'm searching for the next chapter. What does the Gita say about the second half of life, and do you have any journal or book for self-reflection?"
+Detected Emotion: Confusion & Doubt (Expected: Confusion & Doubt)
+Detected Domain: Spiritual Growth (Expected: Spiritual Growth)
+Detected Intent: Verse Request (Expected: None)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 31: Full Day Ayurvedic Diet ---
+User Message: "Can you give me a personalized Ayurvedic diet plan for the whole day? I'm a Pitta type and it's summer."
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Ayurveda & Wellness (Expected: Ayurveda & Wellness)
+Detected Intent: Diet Plan (Expected: Diet Plan)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 32: Puja Planning (Logistics) ---
+User Message: "I want to plan a Satyanarayan Puja at home this Sunday. What items do I need to buy and prepare?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Family (Expected: Family)
+Detected Intent: Puja Guidance (Expected: Puja Guidance)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ✅ PASS
+
+--- Testing Use Case 33: Daily Ganesha Puja Steps ---
+User Message: "I'm a beginner. I want to perform a simple daily Ganesha Puja. What are the exact steps and mantras I should say?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: General Life (Expected: Spiritual Growth)
+Detected Intent: Puja Guidance (Expected: Puja Guidance)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 34: Full Day Yoga Routine ---
+User Message: "Give me a complete yoga routine for the whole day—something for the morning to wake up and something for the night to sleep."
+Detected Emotion: Gratitude & Peace (Expected: None)
+Detected Domain: Yoga Practice (Expected: Yoga Practice)
+Detected Intent: Routine Request (Expected: Routine Request)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 35: Sleep Hygiene Routine ---
+User Message: "I struggle with insomnia. Can you plan a yogic routine for me starting 2 hours before I go to bed?"
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Yoga Practice (Expected: Physical Health)
+Detected Intent: Routine Request (Expected: Routine Request)
+Assistant Response Summary: I understand your question. Let me provide the specific guidance for this....
+Status: ❌ FAIL
+
+--- Testing Use Case 36: 7-Day Meditation Plan ---
+User Message: "I've never meditated. Can you create a 7-day plan to help me start this habit?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Meditation & Mind (Expected: Meditation & Mind)
+Detected Intent: Routine Request (Expected: Routine Request)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 37: Sattvic Weekly Meal ideas ---
+User Message: "I want to follow a Sattvic diet. What are some simple meal ideas for a full week of office lunches?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Ayurveda & Wellness (Expected: Ayurveda & Wellness)
+Detected Intent: Diet Plan (Expected: Diet Plan)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 38: Vastu Altar Setup ---
+User Message: "I'm setting up a spiritual corner in my new apartment. Which direction should it face and what are the 5 essential items I need?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: General Life (Expected: Spiritual Growth)
+Detected Intent: Puja Guidance (Expected: Puja Guidance)
+Assistant Response Summary: That's a very clear request. I'm gathering the relevant wisdom for you right now....
+Status: ✅ PASS
+
+--- Testing Use Case 39: Workplace Spiritual Breaks ---
+User Message: "My job is extremely high-stress. Can you suggest a breakdown of 5-minute 'mindful breaks' I can take at my desk during the day?"
+Detected Emotion: Anxiety & Fear (Expected: Anxiety & Fear)
+Detected Domain: Career & Finance (Expected: Career & Finance)
+Detected Intent: Routine Request (Expected: Routine Request)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+--- Testing Use Case 40: Seasonal Moon Alignment ---
+User Message: "I want to align my life with the moon cycles. Can you tell me what a healthy routine looks like during the Waxing vs Waning moon phases?"
+Detected Emotion: NONE (Expected: None)
+Detected Domain: Panchang & Astrology (Expected: Panchang & Astrology)
+Detected Intent: Routine Request (Expected: Routine Request)
+Assistant Response Summary: I see what you are seeking. Let me look that up for you....
+Status: ✅ PASS
+
+================================================================================
+FINAL SUMMARY
+================================================================================
+✅ PASS - Use Case 1: Career & Stress
+✅ PASS - Use Case 2: Relationship Issues
+✅ PASS - Use Case 3: Grief & Loss
+✅ PASS - Use Case 4: Health & Wellness
+✅ PASS - Use Case 5: Spiritual Inquiry
+✅ PASS - Use Case 6: Managing Anger
+✅ PASS - Use Case 7: Modern Loneliness
+✅ PASS - Use Case 8: Seeking Rituals
+✅ PASS - Use Case 9: Yoga & Mind
+✅ PASS - Use Case 10: Gratitude & Progress
+✅ PASS - Use Case 11: Imposter Syndrome
+✅ PASS - Use Case 12: Parenting & Discipline
+✅ PASS - Use Case 13: Toxic Workplace
+✅ PASS - Use Case 14: Post-Success Existential Crisis
+✅ PASS - Use Case 15: Social Media Envy
+✅ PASS - Use Case 16: Dealing with Elder Care
+✅ PASS - Use Case 17: Recovering from Failure
+✅ PASS - Use Case 18: Conflict of Values
+✅ PASS - Use Case 19: Loneliness in a Crowded Room
+✅ PASS - Use Case 20: Financial Anxiety vs. Faith
+✅ PASS - Use Case 21: The Anxious Student (Hybrid)
+✅ PASS - Use Case 22: Seeking Daily Inspiration (Verse-Only)
+✅ PASS - Use Case 23: Physical Fatigue (Product-Only)
+✅ PASS - Use Case 24: New Parent Sleep Deprivation (Hybrid)
+✅ PASS - Use Case 25: Moral Dilemma at Work (Verse-Only)
+✅ PASS - Use Case 26: Looking for a Gift (Product-Only)
+✅ PASS - Use Case 27: Recovering from Illness (Hybrid)
+✅ PASS - Use Case 28: Dealing with Success & Pride (Verse-Only)
+✅ PASS - Use Case 29: Office Setup Wellness (Product-Only)
+✅ PASS - Use Case 30: Mid-Life Crisis (Hybrid)
+✅ PASS - Use Case 31: Full Day Ayurvedic Diet
+✅ PASS - Use Case 32: Puja Planning (Logistics)
+✅ PASS - Use Case 33: Daily Ganesha Puja Steps
+✅ PASS - Use Case 34: Full Day Yoga Routine
+❌ FAIL - Use Case 35: Sleep Hygiene Routine
+✅ PASS - Use Case 36: 7-Day Meditation Plan
+✅ PASS - Use Case 37: Sattvic Weekly Meal ideas
+✅ PASS - Use Case 38: Vastu Altar Setup
+✅ PASS - Use Case 39: Workplace Spiritual Breaks
+✅ PASS - Use Case 40: Seasonal Moon Alignment
+
+Score: 39/40

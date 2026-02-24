@@ -8,10 +8,12 @@ logger = logging.getLogger(__name__)
 class ProductService:
     def __init__(self):
         self.db = get_mongo_client()
-        self.collection = self.db["products"]
+        self.collection = self.db["products"] if self.db is not None else None
 
     async def get_all_products(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Fetch all products from the collection"""
+        if self.collection is None:
+            return []
         query = {"is_active": True} if active_only else {}
         cursor = self.collection.find(query)
         products = []
@@ -34,7 +36,7 @@ class ProductService:
                 keywords.append(t)
                 seen.add(t)
         
-        if not keywords:
+        if not keywords or self.collection is None:
             return []
 
         # Strategy:
@@ -106,6 +108,8 @@ class ProductService:
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
         """Get recommended products, optionally filtered by category"""
+        if self.collection is None:
+            return []
         query = {"is_active": True}
         if category:
             query["category"] = {"$regex": category, "$options": "i"}
