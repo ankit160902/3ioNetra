@@ -274,6 +274,14 @@ class ConversationStorage:
 
     def __init__(self):
         self.db = get_mongo_client()
+        import redis
+        self._redis = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True
+        )
 
     def save_conversation(
         self,
@@ -283,45 +291,17 @@ class ConversationStorage:
         messages: list,
         memory: Optional[Dict] = None
     ) -> str:
-        """Add unique messages and persistent memory to user's global history"""
+        """Save a specific session to persistent history"""
         if self.db is None: return ""
         
-        # Find user's conversation document
-        user_conversation = self.db.conversations.find_one({"user_id": user_id})
+        # Use session_id/conversation_id to identify the specific session
+        if not conversation_id: return "" # Must have a session ID
         
-        existing_messages = user_conversation.get("messages", []) if user_conversation else []
-        
-        # Deduplication signature
-        existing_sigs = set()
-        for m in existing_messages:
-            sig = (m.get("role"), m.get("content"), m.get("timestamp"))
-            existing_sigs.add(sig)
-            
-        new_to_add = []
-        for m in messages:
-            sig = (m.get("role"), m.get("content"), m.get("timestamp"))
-            if sig not in existing_sigs:
-                new_to_add.append(m)
-        
-        if not new_to_add and not memory:
-            return str(user_conversation["_id"]) if user_conversation else ""
-
-        # Session separator logic
-        if existing_messages and new_to_add:
-            # Add separator only if the first new message isn't already a separator
-            if not any("Session" in str(m.get("content", "")) for m in new_to_add[:1]):
-                 existing_messages.append({
-                    "role": "system",
-                    "content": f"--- New Session: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} ---",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-
-        # Add all new messages
-        existing_messages.extend(new_to_add)
+        query = {"user_id": user_id, "session_id": conversation_id}
         
         update_data = {
-            "messages": existing_messages,
-            "message_count": len(existing_messages),
+            "messages": messages,
+            "message_count": len(messages),
             "updated_at": datetime.utcnow(),
             "last_title": title
         }
@@ -329,53 +309,88 @@ class ConversationStorage:
         if memory:
             update_data["memory"] = memory
 
-        if user_conversation:
-            # Update document
-            self.db.conversations.update_one(
-                {"user_id": user_id},
-                {"$set": update_data}
-            )
-            conv_id = user_conversation["_id"]
-        else:
-            # Create new conversation document for user
-            conversation_doc = {
-                "user_id": user_id,
-                "created_at": datetime.utcnow(),
-                **update_data
-            }
-            
-            result = self.db.conversations.insert_one(conversation_doc)
-            conv_id = result.inserted_id
+        self.db.conversations.update_one(
+            query,
+            {"$set": update_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
+            upsert=True
+        )
         
-        logger.info(f"Updated persistent history and memory for user {user_id}")
-        return str(conv_id)
+        # Invalidate cache
+        try:
+            self._redis.delete(f"history_list:{user_id}")
+        except Exception as e:
+            logger.error(f"Redis cache invalidation error: {e}")
+        
+        logger.info(f"Saved persistent history for session {conversation_id}")
+        return str(conversation_id)
 
-    def get_conversations_list(self, user_id: str, limit: int = 20) -> list:
-        """Get user's conversation (returns single document)"""
+    def get_conversations_list(self, user_id: str, limit: int = 50) -> list:
+        """Get list of individual sessions with Redis caching"""
+        import json
+        
+        # Try cache first
+        cache_key = f"history_list:{user_id}"
+        try:
+            cached_data = self._redis.get(cache_key)
+            if cached_data:
+                logger.info(f"🚀 Serving history list from Redis for user {user_id}")
+                return json.loads(cached_data)
+        except Exception as e:
+            logger.error(f"Redis history fetch error: {e}")
+
         if self.db is None: return []
-        conversation = self.db.conversations.find_one({"user_id": user_id})
         
-        if not conversation:
-            return []
+        # Find all session documents for user, sorted by most recent
+        cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(limit)
         
-        return [
-            {
-                "id": str(conversation["_id"]),
-                "title": conversation.get("last_title", "All Conversations"),
-                "created_at": conversation["created_at"].isoformat(),
-                "message_count": conversation["message_count"],
-            }
-        ]
+        history_list = []
+        for conv in cursor:
+            history_list.append({
+                "id": str(conv["_id"]),
+                "session_id": conv.get("session_id"),
+                "title": conv.get("last_title", "New Conversation"),
+                "created_at": conv["created_at"].isoformat() if isinstance(conv["created_at"], datetime) else str(conv["created_at"]),
+                "updated_at": conv["updated_at"].isoformat() if isinstance(conv["updated_at"], datetime) else str(conv["updated_at"]),
+                "message_count": conv.get("message_count", 0),
+            })
+        
+        # Cache for 10 minutes
+        try:
+            self._redis.setex(cache_key, 600, json.dumps(history_list))
+        except Exception as e:
+            logger.warning(f"Failed to cache history list: {e}")
+
+        return history_list
 
     def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
-        """Get user's complete conversation history"""
+        """Get a specific session's history"""
         if self.db is None: return None
-        conversation = self.db.conversations.find_one({"user_id": user_id})
+        
+        from bson import ObjectId
+        query = {"user_id": user_id}
+        
+        # If conversation_id is provided, try finding by mongo _id or session_id
+        if conversation_id:
+            try:
+                if len(conversation_id) == 24: # MongoDB ObjectId
+                    query = {"_id": ObjectId(conversation_id), "user_id": user_id}
+                else: # session_id (UUID string)
+                    query = {"session_id": conversation_id, "user_id": user_id}
+            except:
+                query = {"session_id": conversation_id, "user_id": user_id}
+        else:
+            # Default to latest session if none specified
+            cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(1)
+            conversation = next(cursor, None)
+            if not conversation: return None
+            query = {"_id": conversation["_id"]}
+
+        conversation = self.db.conversations.find_one(query)
 
         if conversation:
-            conversation["created_at"] = conversation["created_at"].isoformat()
-            conversation["updated_at"] = conversation["updated_at"].isoformat()
-            conversation["id"] = str(conversation["_id"])
+            conversation["created_at"] = conversation["created_at"].isoformat() if isinstance(conversation["created_at"], datetime) else str(conversation["created_at"])
+            conversation["updated_at"] = conversation["updated_at"].isoformat() if isinstance(conversation["updated_at"], datetime) else str(conversation["updated_at"])
+            conversation["id"] = str(conversation.pop("_id"))
 
         return conversation
 
@@ -383,6 +398,12 @@ class ConversationStorage:
         """Delete user's entire conversation history"""
         if self.db is None: return False
         result = self.db.conversations.delete_one({"user_id": user_id})
+
+        # Invalidate cache
+        try:
+            self._redis.delete(f"history_list:{user_id}")
+        except Exception as e:
+            logger.error(f"Redis cache invalidation error: {e}")
 
         if result.deleted_count > 0:
             logger.info(f"Deleted all conversations for user {user_id}")

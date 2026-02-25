@@ -176,9 +176,10 @@ class CompanionEngine:
 
             # 🛍️ PRODUCT RECOMMENDATION
             products = []
-            should_recommend = is_product_request or \
-                              analysis.get("recommend_products", False) or \
-                              analysis.get("intent") == "PRODUCT_SEARCH"
+            is_product_request = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+            
+            # In Guidance Phase, we are more open to recommending if it fits the context
+            should_recommend = is_product_request or analysis.get("recommend_products", False)
             
             if should_recommend:
                 # Use precise keywords if available from LLM analysis
@@ -187,12 +188,13 @@ class CompanionEngine:
                     # Fallback to message or extracted topics
                     search_terms = message
                 
-                logger.info(f"Producing selective product recommendations for query terms: {search_terms}")
-                products = await self.product_service.search_products(search_terms)
+                life_domain = analysis.get("life_domain", "unknown")
+                logger.info(f"Producing selective product recommendations for query terms: {search_terms} | Domain: {life_domain}")
+                products = await self.product_service.search_products(search_terms, life_domain=life_domain)
                 
                 # If no specific products found, but it was an explicit request, show general ones
                 if not products and (is_product_request or analysis.get("intent") == "PRODUCT_SEARCH"):
-                    products = await self.product_service.get_recommended_products()
+                    products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
 
             # Return the response, with the docs and products populated
             return random.choice(acknowledgements), True, context_docs, turn_topics, products, ConversationPhase.GUIDANCE
@@ -237,7 +239,11 @@ class CompanionEngine:
 
             # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase)
             products = []
-            should_recommend = analysis.get("recommend_products", False) or analysis.get("intent") == "PRODUCT_SEARCH"
+            # In Listening phase, ONLY recommend if it's an explicit product inquiry or intent
+            is_explicit_product = analysis.get("intent") == "PRODUCT_SEARCH" or \
+                                 "Product Inquiry" in turn_topics
+                                 
+            should_recommend = is_explicit_product
 
             if should_recommend:
                 # Use precise keywords if available from LLM analysis
@@ -245,11 +251,12 @@ class CompanionEngine:
                 if not search_terms:
                     search_terms = message
                     
-                logger.info(f"Producing selective product recommendations in listening phase for: {search_terms}")
-                products = await self.product_service.search_products(search_terms)
+                life_domain = analysis.get("life_domain", "unknown")
+                logger.info(f"Producing explicit product recommendations in listening phase for: {search_terms} | Domain: {life_domain}")
+                products = await self.product_service.search_products(search_terms, life_domain=life_domain)
                 
                 if not products and analysis.get("intent") == "PRODUCT_SEARCH":
-                    products = await self.product_service.get_recommended_products()
+                    products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
 
             return reply, False, context_docs, turn_topics, products, current_phase
 

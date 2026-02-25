@@ -13,24 +13,57 @@ class IntentAgent:
     """
 
     INTENT_PROMPT = """
-    You are an expert intent classifier for a spiritual companion bot named 3ioNetra.
-    Analyze the following user message and provide a structured JSON response.
+    You are an expert intent classifier for 3ioNetra, a spiritual companion bot.
+    Analyze the user message below and return a JSON object.
 
     USER MESSAGE: "{message}"
     CONVERSATION CONTEXT: {context}
 
-    Return a JSON object with the following fields:
-    1. "intent": One of [GREETING, SEEKING_GUIDANCE, EXPRESSING_EMOTION, ASKING_INFO, ASKING_PANCHANG, PRODUCT_SEARCH, CLOSURE, OTHER]
-    2. "emotion": The primary emotion detected (e.g., sadness, anxiety, joy, neutral, etc.)
-    3. "life_domain": The relevant life area (e.g., career, family, health, relationships, spiritual, unknown)
-    4. "entities": A dictionary of extracted entities like {{"name": "...", "deity": "...", "location": "...", "ritual": "Satyanarayan Puja", "item": "puja thali"}}. Extract specific nouns related to spiritual practices.
-    5. "urgency": One of [low, normal, high, crisis]
-    6. "summary": A very brief 1-sentence summary of what the user is actually asking or saying. Use the context to resolve pronouns like "it", "this", or "same".
-    7. "needs_direct_answer": boolean - True if the user asked a specific factual or "how-to" question that requires a direct answer rather than just empathy.
-    8. "recommend_products": boolean - True if the user explicitly asks for a product/service, where to buy something, or if a specific spiritual tool or service (like a mala, astrology consultation, specific puja, or incense) is a practical solution to their query.
-    9. "product_search_keywords": List of strings - If recommend_products is true, identify 3-4 precise keywords for the product database. CRITICAL: Resolve references using context. If the user asks for "essentials for same" and the context is "Satyanarayan Puja", the keywords MUST include "Satyanarayan" and specific puja items.
+    Return ONLY a JSON object with these fields:
 
-    Respond ONLY with the JSON object.
+    1. "intent": Choose ONE from:
+       [GREETING, SEEKING_GUIDANCE, EXPRESSING_EMOTION, ASKING_INFO, ASKING_PANCHANG, PRODUCT_SEARCH, CLOSURE, OTHER]
+       - ASKING_INFO: factual "what is", "how does", "tell me about" questions
+       - SEEKING_GUIDANCE: planning/advice requests like "give me a routine", "plan me a puja", "how should I"
+       - PRODUCT_SEARCH: ONLY when user explicitly asks to buy/find/order something
+
+    2. "emotion": The dominant emotion (e.g., grief, anxiety, hope, joy, neutral)
+
+    3. "life_domain": Primary area of concern. Choose from:
+       [career, family, relationships, health, spiritual, finance]
+       - career: job, boss, business, workplace, work-life balance
+       - family: parents, children, siblings, elders
+       - relationships: spouse, partner, dating, social isolation, loneliness
+       - health: illness, fatigue, sleep, Ayurveda, diet, yoga, body
+       - spiritual: deity, mantra, puja ritual, scripture, meditation, soul, karma (pure practice queries)
+       - finance: money, investment, savings
+
+    4. "entities": Dict of extracted nouns e.g. {{"deity": "Shiva", "ritual": "Abhishekam", "item": "mala"}}
+
+    5. "urgency": One of [low, normal, high, crisis]
+
+    6. "summary": One-sentence summary of the user's core need.
+
+    7. "needs_direct_answer": boolean
+       - True: user asked a specific HOW-TO, WHAT, or planning question (routine, steps, procedure)
+       - False: user is venting, sharing feelings, or seeking emotional support
+
+    8. "recommend_products": boolean — STRICT RULES:
+       - True ONLY when:
+         a) User explicitly mentions: buy, shop, items, essentials, what do I need, which mala, which oil
+         b) User asks about a puja/ritual AND needs physical items to perform it
+         c) User describes a workplace/home/body need where a product is the clear solution
+       - False when:
+         a) User is expressing pure grief, loss, or spiritual seeking without asking for help
+         b) User asks for a yoga/pranayama routine (no product needed)
+         c) User wants a diet plan (food, not a product)
+         d) User asks philosophical/scriptural questions
+
+    9. "product_search_keywords": List of 3-4 specific product keywords if recommend_products is True.
+       Use context to resolve references (e.g., "essentials" + context "Satyanarayan Puja" → ["Satyanarayan", "puja samagri", "ghee"])
+       Leave empty [] if recommend_products is False.
+
+    Respond ONLY with the valid JSON object.
     """
 
     def __init__(self):

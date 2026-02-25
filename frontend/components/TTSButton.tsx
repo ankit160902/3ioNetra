@@ -103,89 +103,76 @@ export default function TTSButton({
         }
     }, [state, text, lang, cleanup]);
 
-    // Stop on unmount
-    // (Note: using useRef for cleanup reference to avoid stale closures)
-
     const isVerse = variant === 'verse';
 
     // Icon SVGs
     const PlayIcon = () => (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
             <path d="M8 5v14l11-7z" />
         </svg>
     );
 
     const PauseIcon = () => (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3 h-3">
             <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
         </svg>
     );
 
     const LoadingIcon = () => (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 animate-spin">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-3 h-3 animate-spin text-current">
             <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
         </svg>
     );
 
-    const StopIcon = () => (
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-3.5 h-3.5">
-            <rect x="6" y="6" width="12" height="12" rx="1" />
-        </svg>
-    );
-
     const getIcon = () => {
         switch (state) {
-            case 'loading':
-                return <LoadingIcon />;
-            case 'playing':
-                return <PauseIcon />;
-            case 'paused':
-                return <PlayIcon />;
-            default:
-                return <PlayIcon />;
+            case 'loading': return <LoadingIcon />;
+            case 'playing': return <PauseIcon />;
+            case 'paused': return <PlayIcon />;
+            default: return <PlayIcon />;
         }
     };
 
-    const getLabel = () => {
+    const getLabelText = () => {
         if (label) return label;
         if (isVerse) {
             switch (state) {
-                case 'loading': return 'Loading...';
-                case 'playing': return 'Pause Verse';
-                case 'paused': return 'Resume Verse';
-                default: return '🔊 Play Verse';
+                case 'loading': return 'fetching...';
+                case 'playing': return 'pause verse';
+                case 'paused': return 'resume verse';
+                default: return 'play verse';
             }
         }
         switch (state) {
-            case 'loading': return 'Loading...';
-            case 'playing': return 'Pause';
-            case 'paused': return 'Resume';
-            default: return '🔊 Listen';
+            case 'loading': return 'fetching...';
+            case 'playing': return 'pause';
+            case 'paused': return 'resume';
+            default: return 'listen';
         }
     };
 
     const baseClasses = isVerse
-        ? 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium transition-all duration-200 cursor-pointer select-none border'
-        : 'inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 cursor-pointer select-none border';
+        ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer select-none border'
+        : 'inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all duration-300 cursor-pointer select-none border';
 
     const colorClasses = isVerse
         ? state === 'playing'
-            ? 'bg-amber-100 text-amber-800 border-amber-300 shadow-sm'
-            : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 hover:border-amber-300'
+            ? 'bg-amber-100/50 text-amber-800 border-amber-300/50 shadow-inner ring-4 ring-amber-500/5'
+            : 'bg-white text-amber-700 border-amber-100 hover:bg-amber-50 hover:border-amber-200'
         : state === 'playing'
-            ? 'bg-orange-100 text-orange-800 border-orange-300 shadow-sm'
-            : 'bg-orange-50 text-orange-700 border-orange-200 hover:bg-orange-100 hover:border-orange-300';
+            ? 'bg-orange-100/50 text-orange-800 border-orange-300/50 shadow-inner ring-4 ring-orange-500/5'
+            : 'bg-white text-orange-700 border-orange-100 hover:bg-orange-50 hover:border-orange-200';
 
     return (
         <button
             onClick={handleClick}
             disabled={state === 'loading'}
-            className={`${baseClasses} ${colorClasses} ${className}`}
+            className={`${baseClasses} ${colorClasses} ${className} active:scale-90`}
             title={isVerse ? 'Play verse in Hindi' : 'Play response in Hindi'}
         >
             {getIcon()}
-            <span>{getLabel()}</span>
+            <span>{getLabelText()}</span>
         </button>
     );
 }

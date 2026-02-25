@@ -13,6 +13,16 @@ services:
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
 
+  # Redis for Session Storage
+  redis:
+    image: redis:alpine
+    container_name: spiritual-bot-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./data/redis_data:/data
+    restart: always
+
   # Backend API
   backend:
     build:
@@ -28,9 +38,13 @@ services:
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - PYTHONUNBUFFERED=1
     depends_on:
       - qdrant
+      - redis
     command: uvicorn main:app --host 0.0.0.0 --port 8080 --reload
 
   # Frontend

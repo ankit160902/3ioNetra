@@ -226,11 +226,51 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
     setError(null);
   }, []);
 
+  /* =======================
+     Load session (NEW)
+  ======================= */
+  const loadSession = useCallback(async (sessionId: string): Promise<any> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/user/conversations/${sessionId}`, {
+        method: 'GET',
+        headers: {
+          ...authHeader,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to load session');
+      }
+
+      const data = await res.json();
+
+      // Update local session state from the session metadata if available
+      // Note: Backend conversation doc might have different structure than active session
+      setSession({
+        sessionId: data.session_id || sessionId,
+        phase: (data.phase as any) || 'listening',
+        turnCount: data.turn_count || (data.messages ? data.messages.length : 0),
+        signalsCollected: data.signals_collected || {},
+        isComplete: data.is_complete || false,
+      });
+
+      return data;
+    } catch (e: any) {
+      setError(e.message || 'Failed to load session');
+      throw e;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [authHeader]);
+
   return {
     session,
     isLoading,
     error,
     sendMessage,
     resetSession,
+    loadSession,
   };
 }

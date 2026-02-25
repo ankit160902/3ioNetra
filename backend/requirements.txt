@@ -39,3 +39,4 @@ python-dotenv
 # Logging
 loguru
 email-validator
+redis

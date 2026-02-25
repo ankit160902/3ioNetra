@@ -45,17 +45,36 @@ class UserContext:
 # Utilities
 # --------------------------------------------------
 
-def clean_response(text: str) -> str:
-    """Remove trailing questions and clean formatting"""
-    # Simply return the text cleaned of whitespace
-    # We rely on prompts to control questionasking behavior now
-    return text.strip()
+import re
 
-    # OLD LOGIC disabled because it was deleting single-line questions entirely
-    # lines = [line.strip() for line in text.strip().split("\n")]
-    # while lines and lines[-1].endswith("?"):
-    #     lines.pop()
-    # return "\n".join(lines).strip()
+def clean_response(text: str) -> str:
+    """Remove trailing questions and clean formatting, especially from [VERSE] tags"""
+    if not text:
+        return ""
+        
+    # Simply return the text cleaned of whitespace initially
+    text = text.strip()
+    
+    # Robustly clean content inside [VERSE] tags to prevent markdown artifacts
+    def clean_verse_content(match):
+        content = match.group(1).strip()
+        # Remove common markdown hallucinations at start/end
+        # - Double/Triple asterisks (bold/italic)
+        # - Leading/trailing markdown quotes (>)
+        # - Extra double/single quotes that the LLM might hallucinate
+        # - List markers like - or *
+        content = re.sub(r'^[\*\s_>"`„“\']+', '', content)
+        content = re.sub(r'[\*\s_>"`„“\']+$', '', content)
+        
+        # Ensure we don't accidentally strip the closing quote of a citation if it's legitimate
+        # but usually verses are provided "Text" - Source, so we can be careful.
+        
+        return f"[VERSE]\n{content}\n[/VERSE]"
+
+    # Apply sanitization to all verse blocks
+    text = re.sub(r'\[VERSE\]([\s\S]*?)\[/VERSE\]', clean_verse_content, text)
+    
+    return text
 
 
 def is_closure_signal(text: str) -> bool:
@@ -113,8 +132,8 @@ Core principles:
    - If a past context (with a date) is relevant to the current topic, acknowledge it naturally. "I remember we discussed [Topic] last time..." or "Since we last talked about [Old Topic], how has that been progressing?"
    - SHOW, DON'T TELL: Don't say "I am looking at your history." Just refer to the facts you know.
    - If you see a "New Session" separator in the conversation history, it means some time has passed. Greet them as a returning friend. "It's good to see you again. I've been holding space for what we last shared."
-6. BREVITY & TONE: Keep responses concise. Talk like a wise friend over chai. No lists, no markdown symbols (except the [VERSE] tags).
 7. ORIGINAL LANGUAGE: When sharing a verse, ALWAYS prioritize the original language (Sanskrit or Hindi) as provided in the data. Do NOT translate the verse text into English within the [VERSE] tags if the original language is available.
+8. NO MARKDOWN IN VERSES: Content inside [VERSE]...[/VERSE] must be CLEAN TEXT. NEVER use asterisks (**) for bold, never use markdown quotes (>), and never use bullet points inside these tags. Only the verse text and the source reference.
 
 Response Structure:
 - Start with a warm acknowledgment or a direct answer to their question.

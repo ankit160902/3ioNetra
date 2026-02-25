@@ -147,6 +147,78 @@ class MongoSessionManager(SessionManager):
 
 
 # ============================================================================
+# Redis Session Manager (Production-Grade)
+# ============================================================================
+
+class RedisSessionManager(SessionManager):
+    def __init__(self, ttl_minutes: int):
+        import redis
+        import json
+        
+        self._ttl_seconds = ttl_minutes * 60
+        self._redis = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True
+        )
+        logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m)")
+        
+        # Test connection
+        try:
+            self._redis.ping()
+            logger.info("✅ Redis connection established")
+        except Exception as e:
+            logger.error(f"❌ Redis connection failed: {e}")
+            raise e
+
+    async def create_session(self, min_signals=4, min_turns=3, max_turns=6) -> SessionState:
+        session = SessionState(
+            min_signals_threshold=min_signals,
+            min_clarification_turns=min_turns,
+            max_clarification_turns=max_turns
+        )
+        await self.update_session(session)
+        logger.info(f"🆕 Created Redis session {session.session_id}")
+        return session
+
+    async def get_session(self, session_id: str) -> Optional[SessionState]:
+        import json
+        try:
+            data = self._redis.get(f"session:{session_id}")
+            if not data:
+                return None
+            
+            session_dict = json.loads(data)
+            return SessionState.from_dict(session_dict)
+        except Exception as e:
+            logger.error(f"Redis get_session error: {e}")
+            return None
+
+    async def update_session(self, session: SessionState) -> None:
+        import json
+        session.last_activity = datetime.utcnow()
+        data = session.to_dict()
+        
+        try:
+            # Store as JSON with TTL
+            self._redis.setex(
+                f"session:{session.session_id}",
+                self._ttl_seconds,
+                json.dumps(data)
+            )
+        except Exception as e:
+            logger.error(f"Redis update_session error: {e}")
+
+    async def delete_session(self, session_id: str) -> None:
+        try:
+            self._redis.delete(f"session:{session_id}")
+        except Exception as e:
+            logger.error(f"Redis delete_session error: {e}")
+
+
+# ============================================================================
 # Singleton Factory
 # ============================================================================
 
@@ -156,13 +228,23 @@ _session_manager: Optional[SessionManager] = None
 def get_session_manager() -> SessionManager:
     """
     Singleton session manager.
-    MongoDB is preferred if configured, otherwise in-memory.
+    Redis is preferred for production, then MongoDB, then in-memory.
     """
     global _session_manager
 
     if _session_manager is None:
         ttl = settings.SESSION_TTL_MINUTES
 
+        # 1. Try Redis first (High Performance)
+        if settings.REDIS_HOST:
+            try:
+                _session_manager = RedisSessionManager(ttl)
+                logger.info("🚀 Using Redis session storage")
+                return _session_manager
+            except Exception as e:
+                logger.error(f"⚠️ Redis initialization failed: {e}")
+
+        # 2. Try MongoDB (Persistence fallback)
         if settings.MONGODB_URI and settings.DATABASE_NAME:
             try:
                 _session_manager = MongoSessionManager(ttl)

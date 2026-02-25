@@ -706,40 +706,22 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             # Set user_id for long-term memory tracking
             session.user_id = user['id']
             
-            # 🔥 PERSISTENCE: Load global conversation history and deep memory if this is a new session
+            # Restoration of high-level memory/story (without prepending full history)
             if session.turn_count == 0:
                 try:
                     storage = get_conversation_storage()
-                    # Pass empty string to get the user's global conversation doc
-                    past_convo = storage.get_conversation(user["id"], "")
-                    if past_convo and past_convo.get("messages"):
-                        past_messages = past_convo["messages"]
-                        # Prepend last 15 messages for context
-                        context_history = past_messages[-15:]
-                        
-                        # Insert a clear separator so the LLM knows there is a
-                        # time gap between the loaded history and the new session
-                        separator = {
-                            "role": "system",
-                            "content": "=== New Session (Returning User — previous conversation loaded above) ==="
-                        }
-                        session.conversation_history = context_history + [separator] + session.conversation_history
-                        
-                        # Mark as returning user so companion and LLM can acknowledge continuity
-                        session.is_returning_user = True
-                        
+                    past_convo = storage.get_conversation(user["id"], "") # Get latest for memory context
+                    if past_convo:
                         # Restore high-level story and memory from DB if available
                         if past_convo.get("memory"):
                             from models.memory_context import ConversationMemory
                             session.memory = ConversationMemory.from_dict(past_convo["memory"])
                             logger.info(f"✅ Restored permanent memory story for user {user['id']}")
-                        else:
-                            # Reconstruct high-level memory context from history if no saved memory exists
-                            await companion_engine.reconstruct_memory(session, context_history)
                         
-                        logger.info(f"✅ Loaded {len(context_history)} past history messages for returning user {user['id']}")
+                        # Mark as returning user for acknowledgement logic
+                        session.is_returning_user = True
                 except Exception as e:
-                    logger.error(f"Failed to load past history in session: {e}")
+                    logger.error(f"Failed to restore past memory in session: {e}")
 
             logger.info(
                 f"Session {session.session_id}: Refreshed user data "

@@ -22,8 +22,8 @@ class ProductService:
             products.append(doc)
         return products
 
-    async def search_products(self, query_text: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Search products by name or category with precision"""
+    async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5) -> List[Dict[str, Any]]:
+        """Search products by name or category with precision and domain context"""
         import re
         # Tokenize and clean
         tokens = re.findall(r'\w+', query_text.lower())
@@ -85,20 +85,32 @@ class ProductService:
                     matched_keywords += 1
 
             # Multi-term boost: significantly reward products that match more of the search terms
-            # This ensures "Rudraksha Mala" ranks higher than a generic "Mala" when searching for both.
             if matched_keywords > 1:
                 score *= (1 + matched_keywords) 
 
+            # Life Domain Category Boosting
+            domain_category_map = {
+                "career": ["Astrostore", "ASTROLOGY", "Astro List"],
+                "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential"],
+                "health": ["Wellness", "Ayurvedic"],
+                "spiritual": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore"],
+                "family": ["Pooja Essential", "Puja Essential", "Spiritual Home"]
+            }
+            
+            boosted_categories = domain_category_map.get(life_domain.lower(), [])
+            if any(cat in product.get("category", "") for cat in boosted_categories):
+                score += 25  # Significant boost for domain match
+            
             # Category Boosts
             # 1. Physical products boost
             physical_categories = ["Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home"]
             if product.get("category") in physical_categories:
-                score += 15
+                score += 10
 
             # 2. Spiritual Services and Astrology boost
             service_categories = ["ASTROLOGY", "Astro List", "Puja", "Seva", "Ank Shastra"]
             if product.get("category") in service_categories:
-                score += 20 
+                score += 15 
 
             return score
 

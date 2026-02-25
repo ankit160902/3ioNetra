@@ -4,6 +4,7 @@ Configuration management for 3ioNetra Spiritual Companion
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -83,6 +84,14 @@ class Settings(BaseSettings):
     MONGODB_URI: str = Field(default="", env="MONGODB_URI")
     DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
     DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
+
+    # ------------------------------------------------------------------
+    # Redis Settings
+    # ------------------------------------------------------------------
+    REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
+    REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
+    REDIS_DB: int = Field(default=0, env="REDIS_DB")
+    REDIS_PASSWORD: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
 
     # ------------------------------------------------------------------
     # System Prompt

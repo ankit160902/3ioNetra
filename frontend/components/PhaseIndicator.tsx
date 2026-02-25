@@ -11,20 +11,13 @@ interface PhaseIndicatorProps {
   signalsCollected?: Record<string, string>;
 }
 
-const phases = [
-  { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
-  { id: 'guidance', label: 'Guidance', description: 'Sharing wisdom' },
-  { id: 'closure', label: 'Closing', description: 'Wrapping up' },
-] as const;
-
-// Combined phases mapping for indices
 const allPhases = [
-  { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
-  { id: 'clarification', label: 'Understanding', description: 'Learning about your situation' },
-  { id: 'synthesis', label: 'Reflecting', description: 'Finding the right guidance' },
+  { id: 'listening', label: 'Listening', description: 'Learning about you' },
+  { id: 'clarification', label: 'Listening', description: 'Learning about you' },
+  { id: 'synthesis', label: 'Reflecting', description: 'Finding wisdom' },
   { id: 'answering', label: 'Guidance', description: 'Sharing wisdom' },
   { id: 'guidance', label: 'Guidance', description: 'Sharing wisdom' },
-  { id: 'closure', label: 'Closing', description: 'Wrapping up' },
+  { id: 'closure', label: 'Complete', description: 'Peace be with you' },
 ] as const;
 
 export function PhaseIndicator({
@@ -33,18 +26,10 @@ export function PhaseIndicator({
   maxTurns = 6,
   signalsCollected = {},
 }: PhaseIndicatorProps) {
-  const currentIndex = allPhases.findIndex((p) => p.id === phase);
-
-  // Map current phase to display phase index (0, 1, or 2)
-  let displayIndex = 0;
-  if (phase === 'synthesis') displayIndex = 1;
-  else if (phase === 'answering' || phase === 'guidance' || phase === 'closure') displayIndex = 1; // Show as middle or end?
-
-  // Re-define display phases for UI
   const displayPhases = [
-    { id: 'listening', label: 'Understanding', description: 'Learning about your situation' },
-    { id: 'guidance', label: 'Guidance', description: 'Sharing dharmic wisdom' },
-    { id: 'closure', label: 'Complete', description: 'Peace be with you' },
+    { id: 'listening', label: 'Listening', description: 'Understanding you' },
+    { id: 'guidance', label: 'Guidance', description: 'Sharing wisdom' },
+    { id: 'closure', label: 'Complete', description: 'Stay blessed' },
   ];
 
   const currentDisplayIndex = (phase === 'listening' || phase === 'clarification') ? 0
@@ -54,91 +39,53 @@ export function PhaseIndicator({
   const signalCount = Object.keys(signalsCollected).length;
 
   return (
-    <div className="w-full px-4 py-3 bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100">
-      {/* Phase Progress */}
-      <div className="flex items-center justify-center gap-2 mb-2">
+    <div className="w-full px-4 py-2 bg-white/50 backdrop-blur-sm border-b border-orange-100 flex items-center justify-between animate-fade-in">
+      <div className="flex items-center gap-4">
         {displayPhases.map((p, index) => (
-          <React.Fragment key={p.id}>
-            {/* Phase Circle */}
-            <div className="flex flex-col items-center">
-              <div
-                className={`
-                  w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
-                  transition-all duration-300
-                  ${index < currentDisplayIndex
-                    ? 'bg-green-500 text-white'
-                    : index === currentDisplayIndex
-                      ? 'bg-orange-500 text-white ring-2 ring-orange-300 ring-offset-2'
-                      : 'bg-gray-200 text-gray-500'
-                  }
-                `}
-              >
-                {index < currentDisplayIndex ? (
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                ) : (
-                  index + 1
-                )}
-              </div>
-              <span
-                className={`
-                  text-xs mt-1 font-medium
-                  ${index === currentDisplayIndex ? 'text-orange-700' : 'text-gray-500'}
-                `}
-              >
-                {p.label}
-              </span>
+          <div key={p.id} className="flex items-center gap-2">
+            <div
+              className={`
+                w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black
+                transition-all duration-500 shadow-sm
+                ${index < currentDisplayIndex
+                  ? 'bg-green-500 text-white'
+                  : index === currentDisplayIndex
+                    ? 'bg-orange-500 text-white ring-2 ring-orange-200'
+                    : 'bg-gray-100 text-gray-400'
+                }
+              `}
+            >
+              {index < currentDisplayIndex ? '✓' : index + 1}
             </div>
-
-            {/* Connector Line */}
+            <span
+              className={`
+                text-[10px] font-black uppercase tracking-widest
+                ${index === currentDisplayIndex ? 'text-orange-700' : 'text-gray-400'}
+                hidden sm:inline
+              `}
+            >
+              {p.label}
+            </span>
             {index < displayPhases.length - 1 && (
-              <div
-                className={`
-                  w-12 h-0.5 -mt-4
-                  ${index < currentDisplayIndex ? 'bg-green-500' : 'bg-gray-200'}
-                `}
-              />
+              <div className="w-4 h-px bg-orange-100 mx-1" />
             )}
-          </React.Fragment>
+          </div>
         ))}
       </div>
 
-      {/* Phase Description and Progress */}
-      <div className="text-center">
-        <p className="text-sm text-gray-600">{displayPhases[currentDisplayIndex]?.description}</p>
-
-        {/* Show turn count and signals during clarification */}
-        {phase === 'clarification' && (
-          <div className="flex items-center justify-center gap-4 mt-2 text-xs text-gray-500">
-            <span className="flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-              </svg>
-              Turn {turnCount}/{maxTurns}
-            </span>
-            <span className="flex items-center gap-1">
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              {signalCount} signals
-            </span>
-          </div>
-        )}
-
-        {/* Show completion message */}
-        {(phase === 'answering' || phase === 'guidance') && (
-          <p className="text-xs text-green-600 mt-1">Ready to share dharmic guidance</p>
-        )}
-        {phase === 'closure' && (
-          <p className="text-xs text-green-600 mt-1">Conversation complete</p>
-        )}
+      <div className="flex items-center gap-4 text-[10px] font-black uppercase tracking-tighter text-gray-500">
+        <span className="flex items-center gap-1.5 opacity-70">
+          Turn {turnCount}/{maxTurns}
+        </span>
+        <span className="flex items-center gap-1.5 text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+          {signalCount} signals
+        </span>
       </div>
     </div>
   );
 }
 
-// Compact version for mobile
+// Compact version for floating layouts
 export function PhaseIndicatorCompact({
   phase,
   turnCount,
@@ -151,45 +98,44 @@ export function PhaseIndicatorCompact({
   signalsCollected?: Record<string, string>;
 }) {
   const displayPhasesMap = {
-    'listening': { label: 'Listening', description: 'Learning about you' },
-    'clarification': { label: 'Listening', description: 'Learning about you' },
-    'synthesis': { label: 'Reflecting', description: 'Finding wisdom' },
-    'guidance': { label: 'Guidance', description: 'Sharing wisdom' },
-    'answering': { label: 'Guidance', description: 'Sharing wisdom' },
-    'closure': { label: 'Complete', description: 'Peace be with you' },
+    'listening': { label: 'Listening', color: 'orange' },
+    'clarification': { label: 'Listening', color: 'orange' },
+    'synthesis': { label: 'Reflecting', color: 'blue' },
+    'guidance': { label: 'Guidance', color: 'green' },
+    'answering': { label: 'Guidance', color: 'green' },
+    'closure': { label: 'Complete', color: 'gray' },
   };
 
-  const currentPhase = displayPhasesMap[phase];
+  const current = displayPhasesMap[phase];
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 bg-orange-50 border-b border-orange-100 text-sm">
-      <div className="flex items-center gap-2">
-        <span
-          className={`
-            px-2 py-0.5 rounded-full text-xs font-medium
-            ${(phase === 'clarification' || phase === 'listening')
-              ? 'bg-orange-100 text-orange-700'
-              : (phase === 'synthesis')
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-green-100 text-green-700'
-            }
-          `}
-        >
-          {currentPhase?.label}
-        </span>
-        <span className="text-gray-600">{currentPhase?.description}</span>
+    <div className="flex items-center justify-between px-5 py-1.5 bg-orange-50/40 backdrop-blur-md border-b border-orange-100/50 animate-fade-in shrink-0">
+      <div className="flex items-center gap-3">
+        <div className={`
+          px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm
+          ${current.color === 'orange' ? 'bg-orange-100 text-orange-700 border border-orange-200' :
+            current.color === 'blue' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+              'bg-green-100 text-green-700 border border-green-200'}
+        `}>
+          {current.label}
+        </div>
+        <p className="text-[10px] font-bold text-gray-500/80 uppercase tracking-tight hidden sm:block">
+          {phase === 'synthesis' ? 'Seeking profound essence' :
+            phase === 'listening' ? 'Tell us your story' :
+              'Divine guidance received'}
+        </p>
       </div>
 
-      {(phase === 'clarification' || phase === 'listening') && (
-        <div className="flex flex-col items-end">
-          <span className="text-xs text-gray-500">
-            Turns: {turnCount}/{maxTurns}
-          </span>
-          <span className="text-[10px] text-orange-600 font-medium">
-            {Object.keys(signalsCollected).length} traits learned
-          </span>
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-1.5 bg-white/50 px-2 py-0.5 rounded-lg border border-orange-50">
+          <span className="text-[9px] font-black text-gray-400">TURN</span>
+          <span className="text-[10px] font-black text-orange-700">{turnCount}/{maxTurns}</span>
         </div>
-      )}
+        <div className="flex items-center gap-1.5 bg-white/50 px-2 py-0.5 rounded-lg border border-orange-50">
+          <span className="text-[9px] font-black text-gray-400">SIGNALS</span>
+          <span className="text-[10px] font-black text-orange-700">{Object.keys(signalsCollected).length}</span>
+        </div>
+      </div>
     </div>
   );
 }
