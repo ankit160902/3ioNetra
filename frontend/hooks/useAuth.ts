@@ -4,7 +4,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserProfile } from '../components/LoginPage';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const API_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 export interface User {
   id: string;
@@ -60,8 +61,9 @@ export function useAuth() {
               isAuthenticated: true,
               isLoading: false,
             });
-          } else {
-            // Token invalid, clear storage
+          } else if (response.status === 401) {
+            // Token definitely invalid, clear storage
+            console.warn('Auth token expired or invalid (401)');
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_user');
             setAuthState({
@@ -70,9 +72,21 @@ export function useAuth() {
               isAuthenticated: false,
               isLoading: false,
             });
+          } else {
+            // Transient error (500, 502, 503, 504) or unexpected 404
+            // Do NOT logout user immediately for non-401 errors
+            console.error(`Auth verification failed with status ${response.status}. Mismatch in deployment?`);
+            const user = JSON.parse(storedUser);
+            setAuthState({
+              user,
+              token: storedToken,
+              isAuthenticated: true,
+              isLoading: false,
+            });
           }
-        } catch {
-          // Backend not available, use stored data
+        } catch (error) {
+          console.error('Auth verification network error:', error);
+          // Network error, assume offline/transient - use stored data
           const user = JSON.parse(storedUser);
           setAuthState({
             user,

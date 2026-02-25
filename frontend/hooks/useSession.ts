@@ -73,8 +73,8 @@ export interface UserProfile {
    Config
 ======================= */
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const API_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 const STORAGE_KEY = 'spiritual_session_id';
 

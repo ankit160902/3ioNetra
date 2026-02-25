@@ -373,7 +373,11 @@ async def health_check():
     return {
         "status": "healthy",
         "components": {
-            "rag": rag_pipeline is not None
+            "rag": {
+                "initialized": rag_pipeline is not None,
+                "available": rag_pipeline.available if rag_pipeline else False,
+                "detail": "Ready" if rag_pipeline and rag_pipeline.available else "Initializing or failed to load data"
+            }
         }
     }
 
@@ -384,8 +388,9 @@ async def text_query(query: TextQuery):
     Process text query and return text response with citations
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         logger.info(f"Processing text query: {query.query[:50]}...")
 
@@ -415,8 +420,9 @@ async def text_query_stream(query: TextQuery):
     Process text query and return streaming text response
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         logger.info(f"Processing streaming text query: {query.query[:50]}...")
 
@@ -467,8 +473,9 @@ async def search_scripture(
     Search scriptures directly
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         results = await rag_pipeline.search(
             query=query,
@@ -494,8 +501,9 @@ async def generate_embeddings(text: str):
     Generate embeddings for text (utility endpoint)
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         embeddings = await rag_pipeline.generate_embeddings(text)
 
@@ -616,8 +624,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     5. If ready: Synthesize understanding + retrieve wisdom + compose personalized response
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         # Get services
         session_manager = get_session_manager()
@@ -1015,8 +1024,9 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
     During CLARIFICATION, returns complete question immediately.
     """
     try:
-        if not rag_pipeline:
-            raise HTTPException(status_code=500, detail="RAG pipeline not initialized")
+        if not rag_pipeline or not rag_pipeline.available:
+            detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
+            raise HTTPException(status_code=500, detail=detail)
 
         # For now, use the non-streaming endpoint and wrap in SSE
         # Full streaming implementation can be added later

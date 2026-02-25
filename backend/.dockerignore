@@ -59,6 +59,8 @@ logs/
 # ML models and data (if large) - NOT the Python models/ package
 ml_models/
 data/
+!data/processed/
+!data/processed/*.json
 *.pth
 *.bin
 *.h5
