@@ -44,55 +44,57 @@ class RAGPipeline:
 
     async def initialize(self) -> None:
         """
-        Load processed scripture data + embeddings from disk.
-        Pre-computes vector norms for efficient cosine similarity search.
+        Load RAG data efficiently using memory mapping for embeddings.
+        This allows handling massive datasets (2GB+) without OOM crashes.
         """
         try:
             base_dir = Path(__file__).parent.parent
-            processed_path = base_dir / "data" / "processed" / "processed_data.json"
+            processed_dir = base_dir / "data" / "processed"
+            metadata_path = processed_dir / "verses.json"
+            embeddings_path = processed_dir / "embeddings.npy"
 
-            if not processed_path.exists():
-                logger.warning(
-                    f"RAGPipeline: processed data not found at {processed_path}. "
-                    "Run scripts/ingest_all_data.py to create it."
-                )
-                self.available = False
-                return
+            # Check for high-efficiency split format
+            if metadata_path.exists() and embeddings_path.exists():
+                logger.info(f"RAGPipeline: Loading metadata from {metadata_path}...")
+                with metadata_path.open("r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                self.verses = payload.get("verses", [])
+                
+                logger.info(f"RAGPipeline: Memory-mapping embeddings from {embeddings_path}...")
+                # mmap_mode='r' is the critical fix for Cloud Run OOM
+                raw_embeddings = np.load(embeddings_path, mmap_mode='r')
+            else:
+                # Fallback to legacy single JSON file if it exists
+                legacy_path = processed_dir / "processed_data.json"
+                if legacy_path.exists():
+                    logger.warning(f"RAGPipeline: Found legacy data file {legacy_path}. Loading into memory (OOM RISK!)...")
+                    with legacy_path.open("r", encoding="utf-8") as f:
+                        payload = json.load(f)
+                    self.verses = payload.get("verses", [])
+                    
+                    emb_list = [v.get("embedding") for v in self.verses if v.get("embedding") is not None]
+                    if not emb_list:
+                        logger.warning("RAGPipeline: Legacy verses missing embeddings")
+                        self.available = False
+                        return
+                    
+                    raw_embeddings = np.asarray(emb_list, dtype="float32")
+                    # Pre-normalize legacy embeddings as they might not be
+                    norms = np.linalg.norm(raw_embeddings, axis=1, keepdims=True)
+                    norms[norms == 0] = 1.0
+                    raw_embeddings = raw_embeddings / norms
+                else:
+                    logger.warning("RAGPipeline: No processed data found. Run scripts/ingest_all_data.py.")
+                    self.available = False
+                    return
 
-            logger.info(f"RAGPipeline: Loading processed data from {processed_path}...")
-            # Use chunks if file is massive, but for 2GB we might load it all if RAM allows.
-            # Assuming standard server RAM, loading 2GB JSON into memory is heavy but doable.
-            with processed_path.open("r", encoding="utf-8") as f:
-                payload = json.load(f)
-
-            self.verses = payload.get("verses", [])
-            if not self.verses:
-                logger.warning("RAGPipeline: no verses in processed data")
-                self.available = False
-                return
-
-            # Extract embeddings into a single float32 matrix
-            emb_list = [v.get("embedding") for v in self.verses if v.get("embedding") is not None]
-            if not emb_list:
-                logger.warning("RAGPipeline: verses missing embeddings")
-                self.available = False
-                return
-
-            raw_embeddings = np.asarray(emb_list, dtype="float32")
-            if raw_embeddings.ndim != 2:
-                logger.error(f"RAGPipeline: unexpected embedding shape {raw_embeddings.shape}")
+            if not self.verses or raw_embeddings.size == 0:
+                logger.warning("RAGPipeline: Empty dataset loaded")
                 self.available = False
                 return
 
             self.dim = raw_embeddings.shape[1]
-            
-            # Pre-normalize embeddings for cosine similarity
-            #Cosine Similarity(A, B) = (A . B) / (||A|| * ||B||)
-            # If we pre-normalize A (docs), then we only need to normalize B (query) and do dot product.
-            norms = np.linalg.norm(raw_embeddings, axis=1, keepdims=True)
-            norms[norms == 0] = 1.0  # Avoid division by zero
-            self.embeddings = raw_embeddings / norms
-            
+            self.embeddings = raw_embeddings
             self.available = True
 
             scripture_counts = {}
@@ -102,7 +104,7 @@ class RAGPipeline:
 
             logger.info(
                 f"RAGPipeline initialized with {len(self.verses)} verses "
-                f"(dim={self.dim}). Breakdown: {scripture_counts}"
+                f"(dim={self.dim}). Memory Map: {'Active' if metadata_path.exists() else 'Inactive (Legacy Mode)'}"
             )
         except Exception as exc:
             logger.exception(f"Failed to initialize RAGPipeline: {exc}")

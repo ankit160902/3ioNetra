@@ -478,37 +478,43 @@ class UniversalScriptureIngester:
             texts.append(clean_text[:1000])  # Limit length
 
         logger.info(f"Generating embeddings for {len(texts)} verses...")
-        embeddings = self.embedding_model.encode(texts, convert_to_tensor=False, show_progress_bar=True)
+        embeddings = self.embedding_model.encode(
+            texts, 
+            convert_to_tensor=False, 
+            show_progress_bar=True,
+            normalize_embeddings=True
+        )
 
         logger.info(f"✓ Generated embeddings shape: {embeddings.shape}")
         return embeddings
 
     def save_processed_data(self, verses: List[Dict], embeddings: np.ndarray):
-        """Save processed verses and embeddings atomically"""
-        output_file = self.processed_data_dir / "processed_data.json"
-        temp_file = self.processed_data_dir / "processed_data.json.tmp"
-
-        # Convert embeddings to list for JSON serialization
-        for i, verse in enumerate(verses):
-            verse['embedding'] = embeddings[i].tolist()
-
-        # Save as JSON to temp file
-        with open(temp_file, 'w', encoding='utf-8') as f:
+        """Save processed verses (metadata) and embeddings separately for memory efficiency"""
+        metadata_file = self.processed_data_dir / "verses.json"
+        embeddings_file = self.processed_data_dir / "embeddings.npy"
+        
+        # 1. Save embeddings as binary NumPy file
+        logger.info(f"Saving embeddings to {embeddings_file}...")
+        np.save(embeddings_file, embeddings.astype('float32'))
+        
+        # 2. Save verses as JSON (REMOVING embeddings from the objects)
+        logger.info(f"Saving verse metadata to {metadata_file}...")
+        for verse in verses:
+            if 'embedding' in verse:
+                verse.pop('embedding')
+                
+        with open(metadata_file, 'w', encoding='utf-8') as f:
             json.dump({
-
                 'verses': verses,
                 'metadata': {
                     'total_verses': len(verses),
-                    'embedding_dim': len(embeddings[0]) if len(embeddings) > 0 else 0,
+                    'embedding_dim': embeddings.shape[1] if len(embeddings) > 0 else 0,
                     'embedding_model': settings.EMBEDDING_MODEL,
                     'scriptures': sorted(list(set(v.get('scripture', 'Unknown') for v in verses)))
                 }
             }, f, ensure_ascii=False, indent=2)
 
-        import shutil
-        shutil.move(str(temp_file), str(output_file))
-
-        logger.info(f"✓ Saved consolidated processed data to {output_file}")
+        logger.info(f"✓ Saved RAG data efficiently: {metadata_file} and {embeddings_file}")
 
     def ingest_all(self):
         """Main ingestion pipeline"""

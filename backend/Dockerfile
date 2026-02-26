@@ -26,4 +26,11 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
+# Production server with gunicorn
+# --workers 1 to keep RAM usage low (shared memory mapping)
+# --timeout 120 to allow for heavy initialization
+CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "120", "--access-logfile", "-", "main:app"]
+
+# Health check to ensure the container is ready
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1

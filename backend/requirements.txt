@@ -7,6 +7,7 @@ pymongo
 
 # LLM
 google-genai
+gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)
 sentence-transformers
