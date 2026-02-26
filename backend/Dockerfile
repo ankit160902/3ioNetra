@@ -19,18 +19,23 @@ ENV PIP_DEFAULT_TIMEOUT=300
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1
 ENV PIP_NO_CACHE_DIR=1
 
+# Bake models into image
+RUN mkdir -p /app/models/embeddings /app/models/reranker
+
 COPY requirements.txt .
 RUN pip install --use-deprecated=legacy-resolver -r requirements.txt
 
 COPY . .
 
+# Pre-download models during build phase
+RUN python scripts/download_models.py
+
+# Force offline mode for runtime
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_HUB_OFFLINE=1
+
 EXPOSE 8080
 
-# Production server with gunicorn
-# --workers 1 to keep RAM usage low (shared memory mapping)
-# --timeout 120 to allow for heavy initialization
-CMD ["gunicorn", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "120", "--access-logfile", "-", "main:app"]
-
-# Health check to ensure the container is ready
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/health || exit 1
+# Use shell form for CMD to allow environment variable expansion ($PORT)
+# This is critical for Google Cloud Run compatibility
+CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 65

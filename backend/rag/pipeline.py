@@ -1,4 +1,5 @@
 import json
+import os
 import logging
 from pathlib import Path
 from typing import AsyncGenerator, Dict, List, Optional, Tuple
@@ -120,9 +121,17 @@ class RAGPipeline:
 
         try:
             from sentence_transformers import SentenceTransformer
+            
+            # 1. Try local baked-in path first (for production)
+            local_path = "/app/models/embeddings"
+            if os.path.isdir(local_path):
+                logger.info(f"RAGPipeline: loading embedding model from LOCAL path: {local_path}")
+                self._embedding_model = SentenceTransformer(local_path)
+                return
 
+            # 2. Fallback to settings (for local dev)
             model_name = settings.EMBEDDING_MODEL
-            logger.info(f"RAGPipeline: loading embedding model '{model_name}'")
+            logger.info(f"RAGPipeline: loading embedding model '{model_name}' from Hub")
             self._embedding_model = SentenceTransformer(model_name)
         except Exception as exc:
             logger.exception(f"RAGPipeline: failed to load embedding model: {exc}")
@@ -134,9 +143,17 @@ class RAGPipeline:
 
         try:
             from sentence_transformers import CrossEncoder
-            # Small but effective re-ranker
+            
+            # 1. Try local baked-in path first (for production)
+            local_path = "/app/models/reranker"
+            if os.path.isdir(local_path):
+                logger.info(f"RAGPipeline: loading re-ranker from LOCAL path: {local_path}")
+                self._reranker_model = CrossEncoder(local_path)
+                return
+
+            # 2. Fallback to default (for local dev)
             model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-            logger.info(f"RAGPipeline: loading re-ranker model '{model_name}'")
+            logger.info(f"RAGPipeline: loading re-ranker model '{model_name}' from Hub")
             self._reranker_model = CrossEncoder(model_name)
         except Exception as exc:
             logger.exception(f"RAGPipeline: failed to load re-ranker: {exc}")

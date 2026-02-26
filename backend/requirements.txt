@@ -10,10 +10,10 @@ google-genai
 gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)
-sentence-transformers
+sentence-transformers==3.0.1
 torch
-transformers
-huggingface-hub
+transformers==4.41.2
+huggingface-hub==0.23.5
 
 # RAG / LangChain
 langchain
