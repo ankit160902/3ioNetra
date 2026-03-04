@@ -45,6 +45,99 @@ class CompanionEngine:
     # Public API
     # ------------------------------------------------------------------
 
+    async def generate_response_stream(
+        self,
+        session: SessionState,
+        message: str,
+    ):
+        """
+        Streaming version of conversational processing.
+        Yields: (token, is_metadata_chunk, metadata_dict)
+        """
+        turn_topics = self._update_memory(session.memory, session, message)
+        
+        import asyncio
+        
+        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
+        tasks = [
+            self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
+        ]
+        
+        if hasattr(session, "user_id") and session.user_id:
+            tasks.append(self.memory_service.retrieve_relevant_memories(session.user_id, message))
+        else:
+            tasks.append(asyncio.sleep(0, result=[]))
+            
+        analysis, past_memories = await asyncio.gather(*tasks)
+
+        # 1. Update session signals and story (Same as process_message)
+        if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
+            session.memory.story.life_area = analysis["life_domain"]
+            session.add_signal(SignalType.LIFE_DOMAIN, analysis["life_domain"], 0.95)
+            
+        if analysis.get("emotion") and analysis["emotion"] != "neutral":
+            session.memory.story.emotional_state = analysis["emotion"]
+            session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
+
+        entities = analysis.get("entities", {})
+        if entities.get("deity"):
+            session.memory.story.preferred_deity = entities["deity"]
+        if entities.get("ritual"):
+            session.memory.story.primary_concern = f"Performing {entities['ritual']}"
+        
+        if len(session.memory.story.primary_concern) < 15 and analysis.get("summary"):
+            session.memory.story.primary_concern = analysis["summary"]
+
+        # 🚀 Decide phase
+        intent = analysis.get("intent")
+        is_direct_ask = analysis.get("needs_direct_answer", False) or \
+                        analysis.get("recommend_products", False) or \
+                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"] or \
+                        "Verse Request" in turn_topics
+        
+        current_phase = ConversationPhase.CLARIFICATION
+        if intent == "CLOSURE":
+            current_phase = ConversationPhase.CLOSURE
+        
+        is_ready = False if intent == "CLOSURE" else (self._assess_readiness(session) or is_direct_ask)
+
+        if is_ready:
+            # Metadata for frontend
+            yield {
+                "type": "control",
+                "is_ready_for_wisdom": True,
+                "phase": ConversationPhase.GUIDANCE.value,
+                "turn_topics": turn_topics,
+                "intent": intent
+            }
+            return # main.py will handle RAG + Synthesis stream
+
+        # Listening Phase → Stream LLM response
+        yield {
+            "type": "control",
+            "is_ready_for_wisdom": False,
+            "phase": current_phase.value,
+            "turn_topics": turn_topics
+        }
+
+        if self.available:
+            # Start streaming
+            user_profile = self._build_user_profile(session.memory, session)
+            if past_memories:
+                user_profile["past_memories"] = past_memories
+
+            async for token in self.llm.generate_response_stream(
+                query=message,
+                context_docs=[], # No RAG in easy listening unless we want to parallelize it too
+                conversation_history=session.conversation_history,
+                user_profile=user_profile,
+                phase=current_phase,
+                memory_context=session.memory,
+            ):
+                yield {"type": "token", "content": token}
+        else:
+            yield {"type": "token", "content": "I’m here with you. Could you tell me a little more?"}
+
     async def process_message(
         self,
         session: SessionState,
@@ -56,10 +149,22 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
-        # 🚀 LLM-based Intent & Context Analysis
-        # We perform this here to get high-fidelity signals for this turn
-        analysis = await self.intent_agent.analyze_intent(message, session.memory.get_memory_summary())
+        import asyncio
         
+        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
+        tasks = [
+            self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
+        ]
+        
+        # Add memory retrieval task if user is authenticated
+        if hasattr(session, "user_id") and session.user_id:
+            tasks.append(self.memory_service.retrieve_relevant_memories(session.user_id, message))
+        else:
+            tasks.append(asyncio.sleep(0, result=[])) # Dummy task for consistent unpacking
+            
+        # Execute tasks concurrently
+        analysis, past_memories = await asyncio.gather(*tasks)
+
         # 1. Update session signals from LLM analysis
         if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
             session.memory.story.life_area = analysis["life_domain"]
@@ -98,11 +203,6 @@ class CompanionEngine:
                 # Use analysis summary if available for better semantic indexing
                 mem_anchor = analysis.get("summary", message)
                 asyncio.create_task(self.memory_service.store_memory(session.user_id, mem_anchor))
-
-        # 3. Retrieve relevant long-term memories to enhance the prompt
-        past_memories = []
-        if hasattr(session, "user_id") and session.user_id:
-            past_memories = await self.memory_service.retrieve_relevant_memories(session.user_id, message)
 
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
@@ -170,6 +270,7 @@ class CompanionEngine:
                         scripture_filter=None,
                         language="en",
                         top_k=3,
+                        intent=analysis.get("intent"),
                     )
                 except Exception as e:
                     logger.warning(f"Guidance-phase RAG failed: {e}")
@@ -219,6 +320,7 @@ class CompanionEngine:
                             scripture_filter=None,
                             language="en",
                             top_k=3,
+                            intent=analysis.get("intent"),
                         )
                 except Exception as e:
                     logger.warning(f"Listening-phase RAG failed: {e}")

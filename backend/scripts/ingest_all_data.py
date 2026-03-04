@@ -368,7 +368,7 @@ class UniversalScriptureIngester:
             # Standardized Verse Output
             final_verse = {
                 'id': str(uuid.uuid4()),
-                'type': 'scripture',
+                'type': item.get('type', 'scripture'),
                 'scripture': self._infer_scripture(source),
                 'source': source,
                 'chapter': verse.get('chapter'),

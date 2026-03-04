@@ -83,6 +83,52 @@ class ResponseComposer:
         logger.info("LLM unavailable, using fallback")
         return self._compose_fallback(dharmic_query)
 
+    async def compose_stream(
+        self,
+        dharmic_query: DharmicQueryObject,
+        memory: ConversationMemory,
+        retrieved_verses: List[Dict],
+        conversation_history: List[Dict],
+        reduce_scripture: bool = False,
+        phase: Optional[ConversationPhase] = None,
+        original_query: Optional[str] = None,
+        user_id: Optional[str] = None,
+        past_memories: List[str] = None
+    ):
+        """
+        Stream response synthesis using LLMService.generate_response_stream.
+        """
+        llm_query = original_query or (
+            dharmic_query.build_search_query()
+            if hasattr(dharmic_query, "build_search_query")
+            else dharmic_query.get_search_query()
+        )
+
+        if not llm_query:
+            yield self._compose_fallback(dharmic_query)
+            return
+
+        context_docs = retrieved_verses
+        if reduce_scripture and len(retrieved_verses) > 2:
+            context_docs = retrieved_verses[:2]
+
+        user_profile = self._build_user_profile(memory)
+        if past_memories:
+            user_profile["past_memories"] = past_memories
+
+        if self.llm.available:
+            async for chunk in self.llm.generate_response_stream(
+                query=llm_query,
+                context_docs=context_docs,
+                conversation_history=conversation_history,
+                user_profile=user_profile,
+                phase=phase,
+                memory_context=memory
+            ):
+                yield chunk
+        else:
+            yield self._compose_fallback(dharmic_query)
+
     def _build_user_profile(self, memory: ConversationMemory) -> Dict:
         """
         Build a user profile dictionary from conversation memory.

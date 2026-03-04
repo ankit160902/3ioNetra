@@ -669,6 +669,78 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
     # Main Response Generation
     # --------------------------------------------------
 
+    async def generate_response_stream(
+        self,
+        query: str,
+        context_docs: List[Dict] = None,
+        language: str = "en",
+        conversation_history: Optional[List[Dict]] = None,
+        user_profile: Optional[Dict] = None,
+        phase: Optional[ConversationPhase] = None,
+        memory_context: Optional[Any] = None
+    ):
+        """
+        Stream context-aware spiritual companion response.
+        
+        Args:
+            query: User's current message
+            context_docs: Retrieved scripture documents (optional)
+            language: Response language (default: "en")
+            conversation_history: Previous messages in conversation
+            user_profile: User profile data for personalization
+            
+        Yields:
+            Tokens as they are generated
+        """
+        
+        # Fallback if Gemini not available
+        if not self.available:
+            yield "I'm here with you. Please share what's on your mind."
+            return
+        
+        try:
+            # Extract context from query and history
+            context = self._extract_context(query, conversation_history)
+            
+            # Get history length for logging and logic
+            history_len = len(conversation_history) if conversation_history else 0
+            
+            # Detect conversation phase if not provided
+            if phase is None:
+                phase = self._detect_phase(query, context, history_len)
+            
+            logger.info(f"Streaming Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
+            
+            # Build prompt WITH scripture context from RAG and user profile
+            prompt = self._build_prompt(
+                query, 
+                conversation_history, 
+                phase, 
+                context, 
+                context_docs, 
+                user_profile,
+                memory_context=memory_context
+            )
+            
+            # Generate response from Gemini with streaming
+            # SDK v2: generate_content_stream
+            stream = self.client.models.generate_content_stream(
+                model=settings.GEMINI_MODEL,
+                contents=prompt,
+                config={
+                    "system_instruction": self.SYSTEM_INSTRUCTION,
+                    "temperature": 0.7,
+                }
+            )
+
+            for chunk in stream:
+                if chunk.text:
+                    yield chunk.text
+
+        except Exception as e:
+            logger.exception(f"Error in generate_response_stream: {str(e)}")
+            yield "I'm here with you. We can continue whenever you're ready."
+
     async def generate_response(
         self,
         query: str,

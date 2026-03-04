@@ -281,15 +281,13 @@ class RAGPipeline:
             
         return scores
 
-    async def _rerank_results(self, query: str, results: List[Dict]) -> List[Dict]:
-        """Neural re-ranking for higher precision"""
+    async def _rerank_results(self, query: str, results: List[Dict], intent: Optional[str] = None) -> List[Dict]:
+        """Neural re-ranking for higher precision with intent-based weighting"""
         if not results:
             return results
             
         self._ensure_reranker_model()
-        if not hasattr(self, "_reranker_model") or self._reranker_model is None:
-            return results
-
+        
         # Pairs for cross-encoder
         pairs = []
         for doc in results:
@@ -298,17 +296,55 @@ class RAGPipeline:
 
         try:
             # Cross-encoder scores
-            re_scores = self._reranker_model.predict(pairs)
+            if hasattr(self, "_reranker_model") and self._reranker_model is not None:
+                re_scores = self._reranker_model.predict(pairs)
+            else:
+                re_scores = [0.0] * len(results)
             
             # Attach and re-sort
             for i, score in enumerate(re_scores):
                 results[i]["rerank_score"] = float(score)
-                # Combine original retrieval score with neural score (70% rerank weight)
-                results[i]["final_score"] = 0.3 * results[i]["score"] + 0.7 * float(score)
+                
+                # Dynamic Intent-Based Weighting
+                weighting_adjustment = 0.0
+                doc_type = results[i].get("type", "scripture")
+                doc_text = (results[i].get("text", "") + " " + results[i].get("reference", "")).lower()
+                
+                # 1. Penalize Temple/Locations for non-spatial intents
+                spatial_keywords = ["maidan", "ground", "complex", "road", "street", "near"]
+                is_spatial = any(k in doc_text for k in spatial_keywords) or doc_type == "temple"
+                
+                query_lower = query.lower()
+                is_story_request = any(k in query_lower for k in ["story", "legend", "tale", "katha", "parable"])
+
+                if intent in ["SEEKING_GUIDANCE", "EXPRESSING_EMOTION", "OTHER"] or is_story_request:
+                    if is_spatial:
+                        # Very heavy penalty for locations when seeking wisdom or stories
+                        weighting_adjustment -= 3.0 if is_story_request else 1.5
+                    if doc_type == "procedural" or doc_type == "scripture":
+                        # Significant boost for wisdom sources
+                        weighting_adjustment += 1.5 if is_story_request else 1.0
+                
+                # 2. Boost Procedural for Guidance
+                if intent == "SEEKING_GUIDANCE" and doc_type == "procedural":
+                    weighting_adjustment += 1.0
+                
+                # 3. Boost Temples ONLY for specific intents
+                if intent == "ASKING_INFO" and is_spatial:
+                    weighting_adjustment += 0.5
+                
+                # 4. 🔥 NEW: Explicit "How-to" boost for procedural rituals
+                is_howto = any(k in query_lower for k in ["how", "step", "procedure", "ritual", "guide", "method"])
+                if is_howto and doc_type == "procedural":
+                    weighting_adjustment += 1.5 # Aggressive boost for procedural steps
+
+                # Combined retrieval score + neural score + manual weighting
+                # (30% retrieval, 50% rerank, 20% intent weight - removing multiplier for direct impact)
+                results[i]["final_score"] = (0.3 * results[i]["score"]) + (0.5 * float(score)) + weighting_adjustment
 
             # Sort by final score
             results.sort(key=lambda x: x["final_score"], reverse=True)
-            logger.info("Neural re-ranking complete")
+            logger.info(f"Neural re-ranking with intent='{intent}' complete")
             return results
         except Exception as e:
             logger.error(f"Re-ranking failed: {e}")
@@ -320,13 +356,14 @@ class RAGPipeline:
         scripture_filter: Optional[List[str]] = None,
         language: str = "en",
         top_k: int = settings.RETRIEVAL_TOP_K,
+        intent: Optional[str] = None,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
         1. Contextual Query Expansion
         2. Hybrid Search (Semantic + BM25)
         3. Initial Candidate Retrieval
-        4. Neural Re-ranking
+        4. Neural Re-ranking with Intent-Based Weighting
         """
         if not self.available or not self.verses:
             return []
@@ -339,12 +376,16 @@ class RAGPipeline:
         if len(query.split()) < 4:
             expanded_queries = await self._expand_query(query)
 
-        # 2. Multi-Vector Semantic Search & Keyword Search
-        all_semantic_scores = []
-        for q in expanded_queries:
-            q_vec = await self.generate_embeddings(q)
-            all_semantic_scores.append(self._cosine_similarities(q_vec))
+        # 🚀 Parallel Execution: Embeddings for all expansions
+        import asyncio
         
+        async def get_embedding(q):
+            vec = await self.generate_embeddings(q)
+            return self._cosine_similarities(vec)
+
+        # Execute concurrently
+        all_semantic_scores = await asyncio.gather(*[get_embedding(q) for q in expanded_queries])
+
         # Merge semantic scores (max pool across expansions)
         semantic_scores = np.max(np.array(all_semantic_scores), axis=0)
         
@@ -383,12 +424,12 @@ class RAGPipeline:
                 break
 
         # 5. Neural Re-ranking (Cross-Encoder)
-        results = await self._rerank_results(query, results)
+        results = await self._rerank_results(query, results, intent=intent)
 
         # Limit to final top_k
         final_results = results[:top_k]
         
-        logger.info(f"Advanced RAG: retrieved {len(final_results)} verses for query='{query[:40]}'")
+        logger.info(f"Advanced RAG: retrieved {len(final_results)} verses for query='{query[:40]}' with intent='{intent}'")
         return final_results
 
     # ------------------------------------------------------------------
@@ -457,27 +498,60 @@ class RAGPipeline:
         conversation_history: Optional[List[Dict]] = None,
     ) -> AsyncGenerator[Dict, None]:
         """
-        Simple streaming wrapper over `query`.
-
-        For now we emit the full answer in a single chunk so that the
-        existing SSE plumbing in `main.py` works without change.
+        True streaming version of standalone text query.
         """
-        result = await self.query(
-            query=query,
-            language=language,
-            include_citations=include_citations,
-            conversation_history=conversation_history,
+        # 1. Retrieval
+        docs = await self.search(
+            query=query, 
+            scripture_filter=None, 
+            language=language, 
+            top_k=settings.RETRIEVAL_TOP_K
         )
 
-        # First send metadata
+        # 2. Build metadata chunk
+        citations: List[Dict] = []
+        if include_citations:
+            for doc in docs[:3]:
+                citations.append(
+                    {
+                        "reference": doc.get("reference", ""),
+                        "scripture": doc.get("scripture", ""),
+                        "text": (doc.get("text") or "")[:200],
+                        "score": doc.get("score", 0.0),
+                    }
+                )
+
+        confidence = 1.0 if docs and docs[0].get('score', 0) > 0.4 else (0.5 if docs else 0.0)
+
+        # Yield metadata first
         yield {
             "type": "meta",
-            "citations": result.get("citations", []),
-            "confidence": result.get("confidence", 0.0),
+            "citations": citations,
+            "confidence": confidence,
         }
 
-        # Then the full text as one chunk
-        yield {
-            "type": "answer",
-            "text": result.get("answer", ""),
-        }
+        # 3. Stream Synthesis
+        if self._llm.available:
+            # Use generate_response_stream for token-by-token delivery
+            async for token in self._llm.generate_response_stream(
+                query=query,
+                context_docs=docs,
+                language=language,
+                conversation_history=conversation_history or [],
+            ):
+                yield {
+                    "type": "answer",
+                    "text": token,
+                }
+        else:
+            # Simple fallback
+            if docs:
+                top = docs[0]
+                answer = top.get("text") or top.get("meaning") or "I found a relevant verse for you."
+            else:
+                answer = "I'm here to listen to what you're going through."
+            
+            yield {
+                "type": "answer",
+                "text": answer,
+            }

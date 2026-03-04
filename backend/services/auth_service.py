@@ -345,12 +345,17 @@ class ConversationStorage:
         
         history_list = []
         for conv in cursor:
+            # Safe date extraction
+            created_at = conv.get("created_at")
+            updated_at = conv.get("updated_at") or created_at or datetime.utcnow()
+            if not created_at: created_at = updated_at
+
             history_list.append({
                 "id": str(conv["_id"]),
                 "session_id": conv.get("session_id"),
                 "title": conv.get("last_title", "New Conversation"),
-                "created_at": conv["created_at"].isoformat() if isinstance(conv["created_at"], datetime) else str(conv["created_at"]),
-                "updated_at": conv["updated_at"].isoformat() if isinstance(conv["updated_at"], datetime) else str(conv["updated_at"]),
+                "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
+                "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
                 "message_count": conv.get("message_count", 0),
             })
         
@@ -388,8 +393,13 @@ class ConversationStorage:
         conversation = self.db.conversations.find_one(query)
 
         if conversation:
-            conversation["created_at"] = conversation["created_at"].isoformat() if isinstance(conversation["created_at"], datetime) else str(conversation["created_at"])
-            conversation["updated_at"] = conversation["updated_at"].isoformat() if isinstance(conversation["updated_at"], datetime) else str(conversation["updated_at"])
+            # Safe date extraction
+            created_at = conversation.get("created_at")
+            updated_at = conversation.get("updated_at") or created_at or datetime.utcnow()
+            if not created_at: created_at = updated_at
+            
+            conversation["created_at"] = created_at.isoformat() if isinstance(created_at, datetime) else str(created_at)
+            conversation["updated_at"] = updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at)
             conversation["id"] = str(conversation.pop("_id"))
 
         return conversation

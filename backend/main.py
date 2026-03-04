@@ -10,6 +10,7 @@ from typing import Optional, List, Dict
 from enum import Enum
 import json
 import logging
+import random
 
 from config import settings
 from rag.pipeline import RAGPipeline
@@ -49,6 +50,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://3iomitra.3iosetu.com",
         "https://3io-netra.vercel.app",
         "http://localhost:3000",
         "http://localhost:3001",
@@ -435,17 +437,15 @@ async def text_query_stream(query: TextQuery):
                     include_citations=query.include_citations,
                     conversation_history=query.conversation_history
                 ):
-                    # For SSE format, we need to escape newlines in the chunk
-                    # because \n\n terminates an SSE event
-                    # Replace actual newlines with escaped newlines for JSON compatibility
-                    import json
-                    # JSON encode the chunk to escape special characters
-                    chunk_escaped = json.dumps(chunk)
-                    # Send as Server-Sent Events format
-                    yield f"data: {chunk_escaped}\n\n"
+                    # In true streaming, 'answer' chunks are partial tokens
+                    # The frontend expects 'data: content\n\n'
+                    yield f"data: {json.dumps(chunk)}\n\n"
+                
+                # End signal
+                yield "data: [DONE]\n\n"
             except Exception as e:
                 logger.error(f"Error in stream generation: {str(e)}")
-                yield f"data: [ERROR] {str(e)}\n\n"
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return StreamingResponse(
             generate_stream(),
@@ -609,6 +609,66 @@ async def get_session_state(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _populate_session_with_user_context(session: SessionState, user: Optional[dict], user_profile: Optional[UserProfileContext]):
+    """Helper to populate session with auth user and profile data"""
+    if user:
+        # Update authenticated user information in memory
+        session.memory.user_id = user.get('id', '')
+        session.memory.user_name = user.get('name', '')
+        session.memory.user_email = user.get('email', '')
+        session.memory.user_phone = user.get('phone', '')
+        session.memory.user_dob = user.get('dob', '')
+        session.memory.user_created_at = user.get('created_at', '')
+        
+        # Update user demographics in story
+        story = session.memory.story
+        if user.get('age_group'): story.age_group = user.get('age_group')
+        if user.get('gender'): story.gender = user.get('gender')
+        if user.get('profession'): story.profession = user.get('profession')
+        if user.get('preferred_deity'): story.preferred_deity = user.get('preferred_deity')
+        if user.get('location'): story.location = user.get('location')
+        if user.get('spiritual_interests'): story.spiritual_interests = user.get('spiritual_interests')
+        
+        # Nested Profiling Data
+        if user.get('rashi'): story.rashi = user.get('rashi')
+        if user.get('gotra'): story.gotra = user.get('gotra')
+        if user.get('nakshatra'): story.nakshatra = user.get('nakshatra')
+        if user.get('temple_visits'): story.temple_visits = user.get('temple_visits')
+        if user.get('purchase_history'): story.purchase_history = user.get('purchase_history')
+        
+        # Pre-populate signals
+        from models.session import SignalType
+        if user.get('name'):
+            session.add_signal(SignalType.USER_GOAL, f"Greet {user['name']}", 0.5)
+        if user.get('preferred_deity'):
+            session.add_signal(SignalType.INTENT, f"Devotee of {user['preferred_deity']}", 0.8)
+        if user.get('rashi'):
+            session.add_signal(SignalType.MENTAL_STATE, f"Rashi: {user['rashi']}", 0.8)
+        if user.get('temple_visits') and len(user['temple_visits']) > 0:
+            session.add_signal(SignalType.LIFE_DOMAIN, "Pilgrimage History", 0.7)
+        
+        session.user_id = user['id']
+        
+        if session.turn_count == 0:
+            try:
+                storage = get_conversation_storage()
+                past_convo = storage.get_conversation(user["id"], "")
+                if past_convo and past_convo.get("memory"):
+                    from models.memory_context import ConversationMemory
+                    session.memory = ConversationMemory.from_dict(past_convo["memory"])
+                    session.is_returning_user = True
+            except Exception as e:
+                logger.error(f"Failed to restore past memory: {e}")
+
+    if user_profile:
+        story = session.memory.story
+        if user_profile.age_group: story.age_group = user_profile.age_group
+        if user_profile.gender: story.gender = user_profile.gender
+        if user_profile.profession: story.profession = user_profile.profession
+        if user_profile.preferred_deity: story.preferred_deity = user_profile.preferred_deity
+        if user_profile.location: story.location = user_profile.location
+        if user_profile.spiritual_interests: story.spiritual_interests = user_profile.spiritual_interests
+
 @app.post("/api/conversation", response_model=ConversationalResponse)
 async def conversational_query(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """
@@ -663,101 +723,13 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             )
             logger.info(f"✅ Created new session {session.session_id}")
 
-        # ALWAYS refresh user data in session memory if user is authenticated
-        # This ensures even existing sessions get updated with user profile
-        if user:
-            # Update authenticated user information in memory
-            session.memory.user_id = user.get('id', '')
-            session.memory.user_name = user.get('name', '')
-            session.memory.user_email = user.get('email', '')
-            session.memory.user_phone = user.get('phone', '')
-            session.memory.user_dob = user.get('dob', '')
-            session.memory.user_created_at = user.get('created_at', '')
-            
-            # Update user demographics in story (only if not already set or if user data has changed)
-            story = session.memory.story
-            if user.get('age_group'):
-                story.age_group = user.get('age_group')
-            if user.get('gender'):
-                story.gender = user.get('gender')
-            if user.get('profession'):
-                story.profession = user.get('profession')
-            if user.get('preferred_deity'):
-                story.preferred_deity = user.get('preferred_deity')
-            if user.get('location'):
-                story.location = user.get('location')
-            if user.get('spiritual_interests'):
-                story.spiritual_interests = user.get('spiritual_interests')
-            
-            # 🔥 NEW Nested Profiling Data
-            if user.get('rashi'):
-                story.rashi = user.get('rashi')
-            if user.get('gotra'):
-                story.gotra = user.get('gotra')
-            if user.get('nakshatra'):
-                story.nakshatra = user.get('nakshatra')
-            if user.get('temple_visits'):
-                story.temple_visits = user.get('temple_visits')
-            if user.get('purchase_history'):
-                story.purchase_history = user.get('purchase_history')
-            
-            # 🔥 Pre-populate signals if they exist to move the progress bar
-            from models.session import SignalType
-            if user.get('name'):
-                session.add_signal(SignalType.USER_GOAL, f"Greet {user['name']}", 0.5)
-            if user.get('preferred_deity'):
-                session.add_signal(SignalType.INTENT, f"Devotee of {user['preferred_deity']}", 0.8)
-            if user.get('rashi'):
-                session.add_signal(SignalType.MENTAL_STATE, f"Rashi: {user['rashi']}", 0.8)
-            if user.get('temple_visits') and len(user['temple_visits']) > 0:
-                session.add_signal(SignalType.LIFE_DOMAIN, "Pilgrimage History", 0.7)
-            
-            # Set user_id for long-term memory tracking
-            session.user_id = user['id']
-            
-            # Restoration of high-level memory/story (without prepending full history)
-            if session.turn_count == 0:
-                try:
-                    storage = get_conversation_storage()
-                    past_convo = storage.get_conversation(user["id"], "") # Get latest for memory context
-                    if past_convo:
-                        # Restore high-level story and memory from DB if available
-                        if past_convo.get("memory"):
-                            from models.memory_context import ConversationMemory
-                            session.memory = ConversationMemory.from_dict(past_convo["memory"])
-                            logger.info(f"✅ Restored permanent memory story for user {user['id']}")
-                        
-                        # Mark as returning user for acknowledgement logic
-                        session.is_returning_user = True
-                except Exception as e:
-                    logger.error(f"Failed to restore past memory in session: {e}")
-
-            logger.info(
-                f"Session {session.session_id}: Refreshed user data "
-                f"(id={session.memory.user_id}, name={session.memory.user_name}, "
-                f"rashi={story.rashi}, temples={len(story.temple_visits)})"
-            )
+        # ALWAYS refresh user data in session memory
+        await _populate_session_with_user_context(session, user, query.user_profile)
         
-        # Also populate from user_profile if provided in query
-        if query.user_profile:
-            profile = query.user_profile
-            story = session.memory.story
-            if profile.age_group:
-                story.age_group = profile.age_group
-            if profile.gender:
-                story.gender = profile.gender
-            if profile.profession:
-                story.profession = profile.profession
-            if profile.preferred_deity:
-                story.preferred_deity = profile.preferred_deity
-            if profile.location:
-                story.location = profile.location
-            if profile.spiritual_interests:
-                story.spiritual_interests = profile.spiritual_interests
-            logger.info(
-                f"Session {session.session_id}: Updated with user profile "
-                f"(age_group={profile.age_group}, profession={profile.profession}, deity={profile.preferred_deity})"
-            )
+        logger.info(
+            f"Session {session.session_id}: Refreshed user data "
+            f"(id={session.memory.user_id}, name={session.memory.user_name})"
+        )
 
         # Safety check first
         is_crisis, crisis_response = await safety_validator.check_crisis_signals(
@@ -1019,37 +991,168 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 @app.post("/api/conversation/stream")
 async def conversational_query_stream(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """
-    Streaming version of conversational endpoint.
-    Streams response during ANSWERING phase only.
-    During CLARIFICATION, returns complete question immediately.
+    Streaming version of conversational endpoint with immediate acknowledgement.
     """
     try:
         if not rag_pipeline or not rag_pipeline.available:
             detail = "RAG pipeline not initialized" if not rag_pipeline else "RAG data failed to load in pipeline"
             raise HTTPException(status_code=500, detail=detail)
 
-        # For now, use the non-streaming endpoint and wrap in SSE
-        # Full streaming implementation can be added later
-        # Create a modified query object for the conversational endpoint
-        response = await conversational_query(query, user)
+        # Get services
+        session_manager = get_session_manager()
+        companion_engine = get_companion_engine()
+        context_synthesizer = get_context_synthesizer()
+        safety_validator = get_safety_validator()
+        response_composer = get_response_composer()
+
+        # Phase 1: Session & User Context (Shared with conversational_query)
+        # (Replicating logic here for now to avoid breaking the existing sync endpoint)
+        if query.session_id:
+            session = await session_manager.get_session(query.session_id)
+            if session and user and session.memory.user_id and session.memory.user_id != user.get('id'):
+                session = None
+            if not session:
+                session = await session_manager.create_session(
+                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                    min_turns=settings.MIN_CLARIFICATION_TURNS,
+                    max_turns=settings.MAX_CLARIFICATION_TURNS
+                )
+        else:
+            session = await session_manager.create_session(
+                min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                min_turns=settings.MIN_CLARIFICATION_TURNS,
+                max_turns=settings.MAX_CLARIFICATION_TURNS
+            )
+
+        # ALWAYS refresh user data in session memory
+        await _populate_session_with_user_context(session, user, query.user_profile)
+
+        # Safety check first
+        is_crisis, crisis_response = await safety_validator.check_crisis_signals(
+            session, query.message
+        )
+        if is_crisis:
+            async def generate_crisis_stream():
+                yield f"data: {json.dumps({'type': 'meta', 'phase': session.phase.value})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': crisis_response})}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(generate_crisis_stream(), media_type="text/event-stream")
+
+        # Add message to history
+        session.add_message('user', query.message)
+        session.turn_count += 1
 
         async def generate_stream():
-            # Send the response as a single SSE event with metadata
-            data = {
-                "session_id": response.session_id,
-                "phase": response.phase.value,
-                "turn_count": response.turn_count,
-                "signals_collected": response.signals_collected,
-                "is_complete": response.is_complete,
-                "citations": response.citations,
-            }
-            yield f"data: {json.dumps(data)}\n\n"
+            try:
+                # 🚀 Call Companion Engine Stream
+                engine_gen = companion_engine.generate_response_stream(session, query.message)
+                
+                # Get the first chunk (control)
+                first_chunk = await engine_gen.__anext__()
+                
+                if first_chunk["type"] == "control":
+                    is_ready_for_wisdom = first_chunk["is_ready_for_wisdom"]
+                    turn_topics = first_chunk["turn_topics"]
+                    phase = first_chunk["phase"]
+                    
+                    # Yield initial metadata
+                    meta = {
+                        "type": "meta",
+                        "session_id": session.session_id,
+                        "phase": phase,
+                        "turn_count": session.turn_count,
+                        "is_ready_for_wisdom": is_ready_for_wisdom,
+                        "topics": turn_topics
+                    }
+                    yield f"data: {json.dumps(meta)}\n\n"
 
-            # Stream the response text
-            yield f"data: {json.dumps(response.response)}\n\n"
+                    full_response_text = ""
 
-            # End signal
-            yield "data: [DONE]\n\n"
+                    if is_ready_for_wisdom:
+                        # ----------------------------------------------------
+                        # GUIDANCE PHASE: True Parallel RAG + Synthesis
+                        # ----------------------------------------------------
+                        session.phase = ConversationPhase.GUIDANCE
+                        
+                        # 📚 Start immediate acknowledgement to hide RAG/LLM latency
+                        acknowledgements = [
+                            "I hear you deeply. Please give me a moment to gather wisdom...",
+                            "Namaste. I'm looking into the scriptures for guidance...",
+                            "Let me reflect on this through the lens of Dharma..."
+                        ]
+                        ack_text = random.choice(acknowledgements) + "\n\n"
+                        yield f"data: {json.dumps({'type': 'token', 'content': ack_text})}\n\n"
+                        full_response_text += ack_text
+
+                        # Trigger parallel RAG search while streaming ack
+                        session.dharmic_query = context_synthesizer.synthesize_from_memory(session)
+                        dharmic_query = session.dharmic_query
+                        search_query = dharmic_query.build_search_query()
+                        
+                        # Parallelize RAG + Synthesis Prep
+                        retrieved_docs = await rag_pipeline.search(
+                            query=search_query,
+                            scripture_filter=dharmic_query.allowed_scriptures,
+                            language=query.language,
+                            top_k=5,
+                            intent=first_chunk.get("intent")
+                        )
+
+                        reduce_scripture = safety_validator.should_reduce_scripture_density(session)
+                        
+                        # Stream the synthesis
+                        async for chunk in response_composer.compose_stream(
+                            dharmic_query=dharmic_query,
+                            memory=session.memory,
+                            retrieved_verses=retrieved_docs,
+                            conversation_history=session.conversation_history,
+                            reduce_scripture=reduce_scripture,
+                            phase=ConversationPhase.GUIDANCE,
+                            original_query=query.message,
+                            user_id=session.user_id
+                        ):
+                            yield f"data: {json.dumps({'type': 'token', 'content': chunk})}\n\n"
+                            full_response_text += chunk
+                        
+                        # Set final flags
+                        final_citations = [{"reference": d.get('reference')} for d in retrieved_docs[:2]]
+                        yield f"data: {json.dumps({'type': 'final_meta', 'citations': final_citations})}\n\n"
+
+                    else:
+                        # ----------------------------------------------------
+                        # LISTENING PHASE: Simple Stream
+                        # ----------------------------------------------------
+                        async for chunk in engine_gen:
+                            if chunk["type"] == "token":
+                                yield f"data: {json.dumps(chunk)}\n\n"
+                                full_response_text += chunk["content"]
+                        
+                        # Mark closure if needed
+                        if phase == "closure":
+                            session.phase = ConversationPhase.CLOSURE
+                    
+                    # Add full response to history and update session
+                    session.add_message('assistant', full_response_text)
+                    await session_manager.update_session(session)
+                    
+                    # Auto-save
+                    if user:
+                        try:
+                            storage = get_conversation_storage()
+                            storage.save_conversation(
+                                user_id=user["id"],
+                                conversation_id=session.session_id,
+                                title=query.message[:50] + "...",
+                                messages=session.conversation_history,
+                                memory=session.memory.to_dict()
+                            )
+                        except: pass
+
+                yield "data: [DONE]\n\n"
+
+            except Exception as e:
+                logger.exception(f"Streaming error: {e}")
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         return StreamingResponse(
             generate_stream(),

@@ -1,6 +1,9 @@
 # 3ioNetra: System Flow & Architecture Documentation
 
-This document provides a detailed technical overview of the existing and upgraded flows for the 3ioNetra Spiritual Companion.
+This document provides a high-level overview of the system flows for the 3ioNetra Spiritual Companion.
+
+> [!IMPORTANT]
+> For a more granular technical breakdown of the architecture, services, and implementation details, please refer to the [TECHNICAL_SPECIFICATION.md](file:///Users/ankit1609/Desktop/3ioNetra/3ionetra/docs/TECHNICAL_SPECIFICATION.md).
 
 ---
 
@@ -23,13 +26,20 @@ The current 3ioNetra system is a functional prototype designed to provide spirit
 ```mermaid
 graph TD
     User((User)) -->|Message| API[FastAPI Backend]
-    API -->|Manage State| Session[Session Manager & MongoDB]
-    API -->|Process| Engine[Companion Engine]
-    Engine -->|Search Context| RAG[RAG Pipeline]
-    RAG -->|Vector Search| Qdrant[(Qdrant Vector DB)]
-    Engine -->|Generate Response| LLM[LLM Service - Gemini]
-    LLM -->|Text Response| API
-    API -->|Final Message| User
+    
+    subgraph "Persistent Cycle"
+        API -->|1. Fetch History| Session[Session Manager & MongoDB]
+        Session -.->|2. Context| Engine[Companion Engine]
+        Engine -->|3. Update Story| Session
+    end
+    
+    API -->|4. Process| Engine
+    Engine -->|5. Search Context| RAG[RAG Pipeline]
+    RAG -->|6. Vector Search| Qdrant[(Qdrant Vector DB)]
+    Engine -->|7. Generate Response| LLM[LLM Service - Gemini]
+    LLM -->|8. Text Response| API
+    API -->|9. Final Message| User
+    User -->|10. Recurring Loop| API
 ```
 
 ### 1.3 Request Flow (Detailed)
@@ -62,17 +72,28 @@ The upgraded flow integrates the **Service Enhancement Roadmap** to transition t
 ```mermaid
 graph TD
     User((User)) -->|Message| API[FastAPI Backend]
-    API -->|Intent Detection| IntentAgent[Intent Agent]
-    IntentAgent -->|State/Intent| Manager[State Machine Manager]
-    Manager -->|Query Expansion| RAG[Advanced RAG Pipeline]
-    RAG -->|Hybrid Search| SearchEngine{Hybrid Search}
+    
+    subgraph "Recurring Memory Loop"
+        API -->|1. Fetch State| Redis[(Session Cache)]
+        API -->|2. Fetch History| Mongo[(MongoDB Persistence)]
+        Redis -.->|Signals/State| Manager[State Machine Manager]
+        Mongo -.->|Conversation History| Manager
+        Manager -->|3. Async Archive| Celery[Redis/Celery Worker]
+        Celery -->|4. Update LTM| VectorMemory[(LTM Vector DB)]
+        Manager -->|5. Commit Turn| Mongo
+    end
+    
+    API -->|6. Intent Detection| IntentAgent[Intent Agent]
+    IntentAgent -->|State/Intent| Manager
+    Manager -->|7. Query Expansion| RAG[Advanced RAG Pipeline]
+    RAG -->|8. Hybrid Search| SearchEngine{Hybrid Search}
     SearchEngine -->|Semantic| Qdrant[(Qdrant Cloud)]
     SearchEngine -->|Keyword| BM25[(BM25 Search)]
     SearchEngine -->|Top Hits| Reranker[Neural Reranker]
-    Reranker -->|Refined Context| LLM[LLM Service - Gemini 1.5 Pro/Flash]
-    LLM -->|Streamed Tokens| User
-    Manager -->|Async Tasks| Celery[Redis/Celery Worker]
-    Celery -->|Index Progress| VectorMemory[(LTM Vector DB)]
+    Reranker -->|9. Refined Context| LLM[LLM Service - Gemini 1.5 Pro/Flash]
+    LLM -->|10. Streamed Tokens| User
+    
+    User -->|11. Next Interaction| API
 ```
 
 ### 2.3 Enhanced Request Flow
@@ -84,11 +105,13 @@ graph TD
 5.  **Parent-Context Synthesis**: The LLM receives the full context surrounding a retrieved chunk for more coherent synthesis.
 6.  **Real-Time Streaming**: Responses are streamed to the user token-by-token to eliminate perceived wait times.
 
-### 2.4 Technical Roadmap Summary
+### 2.4 Technical Roadmap Summary (February Progress)
 
-| Milestone | Upgrade | Primary Benefit |
-| :--- | :--- | :--- |
-| **Phase 1** | Hybrid Search + LLM Intent | 90% Retrieval Hit Rate; Nuanced understanding. |
-| **Phase 2** | Neural Reranking + Streaming | Higher response accuracy; Zero perceived latency. |
-| **Phase 3** | Long-Term Memory (LTM) | True personalized companionship over months/years. |
-| **Phase 4** | Panchang & Product API | Real-time spiritual utility and commerce integration. |
+The following milestones highlight the intensive development work completed throughout February. For a deeper breakdown of implementation details and architectural shifts, see the [FEBRUARY_PROGRESS_REPORT.md](file:///Users/ankit1609/Desktop/3ioNetra/3ionetra/docs/FEBRUARY_PROGRESS_REPORT.md).
+
+| Milestone | Upgrade | Status | Primary Benefit |
+| :--- | :--- | :--- | :--- |
+| **Phase 1** | Hybrid Search + LLM Intent | ✅ **Done** | 90% Retrieval Hit Rate; Nuanced understanding. |
+| **Phase 2** | Neural Reranking + Streaming | ✅ **Done** | Higher response accuracy; Zero perceived latency. |
+| **Phase 3** | Long-Term Memory (LTM) | 🛠️ **In-Progress** | True personalized companionship over months/years. |
+| **Phase 4** | Panchang & Product API | 🛠️ **In-Progress** | Real-time spiritual utility and commerce integration. |
