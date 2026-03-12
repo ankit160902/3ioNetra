@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { Send, Loader2, RefreshCw, LogOut, User, History, ChevronDown, BookOpen, Activity } from 'lucide-react';
+import { Send, Loader2, RefreshCw, LogOut, User, History, ChevronDown, BookOpen, Activity, ThumbsUp, ThumbsDown } from 'lucide-react';
 import Head from 'next/head';
 import { useSession, Citation, SourceReference, FlowMetadata, UserProfile, Product } from '../hooks/useSession';
 import { PhaseIndicatorCompact } from '../components/PhaseIndicator';
@@ -121,39 +121,54 @@ interface ConversationSummary {
  * Returns an array of segments: { type: 'text' | 'verse', content: string }
  * A "verse" segment is any line that contains a scripture citation pattern.
  */
-function parseResponseForVerses(text: string): { type: 'text' | 'verse'; content: string }[] {
+function parseResponseForVerses(text: string): { type: 'text' | 'verse' | 'mantra'; content: string }[] {
   if (!text) return [{ type: 'text', content: '' }];
 
-  if (text.includes('[VERSE]')) {
-    const segments: { type: 'text' | 'verse'; content: string }[] = [];
-    const regex = /\[VERSE\]([\s\S]*?)\[\/VERSE\]/g;
+  if (text.includes('[VERSE]') || text.includes('[MANTRA]')) {
+    const segments: { type: 'text' | 'verse' | 'mantra'; content: string }[] = [];
+    const regex = /\[(VERSE|MANTRA)\]([\s\S]*?)\[\/\1\]/g;
     let lastIndex = 0;
     let match;
 
     while ((match = regex.exec(text)) !== null) {
       const beforeText = text.substring(lastIndex, match.index);
       if (beforeText.trim()) {
-        segments.push({ type: 'text', content: beforeText });
+        // Clean punctuation artifacts at tag boundaries
+        let cleaned = beforeText;
+        if (lastIndex > 0) {
+          // This text follows a previous tag — strip leading punctuation
+          cleaned = cleaned.replace(/^\s*[""''\u2018\u2019\u201c\u201d]*[.,;:]+\s*/, '');
+        }
+        // Strip trailing punctuation before upcoming tag
+        cleaned = cleaned.replace(/[,;:]\s*$/, '');
+        if (cleaned.trim()) {
+          segments.push({ type: 'text', content: cleaned });
+        }
       }
-      let verseContent = match[1].trim();
-      if (verseContent) {
+      const tagType = match[1].toLowerCase() as 'verse' | 'mantra';
+      let tagContent = match[2].trim();
+      if (tagContent) {
         // Robust cleaning of markdown artifacts from the beginning/end
-        verseContent = verseContent.replace(/^[*_>`"„“' ]+/, '').replace(/[*_>`"„“' ]+$/, '');
-        segments.push({ type: 'verse', content: verseContent });
+        tagContent = tagContent.replace(/^[*_>`”„”' ]+/, '').replace(/[*_>`”„”' ]+$/, '');
+        segments.push({ type: tagType, content: tagContent });
       }
       lastIndex = regex.lastIndex;
     }
 
     const remainingText = text.substring(lastIndex);
     if (remainingText.trim()) {
-      segments.push({ type: 'text', content: remainingText });
+      // Clean leading punctuation orphaned by preceding tag card
+      const cleaned = remainingText.replace(/^\s*[""''\u2018\u2019\u201c\u201d]*[.,;:]+\s*/, '');
+      if (cleaned.trim()) {
+        segments.push({ type: 'text', content: cleaned });
+      }
     }
 
     return segments.length > 0 ? segments : [{ type: 'text', content: text }];
   }
 
   const lines = text.split('\n');
-  const segments: { type: 'text' | 'verse'; content: string }[] = [];
+  const segments: { type: 'text' | 'verse' | 'mantra'; content: string }[] = [];
 
   const versePatterns = [
     /[\u0900-\u097F]{3,}/,
@@ -196,6 +211,33 @@ export default function Home() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [feedback, setFeedback] = useState<Record<number, 'like' | 'dislike'>>({});
+
+  const handleFeedback = async (messageIndex: number, responseText: string, type: 'like' | 'dislike') => {
+    const prev = feedback[messageIndex];
+    if (prev === type) return;
+    setFeedback((f) => ({ ...f, [messageIndex]: type }));
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const auth = getAuthHeader();
+      if (auth) Object.assign(headers, auth);
+      const res = await fetch(`${API_URL}/api/feedback`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          session_id: session.sessionId || '',
+          message_index: messageIndex,
+          response_text: responseText,
+          feedback: type,
+        }),
+      });
+      if (!res.ok) {
+        console.error('Feedback API error:', res.status, await res.text());
+      }
+    } catch (err) {
+      console.error('Failed to submit feedback:', err);
+    }
+  };
 
   const userProfile: UserProfile | undefined = user ? {
     age_group: user.age_group || '',
@@ -208,16 +250,60 @@ export default function Home() {
     session,
     isLoading: sessionLoading,
     sendMessage,
+    sendMessageStream,
     resetSession,
     loadSession,
     error: sessionError,
   } = useSession(userProfile, getAuthHeader());
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesRef = useRef<Message[]>(messages);
+  messagesRef.current = messages;
+  const rafIdRef = useRef<number | null>(null);
+  const lastScrollRef = useRef<number>(0);
+  const targetTextRef = useRef<string>('');
+  const displayedLengthRef = useRef<number>(0);
+  const isStreamingRef = useRef<boolean>(false);
 
   useEffect(() => {
+    const now = Date.now();
+    if (isProcessing && now - lastScrollRef.current < 100) return;
+    lastScrollRef.current = now;
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, isProcessing]);
+
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
+    };
+  }, []);
+
+  // Auto-save conversation whenever messages change
+  useEffect(() => {
+    if (!isAuthenticated || messages.length < 2) return;
+    const convId = currentConversationId || session.sessionId;
+    if (!convId) return;
+
+    const timer = setTimeout(() => {
+      const title = messages.find(m => m.role === 'user')?.content.slice(0, 50) || 'Conversation';
+      fetch(`${API_URL}/api/user/conversations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({
+          conversation_id: convId,
+          title,
+          messages: messages.map(m => ({
+            role: m.role, content: m.content, citations: m.citations, timestamp: m.timestamp.toISOString(),
+          })),
+        }),
+      }).then(() => fetchHistory()).catch(err => console.error('Auto-save failed:', err));
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [messages, currentConversationId, session.sessionId, isAuthenticated]);
 
   useEffect(() => {
     setMessages([]);
@@ -262,8 +348,10 @@ export default function Home() {
     }
   };
 
-  const saveConversation = async () => {
+  const saveConversation = async (overrideId?: string) => {
     if (!isAuthenticated || messages.length <= 1) return;
+    const convId = overrideId || currentConversationId || session.sessionId;
+    if (!convId) return;
     try {
       const title = messages.find(m => m.role === 'user')?.content.slice(0, 50) || 'Conversation';
       await fetch(`${API_URL}/api/user/conversations`, {
@@ -273,7 +361,7 @@ export default function Home() {
           ...getAuthHeader(),
         },
         body: JSON.stringify({
-          conversation_id: currentConversationId,
+          conversation_id: convId,
           title,
           messages: messages.map(m => ({
             role: m.role,
@@ -295,6 +383,7 @@ export default function Home() {
     resetSession();
     setMessages([]);
     setCurrentConversationId(null);
+    setFeedback({});
     fetchHistory();
   };
 
@@ -315,43 +404,149 @@ export default function Home() {
 
     try {
       if (useConversationFlow) {
-        const response = await sendMessage(currentInput, language);
-        if (!response) throw new Error('No response received from server');
+        // Add empty placeholder for streaming text
+        const placeholder: Message = { role: 'assistant', content: '', timestamp: new Date() };
+        setMessages((prev) => [...prev, placeholder]);
 
-        let responseText = typeof response.response === 'string' ? response.response : (typeof response === 'string' ? response : '');
-        if (!responseText.trim()) responseText = 'I apologize, but I received an invalid response. Please try again.';
+        let accumulatedText = '';
+        targetTextRef.current = '';
+        displayedLengthRef.current = 0;
 
-        const flowMetadata = response.flow_metadata || undefined;
-        const assistantMessage: Message = {
-          role: 'assistant',
-          content: responseText,
-          citations: response.citations || [],
-          sources: response.sources || [],
-          recommendedProducts: response.recommended_products || [],
-          flowMetadata: flowMetadata,
-          timestamp: new Date(),
+        const typewriterTick = () => {
+          const target = targetTextRef.current;
+          const displayed = displayedLengthRef.current;
+
+          if (displayed < target.length) {
+            const remaining = target.length - displayed;
+            const chars = remaining > 200 ? 30
+                        : remaining > 80  ? 15
+                        : remaining > 30  ? 6
+                        :                   2;
+            displayedLengthRef.current = Math.min(displayed + chars, target.length);
+            const snapshot = target.slice(0, displayedLengthRef.current);
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
+              return updated;
+            });
+          }
+
+          if (isStreamingRef.current || displayedLengthRef.current < targetTextRef.current.length) {
+            rafIdRef.current = requestAnimationFrame(typewriterTick);
+          } else {
+            rafIdRef.current = null;
+          }
         };
 
-        setMessages((prev) => {
-          const nextMessages = [...prev];
-          for (let i = nextMessages.length - 1; i >= 0; i--) {
-            if (nextMessages[i].role === 'user') {
-              nextMessages[i] = { ...nextMessages[i], flowMetadata: flowMetadata };
-              break;
+        await sendMessageStream(
+          currentInput,
+          language,
+          // onToken — accumulate into ref, typewriter reveals progressively
+          (text) => {
+            accumulatedText += text;
+            targetTextRef.current = accumulatedText;
+            if (!rafIdRef.current) {
+              isStreamingRef.current = true;
+              typewriterTick();
+            }
+          },
+          // onMetadata — update session state
+          (meta) => {
+            if (!currentConversationId && meta.session_id) {
+              setCurrentConversationId(meta.session_id);
+            }
+          },
+          // onDone — finalize with clean text, products, citations
+          (final) => {
+            isStreamingRef.current = false;
+            if (rafIdRef.current) {
+              cancelAnimationFrame(rafIdRef.current);
+              rafIdRef.current = null;
+            }
+            targetTextRef.current = '';
+            displayedLengthRef.current = 0;
+            const flowMetadata = final.flow_metadata || undefined;
+            setMessages((prev) => {
+              const updated = [...prev];
+              // Attach flowMetadata to the last user message
+              for (let i = updated.length - 1; i >= 0; i--) {
+                if (updated[i].role === 'user') {
+                  updated[i] = { ...updated[i], flowMetadata };
+                  break;
+                }
+              }
+              // Finalize assistant message
+              updated[updated.length - 1] = {
+                ...updated[updated.length - 1],
+                content: final.full_response || accumulatedText,
+                recommendedProducts: final.recommended_products || [],
+                flowMetadata,
+                citations: final.citations || [],
+                sources: final.sources || [],
+              };
+              return updated;
+            });
+          },
+          // onError — fallback to non-streaming sendMessage()
+          async (err) => {
+            isStreamingRef.current = false;
+            if (rafIdRef.current) {
+              cancelAnimationFrame(rafIdRef.current);
+              rafIdRef.current = null;
+            }
+            targetTextRef.current = '';
+            displayedLengthRef.current = 0;
+            console.warn('Stream failed, falling back:', err);
+            // Remove placeholder
+            setMessages((prev) => prev.slice(0, -1));
+            try {
+              const response = await sendMessage(currentInput, language);
+              if (!response) throw new Error('No response received');
+              let responseText = typeof response.response === 'string' ? response.response : '';
+              if (!responseText.trim()) responseText = 'I apologize, but I received an invalid response. Please try again.';
+              const flowMetadata = response.flow_metadata || undefined;
+              const assistantMessage: Message = {
+                role: 'assistant',
+                content: responseText,
+                citations: response.citations || [],
+                sources: response.sources || [],
+                recommendedProducts: response.recommended_products || [],
+                flowMetadata,
+                timestamp: new Date(),
+              };
+              setMessages((prev) => {
+                const nextMessages = [...prev];
+                for (let i = nextMessages.length - 1; i >= 0; i--) {
+                  if (nextMessages[i].role === 'user') {
+                    nextMessages[i] = { ...nextMessages[i], flowMetadata };
+                    break;
+                  }
+                }
+                return [...nextMessages, assistantMessage];
+              });
+              if (!currentConversationId && response.session_id) {
+                setCurrentConversationId(response.session_id);
+              }
+            } catch (fallbackErr) {
+              console.error('Fallback also failed:', fallbackErr);
+              setMessages((prev) => [...prev, {
+                role: 'assistant',
+                content: 'I apologize, but I encountered an error. Please try again.',
+                timestamp: new Date(),
+              }]);
             }
           }
-          return [...nextMessages, assistantMessage];
-        });
-
-        if (isAuthenticated) {
-          setTimeout(() => {
-            saveConversation();
-            fetchHistory();
-          }, 1000);
-        }
+        );
       }
     } catch (error) {
-      console.error('❌ Error in handleTextSubmit:', error);
+      console.error('Error in handleTextSubmit:', error);
+      // Remove placeholder if it exists
+      setMessages((prev) => {
+        if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === '') {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
       const errorMessage: Message = {
         role: 'assistant',
         content: 'I apologize, but I encountered an error. Please try again.',
@@ -385,6 +580,8 @@ export default function Home() {
           .animate-fade-in { animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
           .scrollbar-hide::-webkit-scrollbar { display: none; }
           .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+          @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+          .streaming-cursor { display: inline-block; width: 2px; height: 1em; background: #c2410c; margin-left: 2px; vertical-align: text-bottom; animation: blink 0.8s step-end infinite; }
         `}</style>
       </Head>
 
@@ -499,7 +696,9 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="space-y-6 md:space-y-8 pb-10">
-                    {messages.map((message, index) => (
+                    {messages.map((message, index) => {
+                      if (message.role === 'assistant' && !message.content) return null;
+                      return (
                       <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
                         <div className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 md:px-6 md:py-4 shadow-xl shadow-orange-900/[0.03] transition-all relative group ${message.role === 'user'
                           ? 'bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-orange-200/30 rounded-tr-sm'
@@ -510,22 +709,41 @@ export default function Home() {
                             return (
                               <div className="message-content space-y-2.5 md:space-y-3 text-sm md:text-[15px]">
                                 {segments.map((seg, si) => (
-                                  seg.type === 'verse' ? (
+                                  seg.type !== 'text' ? (
                                     <div key={si} className="my-3 md:my-4 pl-3.5 md:pl-5 border-l-4 border-amber-400 bg-amber-50/40 rounded-r-xl py-3 md:py-4 pr-3.5 md:pr-5 border border-orange-100/30 relative overflow-hidden">
                                       <p className="whitespace-pre-wrap text-amber-950 italic text-[14px] leading-relaxed font-serif relative z-10">
-                                        “{seg.content}”
+                                        &quot;{seg.content}&quot;
                                       </p>
                                       <div className="mt-2.5 relative z-10">
-                                        <TTSButton text={seg.content} lang="hi" variant="verse" />
+                                        <TTSButton text={seg.content} lang="hi" variant={seg.type as 'verse' | 'mantra'} />
                                       </div>
                                     </div>
                                   ) : (
                                     <p key={si} className="whitespace-pre-wrap leading-[1.65] md:leading-[1.7] font-medium text-gray-700/90">
                                       {seg.content}
+                                      {isProcessing && index === messages.length - 1 && si === segments.length - 1 && seg.type === 'text' && (
+                                        <span className="streaming-cursor" />
+                                      )}
                                     </p>
                                   )
                                 ))}
-                                <div className="pt-3 border-t border-orange-50/50 flex justify-end">
+                                <div className="pt-3 border-t border-orange-50/50 flex items-center justify-between">
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      onClick={() => handleFeedback(index, message.content, 'like')}
+                                      className={`p-1.5 rounded-lg transition-all ${feedback[index] === 'like' ? 'bg-green-100 text-green-600' : 'text-gray-500 hover:text-green-500 hover:bg-green-50'}`}
+                                      title="Helpful"
+                                    >
+                                      <ThumbsUp className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleFeedback(index, message.content, 'dislike')}
+                                      className={`p-1.5 rounded-lg transition-all ${feedback[index] === 'dislike' ? 'bg-red-100 text-red-600' : 'text-gray-500 hover:text-red-500 hover:bg-red-50'}`}
+                                      title="Not helpful"
+                                    >
+                                      <ThumbsDown className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                   <TTSButton text={message.content} lang="en" variant="response" label="Listen to Full Response" />
                                 </div>
                               </div>
@@ -536,41 +754,7 @@ export default function Home() {
                             </p>
                           )}
 
-                          {message.role === 'assistant' && message.sources && message.sources.length > 0 && (
-                            <details className="mt-3 pt-3 border-t border-orange-50/50 group">
-                              <summary className="flex items-center gap-2 cursor-pointer text-[9px] font-black text-orange-700 hover:text-orange-900 transition-colors uppercase tracking-widest select-none">
-                                <BookOpen className="w-3 h-3" />
-                                Divine Sources ({message.sources.length})
-                              </summary>
-                              <div className="mt-2.5 space-y-2">
-                                {message.sources.map((source, i) => (
-                                  <div key={i} className="bg-orange-50/20 rounded-xl p-2.5 md:p-3 border border-orange-100/20 hover:border-orange-200 transition-colors">
-                                    <div className="flex items-center justify-between mb-1">
-                                      <p className="text-[10px] font-black text-gray-900 tracking-tight">
-                                        {source.scripture}
-                                        {source.reference && <span className="font-normal text-orange-700 ml-1 opacity-70"> — {source.reference}</span>}
-                                      </p>
-                                      <span className="text-[8px] font-black text-orange-600 bg-orange-100 px-1.5 py-0.5 rounded-full">{(source.relevance_score * 100).toFixed(0)}% match</span>
-                                    </div>
-                                    <p className="text-[9px] text-gray-500 leading-relaxed font-serif">"{source.context_text}"</p>
-                                  </div>
-                                ))}
-                              </div>
-                            </details>
-                          )}
 
-                          {/* Metadata */}
-                          {(message.flowMetadata?.topics?.length || 0) > 0 && (
-                            <div className="mt-3 flex items-center gap-1.5 flex-wrap">
-                              {message.flowMetadata?.topics?.map((topic, ti) => (
-                                <span key={ti} className={`inline-flex items-center gap-1.5 text-[8px] md:text-[9px] font-black px-2 py-0.5 rounded-full border shadow-sm transition-all hover:scale-105 ${message.role === 'user' ? 'bg-white/10 text-white border-white/20' : 'bg-orange-50 text-orange-700 border-orange-100'
-                                  }`}>
-                                  <Activity className="w-2.5 h-2.5" />
-                                  {topic.toUpperCase()}
-                                </span>
-                              ))}
-                            </div>
-                          )}
 
                           {message.role === 'assistant' && message.recommendedProducts && message.recommendedProducts.length > 0 && (
                             <ProductDisplay products={message.recommendedProducts} />
@@ -581,9 +765,10 @@ export default function Home() {
                           </div>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
 
-                    {isProcessing && (
+                    {isProcessing && (!messages.length || messages[messages.length - 1]?.content === '') && (
                       <div className="flex justify-start animate-fade-in pl-1">
                         <div className="bg-white/90 backdrop-blur-xl border border-orange-100 shadow-lg rounded-xl px-5 py-3 flex items-center gap-4">
                           <div className="flex gap-1">

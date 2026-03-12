@@ -56,6 +56,11 @@ def get_mongo_client():
             _db.tokens.create_index("token", unique=True)
             _db.tokens.create_index("expires_at", expireAfterSeconds=0)
             _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
+            try:
+                _db.feedback.drop_index("session_id_1_message_index_1_user_id_1")
+            except Exception:
+                pass
+            _db.feedback.create_index([("session_id", 1), ("message_index", 1), ("response_hash", 1), ("user_id", 1)], unique=True)
             logger.info("✅ MongoDB connection established and indexes verified")
         except Exception as e:
             logger.warning(f"⚠️ Index creation partially failed: {e}")
@@ -67,6 +72,16 @@ def get_mongo_client():
         _mongo_client = None
         _db = None
         return None
+
+
+def close_mongo_client():
+    """Close MongoDB client connection on shutdown"""
+    global _mongo_client, _db
+    if _mongo_client:
+        logger.info("Closing MongoDB connection...")
+        _mongo_client.close()
+        _mongo_client = None
+        _db = None
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -269,6 +284,39 @@ class AuthService:
         result = self.db.tokens.delete_one({"token": token})
         return result.deleted_count > 0
 
+    def update_user_profile(self, user_id: str, updates: Dict[str, Any]) -> bool:
+        """Update user's permanent profile fields (e.g. profession, rashi, nakshatra)"""
+        if self.db is None: return False
+        
+        # Prepare MongoDB update object
+        set_data = {}
+        spirit_updates = {}
+        
+        # Map flat updates to nested schema
+        if "profession" in updates: set_data["occupation"] = updates["profession"]
+        if "gender" in updates: set_data["gender"] = updates["gender"]
+        if "dob" in updates: set_data["date_of_birth"] = updates["dob"]
+        
+        # Deities is a list
+        if "preferred_deity" in updates: 
+            set_data["deities"] = [updates["preferred_deity"]]
+            
+        # Spiritual profile nesting
+        if "rashi" in updates: spirit_updates["rashi"] = updates["rashi"]
+        if "gotra" in updates: spirit_updates["gothra"] = updates["gotra"]
+        if "nakshatra" in updates: spirit_updates["nakshatra"] = updates["nakshatra"]
+        
+        if spirit_updates:
+            # $set nested fields
+            for k, v in spirit_updates.items():
+                set_data[f"spiritual_profile.{k}"] = v
+                
+        if not set_data:
+            return True
+            
+        result = self.db.users.update_one({"id": user_id}, {"$set": set_data})
+        return result.modified_count > 0
+
 class ConversationStorage:
     """Store and retrieve user conversations in MongoDB"""
 
@@ -407,7 +455,7 @@ class ConversationStorage:
     def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete user's entire conversation history"""
         if self.db is None: return False
-        result = self.db.conversations.delete_one({"user_id": user_id})
+        result = self.db.conversations.delete_one({"user_id": user_id, "session_id": conversation_id})
 
         # Invalidate cache
         try:

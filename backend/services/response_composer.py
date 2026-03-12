@@ -7,7 +7,6 @@ import logging
 from models.dharmic_query import DharmicQueryObject
 from models.memory_context import ConversationMemory
 from models.session import SessionState, ConversationPhase
-from llm.service import get_llm_service
 from services.panchang_service import get_panchang_service
 
 logger = logging.getLogger(__name__)
@@ -16,6 +15,7 @@ logger = logging.getLogger(__name__)
 class ResponseComposer:
 
     def __init__(self):
+        from llm.service import get_llm_service
         self.llm = get_llm_service()
         self.panchang = get_panchang_service()
         self.available = self.llm.available
@@ -31,7 +31,7 @@ class ResponseComposer:
         phase: Optional[ConversationPhase] = None,
         original_query: Optional[str] = None,
         user_id: Optional[str] = None,
-        past_memories: List[str] = None
+        past_memories: List[str] = None,
     ) -> str:
         """
         Compose a response using:
@@ -77,7 +77,7 @@ class ResponseComposer:
                 conversation_history=conversation_history, # Use the explicit history passed from session
                 user_profile=user_profile,
                 phase=phase,
-                memory_context=memory
+                memory_context=memory,
             )
 
         logger.info("LLM unavailable, using fallback")
@@ -93,7 +93,7 @@ class ResponseComposer:
         phase: Optional[ConversationPhase] = None,
         original_query: Optional[str] = None,
         user_id: Optional[str] = None,
-        past_memories: List[str] = None
+        past_memories: List[str] = None,
     ):
         """
         Stream response synthesis using LLMService.generate_response_stream.
@@ -123,7 +123,7 @@ class ResponseComposer:
                 conversation_history=conversation_history,
                 user_profile=user_profile,
                 phase=phase,
-                memory_context=memory
+                memory_context=memory,
             ):
                 yield chunk
         else:
@@ -149,6 +149,9 @@ class ResponseComposer:
             profile['user_id'] = memory.user_id
         if memory.user_created_at:
             profile['created_at'] = memory.user_created_at
+        
+        # 🔄 Returning user flag
+        profile['is_returning_user'] = memory.is_returning_user
         
         # Demographics and current state from story
         story = memory.story

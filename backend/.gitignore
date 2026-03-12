@@ -46,8 +46,9 @@ env/
 logs/
 *.log.*
 
-# Data & ML Models (not Python code models/)
+# Data & ML Models
 data/
+models/
 ml_models/
 *.pkl
 *.pth

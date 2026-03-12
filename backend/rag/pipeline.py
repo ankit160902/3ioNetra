@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import logging
@@ -8,6 +9,7 @@ import numpy as np
 
 from config import settings
 from llm.service import get_llm_service
+from services.cache_service import get_cache_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +35,8 @@ class RAGPipeline:
         self.embeddings: Optional[np.ndarray] = None
         self.dim: int = 0
         self.available: bool = False
-        self._embedding_model = None  # lazy‑loaded
+        self._embedding_model = None
+        self._reranker_model = None
         self._llm = get_llm_service()
 
     def __bool__(self) -> bool:
@@ -65,29 +68,9 @@ class RAGPipeline:
                 # mmap_mode='r' is the critical fix for Cloud Run OOM
                 raw_embeddings = np.load(embeddings_path, mmap_mode='r')
             else:
-                # Fallback to legacy single JSON file if it exists
-                legacy_path = processed_dir / "processed_data.json"
-                if legacy_path.exists():
-                    logger.warning(f"RAGPipeline: Found legacy data file {legacy_path}. Loading into memory (OOM RISK!)...")
-                    with legacy_path.open("r", encoding="utf-8") as f:
-                        payload = json.load(f)
-                    self.verses = payload.get("verses", [])
-                    
-                    emb_list = [v.get("embedding") for v in self.verses if v.get("embedding") is not None]
-                    if not emb_list:
-                        logger.warning("RAGPipeline: Legacy verses missing embeddings")
-                        self.available = False
-                        return
-                    
-                    raw_embeddings = np.asarray(emb_list, dtype="float32")
-                    # Pre-normalize legacy embeddings as they might not be
-                    norms = np.linalg.norm(raw_embeddings, axis=1, keepdims=True)
-                    norms[norms == 0] = 1.0
-                    raw_embeddings = raw_embeddings / norms
-                else:
-                    logger.warning("RAGPipeline: No processed data found. Run scripts/ingest_all_data.py.")
-                    self.available = False
-                    return
+                logger.warning("RAGPipeline: No processed data found (verses.json + embeddings.npy). Run scripts/ingest_all_data.py.")
+                self.available = False
+                return
 
             if not self.verses or raw_embeddings.size == 0:
                 logger.warning("RAGPipeline: Empty dataset loaded")
@@ -107,9 +90,41 @@ class RAGPipeline:
                 f"RAGPipeline initialized with {len(self.verses)} verses "
                 f"(dim={self.dim}). Memory Map: {'Active' if metadata_path.exists() else 'Inactive (Legacy Mode)'}"
             )
+
+            # Eagerly load ML models at startup to avoid per-request delays
+            self._load_ml_models()
+
         except Exception as exc:
             logger.exception(f"Failed to initialize RAGPipeline: {exc}")
             self.available = False
+
+    # ------------------------------------------------------------------
+    # ML Model Loading (eager at startup, cached locally)
+    # ------------------------------------------------------------------
+
+    def _load_ml_models(self) -> None:
+        """Load embedding and reranker models once at startup.
+        Also pre-computes BM25 statistics and sets HuggingFace Hub to offline
+        mode to prevent HTTP requests during request handling.
+        """
+        self._ensure_embedding_model()
+        self._ensure_reranker_model()
+
+        # Pre-compute BM25 doc stats so first search is instant
+        self._precompute_bm25_stats()
+
+        # Block all future HuggingFace Hub HTTP requests
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        logger.info(
+            "RAGPipeline: ML models loaded at startup — "
+            "HuggingFace Hub set to offline mode for runtime"
+        )
+
+    @staticmethod
+    def _local_dev_model_dir() -> Path:
+        """Return <backend>/models — the local dev model cache directory."""
+        return Path(__file__).resolve().parent.parent / "models"
 
     # ------------------------------------------------------------------
     # Embedding utilities
@@ -121,40 +136,64 @@ class RAGPipeline:
 
         try:
             from sentence_transformers import SentenceTransformer
-            
-            # 1. Try local baked-in path first (for production)
+
+            # 1. Docker production path
             local_path = "/app/models/embeddings"
             if os.path.isdir(local_path):
                 logger.info(f"RAGPipeline: loading embedding model from LOCAL path: {local_path}")
                 self._embedding_model = SentenceTransformer(local_path)
                 return
 
-            # 2. Fallback to settings (for local dev)
+            # 2. Local dev cache path (backend/models/embeddings)
+            dev_path = str(self._local_dev_model_dir() / "embeddings")
+            if os.path.isdir(dev_path) and os.listdir(dev_path):
+                logger.info(f"RAGPipeline: loading embedding model from DEV cache: {dev_path}")
+                self._embedding_model = SentenceTransformer(dev_path)
+                return
+
+            # 3. Download from Hub (first time only), then cache locally
             model_name = settings.EMBEDDING_MODEL
-            logger.info(f"RAGPipeline: loading embedding model '{model_name}' from Hub")
+            logger.info(f"RAGPipeline: downloading embedding model '{model_name}' from Hub (one-time)")
             self._embedding_model = SentenceTransformer(model_name)
+
+            # Auto-save to local dev cache for instant loads next time
+            os.makedirs(dev_path, exist_ok=True)
+            self._embedding_model.save(dev_path)
+            logger.info(f"RAGPipeline: cached embedding model to {dev_path}")
         except Exception as exc:
             logger.exception(f"RAGPipeline: failed to load embedding model: {exc}")
             self._embedding_model = None
 
     def _ensure_reranker_model(self) -> None:
-        if hasattr(self, "_reranker_model") and self._reranker_model is not None:
+        if self._reranker_model is not None:
             return
 
         try:
             from sentence_transformers import CrossEncoder
-            
-            # 1. Try local baked-in path first (for production)
+
+            # 1. Docker production path
             local_path = "/app/models/reranker"
             if os.path.isdir(local_path):
                 logger.info(f"RAGPipeline: loading re-ranker from LOCAL path: {local_path}")
                 self._reranker_model = CrossEncoder(local_path)
                 return
 
-            # 2. Fallback to default (for local dev)
+            # 2. Local dev cache path (backend/models/reranker)
+            dev_path = str(self._local_dev_model_dir() / "reranker")
+            if os.path.isdir(dev_path) and os.listdir(dev_path):
+                logger.info(f"RAGPipeline: loading re-ranker from DEV cache: {dev_path}")
+                self._reranker_model = CrossEncoder(dev_path)
+                return
+
+            # 3. Download from Hub (first time only), then cache locally
             model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-            logger.info(f"RAGPipeline: loading re-ranker model '{model_name}' from Hub")
+            logger.info(f"RAGPipeline: downloading re-ranker '{model_name}' from Hub (one-time)")
             self._reranker_model = CrossEncoder(model_name)
+
+            # Auto-save to local dev cache for instant loads next time
+            os.makedirs(dev_path, exist_ok=True)
+            self._reranker_model.save(dev_path)
+            logger.info(f"RAGPipeline: cached re-ranker to {dev_path}")
         except Exception as exc:
             logger.exception(f"RAGPipeline: failed to load re-ranker: {exc}")
             self._reranker_model = None
@@ -172,15 +211,27 @@ class RAGPipeline:
 
         # Normalize text: strip whitespace, replace newlines
         clean_text = text.strip().replace("\n", " ")
-        vec = self._embedding_model.encode([clean_text], convert_to_tensor=False)[0]
+        vec = self._embedding_model.encode([clean_text], convert_to_tensor=False, show_progress_bar=False)[0]
         return np.asarray(vec, dtype="float32")
 
     # ------------------------------------------------------------------
     # Query Expansion
     # ------------------------------------------------------------------
 
+    # Words that should never trigger LLM-based query expansion
+    _SKIP_EXPANSION = frozenset([
+        "hi", "hey", "hello", "namaste", "pranam", "ok", "okay",
+        "thanks", "thank you", "bye", "hii", "hiii", "yes", "no",
+    ])
+
     async def _expand_query(self, query: str) -> List[str]:
-        """Use LLM to expand the query for better recall"""
+        """Use LLM to expand the query for better recall.
+        Skips expansion for greetings and trivial messages to save a Gemini call.
+        """
+        # Fast-path: skip expansion for greetings / trivial messages
+        if query.strip().lower() in self._SKIP_EXPANSION:
+            return [query]
+
         if not self._llm.available:
             return [query]
 
@@ -190,7 +241,18 @@ class RAGPipeline:
         Respond ONLY with the 2 terms, separated by a newline. Do not include numbering or bullets.
         """
         try:
-            expansion = await self._llm.generate_response(query=prompt, conversation_history=[])
+            import asyncio
+
+            # Use the fast model for query expansion (lightweight task)
+            def _sync_expand():
+                return self._llm.client.models.generate_content(
+                    model=settings.GEMINI_FAST_MODEL,
+                    contents=prompt,
+                    config={"temperature": 0.3, "max_output_tokens": 100, "automatic_function_calling": {"disable": True}}
+                )
+
+            response = await asyncio.to_thread(_sync_expand)
+            expansion = response.text if response.text else ""
             expanded_terms = [t.strip() for t in expansion.split("\n") if t.strip()]
             logger.info(f"Query expansion: {expanded_terms}")
             return [query] + expanded_terms[:2]
@@ -201,6 +263,15 @@ class RAGPipeline:
     # ------------------------------------------------------------------
     # Core search
     # ------------------------------------------------------------------
+
+    def _get_best_score(self, doc: Dict) -> float:
+        """Return the best available numeric score from a retrieved document."""
+        return float(
+            doc.get("final_score")
+            or doc.get("rerank_score")
+            or doc.get("score")
+            or 0.0
+        )
 
     def _cosine_similarities(self, query_vec: np.ndarray) -> np.ndarray:
         if self.embeddings is None or not self.available:
@@ -215,19 +286,44 @@ class RAGPipeline:
         # Dot product with pre-normalized document vectors
         return self.embeddings @ q
 
+    def _precompute_bm25_stats(self) -> None:
+        """Pre-compute BM25 document statistics at startup (avoids first-search delay)."""
+        if not self.verses:
+            return
+        N = len(self.verses)
+        self._doc_lengths = []
+        self._word_counts = []
+        for verse in self.verses:
+            text = (
+                (verse.get("text") or "") + " " +
+                (verse.get("meaning") or "") + " " +
+                (verse.get("translation") or "")
+            ).lower()
+            tokens = text.split()
+            self._doc_lengths.append(len(tokens))
+            counts: Dict[str, int] = {}
+            for t in tokens:
+                counts[t] = counts.get(t, 0) + 1
+            self._word_counts.append(counts)
+
+        self._avg_dl = sum(self._doc_lengths) / max(1, N)
+        self._df: Dict[str, int] = {}
+        for counts in self._word_counts:
+            for token in counts:
+                self._df[token] = self._df.get(token, 0) + 1
+        logger.info(f"BM25 stats pre-computed for {N} documents")
+
     def _keyword_score_bm25(self, query: str) -> np.ndarray:
         """Improved keyword matching using a simplified BM25 approach"""
         if not self.verses:
             return np.zeros((0,))
-        
-        # We'll use a fast custom implementation for mid-sized datasets
-        # In a production setting with millions of docs, we'd use a dedicated library
+
         query_tokens = [t.lower() for t in query.split() if len(t) > 2]
         if not query_tokens:
             return np.zeros(len(self.verses))
 
         N = len(self.verses)
-        # Pre-calculating doc lengths if not already done
+        # Lazy fallback if not pre-computed (shouldn't happen after startup)
         if not hasattr(self, "_doc_lengths"):
             self._doc_lengths = []
             self._word_counts = []
@@ -357,6 +453,8 @@ class RAGPipeline:
         language: str = "en",
         top_k: int = settings.RETRIEVAL_TOP_K,
         intent: Optional[str] = None,
+        min_score: float = 0.12,
+        doc_type_filter: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
@@ -377,20 +475,18 @@ class RAGPipeline:
             expanded_queries = await self._expand_query(query)
 
         # 🚀 Parallel Execution: Embeddings for all expansions
-        import asyncio
-        
-        async def get_embedding(q):
-            vec = await self.generate_embeddings(q)
-            return self._cosine_similarities(vec)
+        # Execute semantic search and BM25 concurrently for significant latency reduction
+        async def get_all_semantic_scores():
+            tasks = [self.generate_embeddings(q) for q in expanded_queries]
+            vecs = await asyncio.gather(*tasks)
+            all_scores = [self._cosine_similarities(v) for v in vecs]
+            return np.max(np.array(all_scores), axis=0)
 
-        # Execute concurrently
-        all_semantic_scores = await asyncio.gather(*[get_embedding(q) for q in expanded_queries])
-
-        # Merge semantic scores (max pool across expansions)
-        semantic_scores = np.max(np.array(all_semantic_scores), axis=0)
+        # 3. Hybrid Search (Parallel EXECUTION)
+        semantic_task = get_all_semantic_scores()
+        keyword_task = asyncio.to_thread(self._keyword_score_bm25, query)
         
-        # 3. Hybrid Search: Semantic + BM25
-        keyword_scores = self._keyword_score_bm25(query)
+        semantic_scores, keyword_scores = await asyncio.gather(semantic_task, keyword_task)
         
         # Fusion (70% semantic weight)
         fused_scores = (0.7 * semantic_scores) + (0.3 * keyword_scores)
@@ -426,6 +522,23 @@ class RAGPipeline:
         # 5. Neural Re-ranking (Cross-Encoder)
         results = await self._rerank_results(query, results, intent=intent)
 
+        # 6. Minimum score gate — drop irrelevant candidates
+        if min_score > 0:
+            before = len(results)
+            results = [r for r in results if self._get_best_score(r) >= min_score]
+            dropped = before - len(results)
+            if dropped:
+                logger.info(f"min_score gate: dropped {dropped} doc(s) below threshold={min_score}")
+
+        # 7. Doc-type exclusion filter
+        if doc_type_filter:
+            excluded_types = {t.lower() for t in doc_type_filter}
+            before = len(results)
+            results = [r for r in results if (r.get("type") or "scripture").lower() not in excluded_types]
+            dropped = before - len(results)
+            if dropped:
+                logger.info(f"doc_type_filter: dropped {dropped} doc(s) of types={doc_type_filter}")
+
         # Limit to final top_k
         final_results = results[:top_k]
         
@@ -444,8 +557,24 @@ class RAGPipeline:
         conversation_history: Optional[List[Dict]] = None,
     ) -> Dict:
         """
-        RAG‑augmented QA for standalone text queries.
+        RAG‑augmented QA for standalone text queries with caching.
         """
+        cache = get_cache_service()
+        
+        # 1. Try to get from cache
+        # Note: we use a limited history slice for cache key stability
+        history_key = str(conversation_history[-2:]) if conversation_history else ""
+        cache_params = {
+            "query": query,
+            "language": language,
+            "citations": include_citations,
+            "history": history_key
+        }
+        
+        cached_res = await cache.get("rag_query", **cache_params)
+        if cached_res:
+            return cached_res
+
         # Retrieve context first
         docs = await self.search(
             query=query, 
@@ -484,11 +613,16 @@ class RAGPipeline:
 
         confidence = 1.0 if docs and docs[0].get('score', 0) > 0.4 else (0.5 if docs else 0.0)
 
-        return {
+        result = {
             "answer": answer,
             "citations": citations,
             "confidence": confidence,
         }
+
+        # 3. Store in cache (expire after 1 hour by default)
+        await cache.set("rag_query", result, ttl=3600, **cache_params)
+
+        return result
 
     async def query_stream(
         self,

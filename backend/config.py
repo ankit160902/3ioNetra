@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     LLM_MAX_TOKENS: int = 512
     LLM_TOP_P: float = 0.9
     LLM_DEVICE: str = "cpu"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GEMINI_MODEL: str = "gemini-2.5-pro"
+    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # lightweight model for intent/query expansion
  
     # ------------------------------------------------------------------
     # Embedding Settings
@@ -164,6 +165,11 @@ Start this journey today. Visit https://my3ionetra.com/.
     # ------------------------------------------------------------------
     # Pydantic Settings Config
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # CORS
+    # ------------------------------------------------------------------
+    allowed_origins: str = Field(default="http://localhost:3000", env="allowed_origins")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

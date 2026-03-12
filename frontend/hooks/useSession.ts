@@ -211,6 +211,88 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
   );
 
   /* =======================
+     Send message stream (SSE)
+  ======================= */
+
+  const sendMessageStream = useCallback(
+    async (
+      message: string,
+      language: string,
+      onToken: (text: string) => void,
+      onMetadata: (meta: any) => void,
+      onDone: (final: any) => void,
+      onError: (error: Error) => void,
+    ): Promise<void> => {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        let sessionId = session.sessionId;
+        if (!sessionId) {
+          sessionId = await createSession();
+        }
+
+        const body: any = { session_id: sessionId, message, language };
+        if (session.turnCount === 0 && userProfile) {
+          body.user_profile = userProfile;
+        }
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          ...authHeader,
+        };
+
+        const res = await fetch(`${API_URL}/api/conversation/stream`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Stream request failed');
+        }
+
+        const reader = res.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let currentEvent = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('event: ')) {
+              currentEvent = line.slice(7).trim();
+            } else if (line.startsWith('data: ') && currentEvent) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (currentEvent === 'metadata') onMetadata(data);
+                else if (currentEvent === 'token') onToken(data.text);
+                else if (currentEvent === 'done') onDone(data);
+                else if (currentEvent === 'error') onError(new Error(data.message));
+              } catch {
+                // skip malformed JSON lines
+              }
+              currentEvent = '';
+            }
+          }
+        }
+      } catch (e: any) {
+        setError(e.message || 'Stream failed');
+        onError(e);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [session.sessionId, session.turnCount, userProfile, authHeader, createSession]
+  );
+
+  /* =======================
      Reset session
   ======================= */
 
@@ -270,6 +352,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
     isLoading,
     error,
     sendMessage,
+    sendMessageStream,
     resetSession,
     loadSession,
   };

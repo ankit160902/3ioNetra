@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 import logging
 from .auth_service import get_mongo_client
 from models.product import Product
@@ -10,6 +11,15 @@ class ProductService:
         self.db = get_mongo_client()
         self.collection = self.db["products"] if self.db is not None else None
 
+    @staticmethod
+    def _serialize_doc(doc: dict) -> dict:
+        """Convert MongoDB doc fields to JSON-safe types."""
+        doc["_id"] = str(doc["_id"])
+        for key in ("created_at", "updated_at"):
+            if key in doc and isinstance(doc[key], datetime):
+                doc[key] = doc[key].isoformat()
+        return doc
+
     async def get_all_products(self, active_only: bool = True) -> List[Dict[str, Any]]:
         """Fetch all products from the collection"""
         if self.collection is None:
@@ -18,11 +28,12 @@ class ProductService:
         cursor = self.collection.find(query)
         products = []
         for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            doc = self._serialize_doc(doc)
             products.append(doc)
         return products
 
-    async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5) -> List[Dict[str, Any]]:
+    async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
+                              emotion: str = "", deity: str = "") -> List[Dict[str, Any]]:
         """Search products by name or category with precision and domain context"""
         import re
         # Tokenize and clean
@@ -58,7 +69,7 @@ class ProductService:
         cursor = self.collection.find(query).limit(50) 
         raw_products = []
         for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            doc = self._serialize_doc(doc)
             raw_products.append(doc)
             
         # Re-rank based on keyword match density and multi-term boosting
@@ -90,17 +101,49 @@ class ProductService:
 
             # Life Domain Category Boosting
             domain_category_map = {
-                "career": ["Astrostore", "ASTROLOGY", "Astro List"],
-                "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential"],
-                "health": ["Wellness", "Ayurvedic"],
-                "spiritual": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore"],
-                "family": ["Pooja Essential", "Puja Essential", "Spiritual Home"]
+                "career": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
+                "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential", "Astro List"],
+                "health": ["Astrostore", "GST-Included"],
+                "spiritual": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva", "Puja"],
+                "family": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Pooja Murti"],
+                "finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
+                # _update_memory domain labels
+                "career & finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
+                "physical health": ["Astrostore", "GST-Included"],
+                "ayurveda & wellness": ["Astrostore", "GST-Included"],
+                "yoga practice": ["Astrostore", "GST-Included"],
+                "meditation & mind": ["Astrostore", "Pooja Essential"],
+                "spiritual growth": ["Pooja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva"],
             }
-            
+
             boosted_categories = domain_category_map.get(life_domain.lower(), [])
             if any(cat in product.get("category", "") for cat in boosted_categories):
                 score += 25  # Significant boost for domain match
-            
+
+            # Deity name boost
+            if deity:
+                deity_lower = deity.lower()
+                if deity_lower in name_lower:
+                    score += 30
+                if deity_lower in desc_lower:
+                    score += 10
+
+            # Emotion category boost
+            emotion_category_boost = {
+                "anxiety": ["Astrostore"],
+                "grief": ["Seva", "Astro List", "Spiritual"],
+                "confusion": ["Astro List", "ASTROLOGY", "Ank Shastra"],
+                "anger": ["Astrostore"],
+                "stress": ["Astrostore", "GST-Included"],
+                "fear": ["Astrostore", "Pooja Murti"],
+                "hopelessness": ["Astro List", "Spiritual"],
+                "sadness": ["Astrostore", "Astro List"],
+            }
+            if emotion:
+                emotion_cats = emotion_category_boost.get(emotion.lower(), [])
+                if any(cat in product.get("category", "") for cat in emotion_cats):
+                    score += 15
+
             # Category Boosts
             # 1. Physical products boost
             physical_categories = ["Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home"]
@@ -129,14 +172,14 @@ class ProductService:
         cursor = self.collection.find(query).limit(limit)
         products = []
         for doc in cursor:
-            doc["_id"] = str(doc["_id"])
+            doc = self._serialize_doc(doc)
             products.append(doc)
         
         # If no products found in category, return top active products
         if not products and category:
             cursor = self.collection.find({"is_active": True}).limit(limit)
             for doc in cursor:
-                doc["_id"] = str(doc["_id"])
+                doc = self._serialize_doc(doc)
                 products.append(doc)
                 
         return products

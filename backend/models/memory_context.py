@@ -130,6 +130,9 @@ class ConversationMemory:
     user_phone: str = ""
     user_dob: str = ""
     user_created_at: str = ""
+    
+    # Returning user flag
+    is_returning_user: bool = False
 
     def to_dict(self) -> Dict:
         return {
@@ -144,7 +147,8 @@ class ConversationMemory:
             "user_email": self.user_email,
             "user_phone": self.user_phone,
             "user_dob": self.user_dob,
-            "user_created_at": self.user_created_at
+            "user_created_at": self.user_created_at,
+            "is_returning_user": self.is_returning_user
         }
     
     @classmethod
@@ -163,7 +167,8 @@ class ConversationMemory:
             user_email=data.get("user_email", ""),
             user_phone=data.get("user_phone", ""),
             user_dob=data.get("user_dob", ""),
-            user_created_at=data.get("user_created_at", "")
+            user_created_at=data.get("user_created_at", ""),
+            is_returning_user=data.get("is_returning_user", False)
         )
         return memory
 

@@ -78,6 +78,9 @@ class SessionState:
     # Returning user detection
     is_returning_user: bool = False  # True if past conversation history was loaded
 
+    # Proactive product suggestion anti-spam guard
+    last_proactive_product_turn: int = -1
+
     def to_dict(self) -> Dict:
         return {
             "session_id": self.session_id,
@@ -93,6 +96,7 @@ class SessionState:
             "max_clarification_turns": self.max_clarification_turns,
             "last_guidance_turn": self.last_guidance_turn,
             "is_returning_user": self.is_returning_user,
+            "last_proactive_product_turn": self.last_proactive_product_turn,
             "memory": self.memory.to_dict() if self.memory else None
         }
 
@@ -121,6 +125,7 @@ class SessionState:
             max_clarification_turns=data.get("max_clarification_turns", 6),
             last_guidance_turn=data.get("last_guidance_turn", -1),
             is_returning_user=data.get("is_returning_user", False),
+            last_proactive_product_turn=data.get("last_proactive_product_turn", -1),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )
         return session

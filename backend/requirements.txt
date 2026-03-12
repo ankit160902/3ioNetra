@@ -11,6 +11,7 @@ gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)
 sentence-transformers==3.0.1
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
 transformers==4.41.2
 huggingface-hub==0.23.5

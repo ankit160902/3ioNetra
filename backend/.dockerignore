@@ -61,6 +61,7 @@ ml_models/
 data/
 !data/processed/
 !data/processed/*.json
+!data/processed/*.npy
 *.pth
 *.bin
 *.h5

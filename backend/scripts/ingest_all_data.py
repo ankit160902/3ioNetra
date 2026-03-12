@@ -1,7 +1,3 @@
-"""
-Ingest all spiritual text datasets and create embeddings for RAG pipeline
-Handles multiple data formats: CSV, JSON with various structures
-"""
 import os
 import sys
 import json
@@ -10,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict
 import numpy as np
+import asyncio
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -46,6 +43,24 @@ class UniversalScriptureIngester:
             except Exception as e:
                 logger.error(f"Failed to load embedding model: {e}")
 
+        # PDF Ingester
+        try:
+            from scripts.pdf_ingester import PDFIngester
+            self.pdf_ingester = PDFIngester()
+            logger.info("PDF Ingester initialized")
+        except ImportError:
+            self.pdf_ingester = None
+            logger.warning("PDF Ingester or its dependencies not available")
+
+        # Video Ingester
+        try:
+            from scripts.video_ingester import VideoIngester
+            self.video_ingester = VideoIngester()
+            logger.info("Video Ingester initialized")
+        except ImportError:
+            self.video_ingester = None
+            logger.warning("Video Ingester or its dependencies not available")
+
     def find_dataset_files(self) -> List[Path]:
         """Find all dataset files in raw data directory"""
         files = []
@@ -54,12 +69,18 @@ class UniversalScriptureIngester:
             logger.error(f"Raw data directory not found: {self.raw_data_dir}")
             return files
 
-        # Look for CSV and JSON files
+        # Look for CSV, JSON, and PDF files
         csv_files = list(self.raw_data_dir.glob("*.csv"))
         json_files = list(self.raw_data_dir.glob("*.json"))
+        pdf_files = list(self.raw_data_dir.glob("*.pdf"))
+        video_files = []
+        for ext in ['*.mp4', '*.mkv', '*.mov', '*.avi', '*.webm']:
+            video_files.extend(list(self.raw_data_dir.glob(ext)))
 
         files.extend(csv_files)
         files.extend(json_files)
+        files.extend(pdf_files)
+        files.extend(video_files)
 
         logger.info(f"Found {len(files)} data files")
         return files
@@ -134,6 +155,30 @@ class UniversalScriptureIngester:
             logger.error(f"✗ Error parsing JSON {file_path.name}: {e}")
 
         return verses
+
+    async def parse_pdf_file(self, file_path: Path) -> List[Dict]:
+        """Parse PDF file using PDFIngester"""
+        if not self.pdf_ingester:
+            logger.error(f"Cannot parse PDF {file_path.name}: Ingester not available")
+            return []
+            
+        try:
+            return await self.pdf_ingester.process_pdf(file_path)
+        except Exception as e:
+            logger.error(f"✗ Error parsing PDF {file_path.name}: {e}")
+            return []
+
+    async def parse_video_file(self, file_path: Path) -> List[Dict]:
+        """Parse Video file using VideoIngester"""
+        if not self.video_ingester:
+            logger.error(f"Cannot parse Video {file_path.name}: Ingester not available")
+            return []
+            
+        try:
+            return await self.video_ingester.process_video(file_path)
+        except Exception as e:
+            logger.error(f"✗ Error parsing Video {file_path.name}: {e}")
+            return []
 
     def strip_markdown(self, text: str) -> str:
         """Simple markdown stripper"""
@@ -516,8 +561,10 @@ class UniversalScriptureIngester:
 
         logger.info(f"✓ Saved RAG data efficiently: {metadata_file} and {embeddings_file}")
 
-    def ingest_all(self):
-        """Main ingestion pipeline"""
+        logger.info("\n🎯 Data is ready for RAG pipeline!")
+
+    async def ingest_all_async(self):
+        """Main async ingestion pipeline"""
         logger.info("\n" + "=" * 80)
         logger.info("🚀 STARTING UNIVERSAL SCRIPTURE DATASET INGESTION")
         logger.info("=" * 80)
@@ -541,6 +588,10 @@ class UniversalScriptureIngester:
                 verses = self.parse_csv_file(file_path)
             elif file_path.suffix == '.json':
                 verses = self.parse_json_file(file_path)
+            elif file_path.suffix == '.pdf':
+                verses = await self.parse_pdf_file(file_path)
+            elif file_path.suffix.lower() in ['.mp4', '.mkv', '.mov', '.avi', '.webm']:
+                verses = await self.parse_video_file(file_path)
             else:
                 logger.warning(f"⚠ Unsupported file type: {file_path.name}")
                 continue
@@ -590,7 +641,7 @@ class UniversalScriptureIngester:
 def main():
     """Run ingestion"""
     ingester = UniversalScriptureIngester()
-    ingester.ingest_all()
+    asyncio.run(ingester.ingest_all_async())
 
 
 if __name__ == "__main__":

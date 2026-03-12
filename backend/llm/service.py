@@ -8,6 +8,8 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass, field
 from enum import Enum
 from config import settings
+from services.resilience import CircuitBreaker
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,114 @@ def clean_response(text: str) -> str:
 
     # Apply sanitization to all verse blocks
     text = re.sub(r'\[VERSE\]([\s\S]*?)\[/VERSE\]', clean_verse_content, text)
-    
+
+    # Robustly clean content inside [MANTRA] tags (same pattern as [VERSE])
+    def clean_mantra_content(match):
+        content = match.group(1).strip()
+        content = re.sub(r'^[\*\s_>"`„"\']+', '', content)
+        content = re.sub(r'[\*\s_>"`„"\']+$', '', content)
+        return f"[MANTRA]\n{content}\n[/MANTRA]"
+
+    text = re.sub(r'\[MANTRA\]([\s\S]*?)\[/MANTRA\]', clean_mantra_content, text)
+
+    # Safety net: detect known mantras NOT already inside [MANTRA] or [VERSE] tags and wrap them
+    KNOWN_MANTRA_PATTERNS = [
+        # Long mantras (safe to auto-detect without quotes)
+        r"Om\s+Tryambakam\s+Yajamahe[\s\S]*?Ma'?amritat",
+        r'Om\s+Gam\s+Ganapataye\s+Namah[a]?',
+        r'Om\s+Namah\s+Shivaya',
+        r'Om\s+Shreem\s+Mahalakshmyai\s+Namah[a]?',
+        r'Om\s+Aim\s+Saraswatyai\s+Namah[a]?',
+        r'Om\s+Kleem\s+Krishnaya\s+Namah[a]?',
+        r'Om\s+Namo\s+Bhagavate\s+Vasudevaya',
+        r'Lokah\s+Samastah\s+Sukhino\s+Bhavantu',
+        # Short mantras — require quotes around them to avoid false positives
+        r"['\u2018\u201c]Om\s+Shanti(?:\s+Om\s+Shanti)*['\u2019\u201d]",
+        r"['\u2018\u201c]So\s+Hum['\u2019\u201d]",
+        r"['\u2018\u201c]Om\s+Tat\s+Sat['\u2019\u201d]",
+    ]
+
+    def _is_inside_tags(text, start, end):
+        """Check if position start..end is already inside [MANTRA] or [VERSE] tags."""
+        for tag in ['MANTRA', 'VERSE']:
+            for m in re.finditer(r'\[' + tag + r'\][\s\S]*?\[/' + tag + r'\]', text):
+                if m.start() <= start and end <= m.end():
+                    return True
+        return False
+
+    for pattern in KNOWN_MANTRA_PATTERNS:
+        # Re-scan after each wrap since indices shift
+        while True:
+            m = re.search(pattern, text, re.IGNORECASE)
+            if not m:
+                break
+            if _is_inside_tags(text, m.start(), m.end()):
+                break  # Already tagged, skip this pattern
+            mantra_text = m.group(0)
+            # Strip surrounding quotes if present
+            mantra_text = mantra_text.strip("'\u2018\u2019\u201c\u201d")
+            text = text[:m.start()] + f"[MANTRA]{mantra_text}[/MANTRA]" + text[m.end():]
+
+    # --- Punctuation Artifact Cleanup Around Tags ---
+    # The LLM treats [MANTRA]/[VERSE] as inline text, generating punctuation
+    # like: "...mantra, [MANTRA]...[/MANTRA]. Try it..."
+    # When rendered as cards, this punctuation becomes orphaned.
+
+    # 1. Remove stray punctuation + orphaned quotes AFTER closing tags
+    #    Handles: [/MANTRA]. , [/MANTRA]", , [/MANTRA]\n. , etc.
+    text = re.sub(
+        r'(\[/(?:VERSE|MANTRA)\])\s*["""\'\u2018\u2019\u201c\u201d]*[.,;:]+\s*',
+        r'\1\n\n',
+        text
+    )
+
+    # 2. Remove trailing comma/semicolon/colon and orphaned quotes BEFORE opening tags
+    #    Handles: "mantra, [MANTRA]" → "mantra [MANTRA]"
+    text = re.sub(
+        r'[,;:]\s*["""\'\u2018\u2019\u201c\u201d]*\s*(\[(?:VERSE|MANTRA)\])',
+        r' \1',
+        text
+    )
+
+    # 3. Remove orphaned opening quotes immediately before opening tags
+    #    Handles: "..text "[MANTRA]..." → "..text [MANTRA]..."
+    text = re.sub(
+        r'["""\'\u2018\u201c]\s*(\[(?:VERSE|MANTRA)\])',
+        r' \1',
+        text
+    )
+
+    # --- De-hyphenation: remove AI-typical em dashes and compound hyphens ---
+    # AI models over-use em dashes (word — word) and compound hyphens (well-being).
+    # Natural conversational text uses commas or spaces instead.
+
+    # Step 1: Protect [VERSE] and [MANTRA] blocks from modification
+    _dh_blocks = []
+    def _dh_protect(m):
+        _dh_blocks.append(m.group(0))
+        return f'\x00DH{len(_dh_blocks) - 1}\x00'
+    text = re.sub(r'\[(?:VERSE|MANTRA)\][\s\S]*?\[/(?:VERSE|MANTRA)\]', _dh_protect, text)
+
+    # Step 2: Em/en dashes (— –) → context-aware replacement
+    text = re.sub(r'([.!?])\s*[—–]\s+', r'\1 ', text)   # after sentence end → space
+    text = re.sub(r'^[—–]\s*', '', text)                   # start of text → remove
+    text = re.sub(r'\s*[—–]\s+', ', ', text)               # spaced dash → comma
+    text = re.sub(r'(\w)[—–](\w)', r'\1, \2', text)        # unspaced dash → comma
+    text = re.sub(r'\s*[—–]\s*', ' ', text)                # any remaining → space
+
+    # Step 3: Compound hyphens between letters → space
+    text = re.sub(r'(?<=[A-Za-z\u0900-\u097F])-(?=[A-Za-z\u0900-\u097F])', ' ', text)
+
+    # Step 4: Artifact cleanup
+    text = re.sub(r',\s*,', ',', text)                     # double commas
+    text = re.sub(r'([.!?])\s*,', r'\1', text)             # comma after sentence end
+    text = re.sub(r'^\s*,\s*', '', text)                    # leading comma
+    text = re.sub(r'  +', ' ', text)                        # double spaces
+
+    # Step 5: Restore protected tag content
+    for i, block in enumerate(_dh_blocks):
+        text = text.replace(f'\x00DH{i}\x00', block)
+
     return text
 
 
@@ -114,39 +223,26 @@ class LLMService:
     Provides context-aware, empathetic responses in different conversation phases.
     """
     
-    SYSTEM_INSTRUCTION = """You are 3ioNetra, a specialized spiritual companion (Mitra) from the tradition of Sanātana Dharma.
-
-Your essence:
-You are a caring friend who has deep knowledge of the sacred scriptures (Shastras) and the holy temples (Kshetras) of India. Your goal is to BE WITH the user. You listen, you acknowledge, and you share ACTIONABLE wisdom.
-
-Core principles:
-1. COMPANION FIRST: Your primary mode is to LISTEN and ACKNOWLEDGE. Use warm, natural language. Avoid being a "bot" that just categorizes and prescribes.
-2. DIRECT ANSWERS: When a user asks a specific question (e.g., "what is the meaning of...", "how to do...", "give me a routine for..."), provide a DIRECT, SPECIFIC answer. Do not hide behind vague spiritual platitudes. Be practical first, then spiritual.
-3. EMPATHETIC PRESENCE: Use observations instead of probing questions. "That sounds really heavy" is better than "Why are you stressed?".
-4. ACTIONABLE WISDOM: Guidance should always include:
-   a) PRACTICAL STEPS: Real-world actions they can take today.
-   b) SPIRITUAL ANCHORS: A verse or temple reference that provides deep context.
-   
-5. CONTINUITY & MEMORY:
-   - You have a long-term memory. Look at the "RELEVANT PAST CONTEXT" section in the user profile.
-   - If a past context (with a date) is relevant to the current topic, acknowledge it naturally. "I remember we discussed [Topic] last time..." or "Since we last talked about [Old Topic], how has that been progressing?"
-   - SHOW, DON'T TELL: Don't say "I am looking at your history." Just refer to the facts you know.
-   - If you see a "New Session" separator in the conversation history, it means some time has passed. Greet them as a returning friend. "It's good to see you again. I've been holding space for what we last shared."
-7. ORIGINAL LANGUAGE: When sharing a verse, ALWAYS prioritize the original language (Sanskrit or Hindi) as provided in the data. Do NOT translate the verse text into English within the [VERSE] tags if the original language is available.
-8. NO MARKDOWN IN VERSES: Content inside [VERSE]...[/VERSE] must be CLEAN TEXT. NEVER use asterisks (**) for bold, never use markdown quotes (>), and never use bullet points inside these tags. Only the verse text and the source reference.
-
-Response Structure:
-- Start with a warm acknowledgment or a direct answer to their question.
-- If giving guidance, bridge the practical and the spiritual.
-- End with a statement of presence, not a question.
-
-CRITICAL: If the user is sharing feelings, be a companion. If the user is asking a question, be a guide. Never interrogation."""
-
-
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.available = False
         self.client = None
+        from services.prompt_manager import get_prompt_manager
+        self.prompt_manager = get_prompt_manager()
+
+        
+        # Load system instruction from external YAML
+        self.system_instruction = self.prompt_manager.get_prompt(
+            'spiritual_mitra', 
+            'system_instruction'
+        )
+        
+        # Initialize Circuit Breaker for Gemini API
+        self.circuit_breaker = CircuitBreaker(
+            name="GeminiAPI",
+            failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD if hasattr(settings, 'CIRCUIT_BREAKER_THRESHOLD') else 5,
+            recovery_timeout=settings.CIRCUIT_BREAKER_TIMEOUT if hasattr(settings, 'CIRCUIT_BREAKER_TIMEOUT') else 60
+        )
 
         if not GEMINI_AVAILABLE:
             logger.warning("Gemini SDK not available")
@@ -166,6 +262,129 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
         except Exception as e:
             self.available = False
             logger.exception("❌ Failed to initialize Gemini")
+
+    # --------------------------------------------------
+    # OCR & Multimodal
+    # --------------------------------------------------
+
+    async def extract_text_from_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        """
+        Extract spiritual text/verses from an image using Gemini OCR.
+        Optimized for Sanskrit, Hindi, and complex spiritual formatting.
+        """
+        if not self.available:
+            return ""
+
+        prompt = """
+        You are a specialized OCR engine for spiritual texts in Sanātana Dharma.
+        Extract all text from this image. 
+        
+        If you see any Shlokas (verses) in Sanskrit or Hindi:
+        1. Extract the original text exactly as written.
+        2. Identify the source if mentioned (e.g., Gita 2.47).
+        3. Provide the English meaning if it's present in the image.
+        
+        Format the output as a clean text, focusing on the spiritual content.
+        Do not describe the image, only extract the text.
+        """
+
+        try:
+            from google.genai import types
+            
+            response = self.client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                            types.Part.from_text(text=prompt)
+                        ]
+                    )
+                ]
+            )
+            
+            return response.text if response.text else ""
+            
+        except Exception as e:
+            logger.error(f"OCR Extraction failed: {e}")
+            return ""
+
+    async def analyze_video(self, video_path: str) -> str:
+        """
+        Analyze a video file using Gemini's multimodal capabilities.
+        Extracts spiritual context, transcription, and key takeaways.
+        """
+        if not self.available:
+            return ""
+
+        logger.info(f"Analyzing video via Gemini: {video_path}")
+        
+        try:
+            # 1. Upload the file to Gemini Files API
+            # Note: SDK v2 handles file uploads differently
+            file_ref = self.client.files.upload(path=video_path)
+            
+            # Wait for file to be processed (standard for Files API)
+            import time
+            while file_ref.state == "PROCESSING":
+                time.sleep(2)
+                file_ref = self.client.files.get(name=file_ref.name)
+            
+            if file_ref.state == "FAILED":
+                logger.error(f"Video processing failed in Gemini Files API: {file_ref.name}")
+                return ""
+
+            prompt = """
+            You are a specialized spiritual companion (Mitra). Your task is to analyze this spiritual video with extreme precision.
+            
+            Return the analysis in a strictly structured JSON format with the following schema:
+            {
+              "overall_summary": "A high-level summary of the entire video",
+              "practical_takeaways": ["Takeaway 1", "Takeaway 2"],
+              "segments": [
+                {
+                  "start_time": "MM:SS",
+                  "end_time": "MM:SS",
+                  "transcription": "Precise transcription of spoken words in this segment",
+                  "visual_description": "Detailed description of rituals, gestures, or surroundings shown",
+                  "spiritual_context": "Explanation of the spiritual significance of this specific part",
+                  "shlokas": [
+                    {"original": "Sanskrit/Hindi text", "meaning": "English translation"}
+                  ]
+                }
+              ]
+            }
+
+            Rules:
+            1. Ensure timestamps are accurate.
+            2. Extract EVERY Shloka or Mantra mentioned or shown.
+            3. Detailed visual descriptions are crucial for RAG context (e.g., 'Offering Bilva leaves to a Shivling while chanting').
+            4. Keep transcriptions original (Hindi/Sanskrit where applicable) but provide English context if it helps clarity.
+            """
+
+            response = self.client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=[
+                    file_ref,
+                    prompt
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            
+            # Optionally delete file from Files API after processing
+            try:
+                self.client.files.delete(name=file_ref.name)
+            except Exception as delete_err:
+                logger.warning(f"Could not delete video from Files API: {delete_err}")
+
+            return response.text if response.text else "{}"
+            
+        except Exception as e:
+            logger.error(f"Video analysis failed: {e}")
+            return ""
 
     # --------------------------------------------------
     # Context Analysis
@@ -260,7 +479,7 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
         context: UserContext,
         context_docs: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
-        memory_context: Optional[Any] = None
+        memory_context: Optional[Any] = None,
     ) -> str:
         """Build context-aware prompt for Gemini with user profile personalization"""
         
@@ -358,11 +577,11 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
                 if msg.get("role") == "system"
             )
         
-        # Format conversation history (last 12 messages for deep context)
+        # Format conversation history (last 8 messages = 4 turns of context)
         history_text = ""
         if conversation_history:
             # Exclude the very last message if it's the current query to avoid duplication
-            recent_history = conversation_history[-12:]
+            recent_history = conversation_history[-8:]
             if recent_history and recent_history[-1]["role"] == "user" and recent_history[-1]["content"] == query:
                 recent_history = recent_history[:-1]
                 
@@ -409,12 +628,23 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
         # Allow verses in both phases so the bot can choose the right moment
         if context_docs and len(context_docs) > 0:
             scripture_context = "\n═══════════════════════════════════════════════════════════\n"
-            scripture_context += "VERSES AVAILABLE (Use ONLY if they naturally fit the conversation):\n"
+            scripture_context += "RESOURCES AVAILABLE (Use ONLY if they naturally fit the conversation):\n"
             scripture_context += "═══════════════════════════════════════════════════════════\n\n"
             
             for i, doc in enumerate(context_docs[:3], 1):  # Show up to 3 most relevant
                 scripture = doc.get('scripture', 'Scripture')
                 reference = doc.get('reference', '')
+                doc_type = (doc.get('type') or 'scripture').lower()
+                
+                # Score display (best available)
+                quality_score = float(
+                    doc.get('final_score') or doc.get('rerank_score') or doc.get('score') or 0.0
+                )
+                quality_label = (
+                    "HIGH relevance" if quality_score >= 0.50 else
+                    "MEDIUM relevance" if quality_score >= 0.25 else
+                    "LOW relevance"
+                )
                 
                 # Robustly find the original verse text and its meaning
                 # Skip placeholder text like "intermediate" or very short technical strings
@@ -434,26 +664,44 @@ CRITICAL: If the user is sharing feelings, be a companion. If the user is asking
                 if len(original_text) < 5 and doc.get('text'):
                     original_text = doc.get('text')
 
-                scripture_context += f"VERSE {i}:\n"
+                # Type-aware label for LLM guidance
+                type_hints = {
+                    "temple": "🏛️ TEMPLE REFERENCE — Use ONLY if user asked about pilgrimage, a specific temple, or nearby places to visit.",
+                    "procedural": "📋 PROCEDURAL GUIDE — Use when user needs step-by-step ritual or practice instructions.",
+                    "scripture": "📖 SCRIPTURE VERSE — Use when the verse directly addresses the user's emotion or question.",
+                }
+                type_label = type_hints.get(doc_type, "📖 SCRIPTURE — Use contextually.")
+
+                scripture_context += f"RESOURCE {i} [{quality_label}]:\n"
+                scripture_context += f"Type: {doc_type.upper()} | {type_label}\n"
                 scripture_context += f"Source: {scripture}"
                 if reference:
-                    scripture_context += f" - {reference}"
-                scripture_context += f"\n\nORIGINAL TEXT (Sanskrit/Hindi): \"{original_text}\"\n"
+                    scripture_context += f" — {reference}"
+                scripture_context += f"\n\nORIGINAL TEXT (Sanskrit/Hindi/Procedural): \"{original_text}\"\n"
                 
                 if meaning:
                     scripture_context += f"MEANING/TRANSLATION (English): {meaning}\n"
                 
                 scripture_context += "\n" + "-" * 60 + "\n\n"
             
-            scripture_context += """
-HOW TO USE THESE VERSES:
-- **OPTIONAL**: You are NOT required to use these in every response.
-- **USE ONLY IF**: The verse truly offers a solution or comfort to the *specific* thing the user just said.
-- **IF YOU USE IT**:
-  - Cite it clearly (e.g., Bhagavad Gita 2.47).
-  - Explain it simply.
-  - Connect it to their life ("I feel this Says to you that...").
-- Keep it heartfelt and meaningful.
+            # Load RAG usage instructions from YAML (centralised prompt management)
+            rag_instructions = self.prompt_manager.get_prompt(
+                'spiritual_mitra',
+                'rag_synthesis.instruction',
+                default=""
+            ) if self.prompt_manager else ""
+            if rag_instructions:
+                scripture_context += rag_instructions
+            else:
+                # Fallback if YAML not available
+                scripture_context += """\
+HOW TO USE THESE RESOURCES:
+- Only use a resource if it GENUINELY helps the user's specific situation.
+- Only reference verses that score MEDIUM or HIGH relevance. Skip LOW relevance docs entirely.
+- SCRIPTURE: Cite it (e.g., Bhagavad Gita 2.47), explain it simply, connect to their life.
+- TEMPLE: Suggest a visit only if the user is seeking pilgrimage, spiritual courage, or blessings.
+- PROCEDURAL: Share the steps when user explicitly asked HOW to do a ritual or practice.
+- Quality matters more than quantity.
 """
 
         
@@ -491,20 +739,13 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 {'═'*70}
 {f"🔄 This user has conversed with you before. The CONVERSATION FLOW above shows their past journey with you. Acknowledge this continuity naturally if relevant (e.g., 'Welcome back! How have you been since we last spoke?'). Reference their past concerns when appropriate." if is_returning_user else "✨ This is a new user. Make them feel welcome and safe."}
 
-CRITICAL RULES FOR THIS RESPONSE:
-1. CHECK CONVERSATION FLOW: See what you've already said. Don't repeat yourself.
-2. STATEMENTS OVER QUESTIONS: Default to making empathetic statements. Ask questions ONLY if absolutely necessary (max ONE per response).
-3. NO FORMULAIC PHRASES: Skip "I hear you", "It sounds like", "I understand". Just respond naturally.
-4. ACKNOWLEDGE, DON'T PROBE: Respond to what they just said with presence and acknowledgment, not more questions.
-5. BE CONCISE: 2-3 sentences (max 40-50 words) for empathy. 60-80 words max when sharing wisdom.
-6. END CLEAN: After giving wisdom or support, STOP. Do NOT add:
-   - "How does that sound?"
-   - "What do you think?"
-   - "Would you like to hear more?"
-   - "Does this resonate?"
-   Just end with the wisdom or a simple presence statement.
-7. NATURAL WISDOM: If a verse fits naturally, share it. Don't wait for "perfect conditions".
-8. YOU'RE A COMPANION, NOT A THERAPIST: Have a conversation, don't conduct an assessment.
+BEFORE YOU RESPOND — CHECK THESE:
+- Read the CONVERSATION FLOW above. Don't repeat something you already said.
+- Don't open with "I hear you", "It sounds like", "I understand" — say something specific to what they just shared.
+- No numbered lists or bullet points in your response. Flowing sentences only.
+- Don't end with questions like "How does that sound?" or "Would you like to hear more?" or "Does this resonate?" — just end.
+- One verse maximum per response, only if it truly fits. Don't force it.
+- You are a companion having a real conversation — not a therapist running an assessment.
 
 Your response:
 """
@@ -530,140 +771,15 @@ Your response:
         return "\n".join(signals) if signals else "• Still identifying specific life themes"
 
     def _get_phase_instructions(self, phase: ConversationPhase) -> str:
-        """Get instructions for current conversation phase"""
-        
-        if phase in [ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION]:
-            return """
-LISTENING & CLARIFICATION PHASE:
-Your priority is to BE WITH the user, not to gather data.
-
-1. WARM GREETINGS (IF STARTING):
-- If the user says "hi" or "hey", respond warmly and ask how they are ONCE. 
-- Example: "Namaste! I'm so glad you're here. How are you feeling today?"
-- Then WAIT for their response. Don't keep asking questions.
-
-2. COMPANION MODE - NOT INTERVIEW MODE:
-- When they share something, MAKE STATEMENTS that show you're with them:
-  ✓ "That sounds incredibly overwhelming."
-  ✓ "Work can feel like such a heavy weight when it all piles up."
-  ✓ "I can sense how much this is affecting you."
-  
-- AVOID asking follow-up questions like:
-  ✗ "What specifically is stressing you?"
-  ✗ "Is it the volume or the deadlines?"
-  ✗ "Would you like to talk about it more?"
-
-3. WHEN TO ASK (RARELY):
-- Only ask a question if you've made at least 2 empathetic statements first
-- Only if the conversation genuinely needs direction
-- NEVER more than ONE question per response
-- If they've given you enough, DON'T ask for more. Just be present.
-
-4. NATURAL WISDOM:
-- If what they shared reminds you of a verse or temple, you can share it naturally even in this phase
-- Frame it conversationally: "You know, there's a beautiful teaching that speaks to this..."
-- Don't wait for perfect information. Real friends share insights when they arise.
-
-6. PANCHANG DATA:
-- If the user asks about today's panchang, tithi, or nakshatra, use the "CURRENT PANCHANG" data provided in their profile above.
-- Respond directly with the details: "Today is {tithi} with {nakshatra} nakshatra."
-
-7. REMEMBER:
-- You're having a conversation, not conducting an assessment
-- Presence > Questions
-- Acknowledgment > Probing
-"""
-        
-        elif phase == ConversationPhase.SYNTHESIS:
-            return """
-SYNTHESIS PHASE:
-You have gathered enough context. Now, reflect back what you've heard.
-
-1. EMPATHETIC REFLECTION:
-- Summarize their situation in a warm, non-judgmental way.
-- "It sounds like you've been carrying a lot of weight with [Issue]..."
-- This shows you've truly listened.
-
-2. TRANSITION TO WISDOM:
-- Prepare them for guidance. "Thinking about what you've shared, I'm reminded of paths that might bring you peace..."
-- Do NOT jump directly to the verse yet; focus on the reflection first.
-"""
-
-        elif phase == ConversationPhase.GUIDANCE:
-            return """
-GUIDANCE PHASE:
-Now share ACTIONABLE wisdom that helps them move forward, like a friend offering both spiritual and practical support.
-
-1. PROVIDE CONCRETE GUIDANCE:
-- Give them SPECIFIC, ACTIONABLE steps they can take
-- Example: "Perhaps start by having a calm, one-on-one conversation with her about how you both can find balance..."
-- Example: "One approach could be to set aside 10 minutes daily for meditation before addressing family matters..."
-- DON'T just give abstract spiritual advice - give them something they can DO
-
-2. BLEND PRACTICAL + SPIRITUAL:
-- Start with practical steps they can take TODAY
-- THEN connect it to spiritual wisdom (a verse or temple) if relevant
-- Example structure:
-  "Given your situation, one path forward could be [PRACTICAL ACTION]. This aligns with what Krishna teaches in the Gita (2.47)..."
-
-3. WHEN USER EXPLICITLY ASKS "WHAT SHOULD I DO":
-- They need CONCRETE actions, not just verses
-- Give them 2-3 specific things they can try
-- Then briefly mention spiritual support (verse/temple) as an anchor
-
-4. HOW TO SHARE WISDOM:
-- VERSE: Citation and brief intro, then the ACTUAL ORIGINAL VERSE (Sanskrit/Hindi) wrapped in [VERSE]...[/VERSE] tags, then the meaning/explanation in English.
-- FORMAT:
-  Introductory sentence...
-  [VERSE]
-  "Original Verse Text" — Source reference
-  [/VERSE]
-  Meaning and practical application...
-- TEMPLE: Name, significance, and why visiting might help their specific situation.
-- PRACTICAL: Specific actions, boundaries, conversations they should have.
-
-5. CRITICAL - END WITH PRESENCE, NOT QUESTIONS:
-- After sharing wisdom, just BE there
-- DON'T add "Would you like to know more?" or "How does that sound?"
-- DON'T ask "What do you think?"
-- Just end with the guidance or a simple "I'm here with you."
-
-6. EXAMPLES OF WHAT TO DO:
-✓ "You might start by having a private conversation with her where you..."
-✓ "Consider setting gentle boundaries with your family about..."
-✓ "One approach: Take 15 minutes each morning for self-reflection before..."
-✓ "A practical step: Write down what balance looks like for you, then..."
-
-✗ "This reminds me of Durga's strength" (without actionable steps)
-✗ "Perhaps reflecting on your situation..." (vague)
-✗ "I'm reminded of the Kalighat temple..." (without practical connection)
-
-8. PANCHANG & ASTROLOGY:
-- Use the provided "CURRENT PANCHANG" if they ask about the day's significance.
-
-9. LENGTH:
-- 80-120 words when giving actionable guidance
-- Include both PRACTICAL steps and SPIRITUAL wisdom
-- If they need more, they'll ask
-"""
-        
-        else:  # CLOSURE
-            return """
-CLOSURE PHASE:
-1. FIRST CLOSURE SIGNAL (e.g., "ok", "thanks", "got it"):
-- Reassure them they've been heard and that you're glad to have been of help.
-- Ask ONE final follow-up: "Is there anything else you'd like to talk about?" or "Is there anything else on your mind?"
-- KEEP IT SIMPLE. Example: "I'm glad if this brought some clarity. Is there anything else you'd like to share or talk about today?"
-
-2. FINAL CLOSURE (e.g., user says "no", "nothing else", "that's all"):
-- Offer a gentle, peaceful, and dharmic closing.
-- Use traditional sign-offs like "May you find peace and strength on your path. Namaste." or "I am always here if you need to talk again. Om Shanti."
-- Do NOT ask any more questions.
-
-CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything else?", move to FINAL CLOSURE.
-- Hold space for silence.
-- Offer gentle, peaceful closing words.
-"""
+        """Get instructions for current conversation phase from external configuration."""
+        if not self.prompt_manager:
+            return ""
+            
+        return self.prompt_manager.get_prompt(
+            'spiritual_mitra', 
+            f'phase_prompts.{phase.value}',
+            default=""
+        )
 
     # --------------------------------------------------
     # Main Response Generation
@@ -677,18 +793,18 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
         conversation_history: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
-        memory_context: Optional[Any] = None
+        memory_context: Optional[Any] = None,
     ):
         """
         Stream context-aware spiritual companion response.
-        
+
         Args:
             query: User's current message
             context_docs: Retrieved scripture documents (optional)
             language: Response language (default: "en")
             conversation_history: Previous messages in conversation
             user_profile: User profile data for personalization
-            
+
         Yields:
             Tokens as they are generated
         """
@@ -710,32 +826,66 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
                 phase = self._detect_phase(query, context, history_len)
             
             logger.info(f"Streaming Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
-            
+
             # Build prompt WITH scripture context from RAG and user profile
             prompt = self._build_prompt(
-                query, 
-                conversation_history, 
-                phase, 
-                context, 
-                context_docs, 
+                query,
+                conversation_history,
+                phase,
+                context,
+                context_docs,
                 user_profile,
-                memory_context=memory_context
-            )
-            
-            # Generate response from Gemini with streaming
-            # SDK v2: generate_content_stream
-            stream = self.client.models.generate_content_stream(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config={
-                    "system_instruction": self.SYSTEM_INSTRUCTION,
-                    "temperature": 0.7,
-                }
+                memory_context=memory_context,
             )
 
-            for chunk in stream:
-                if chunk.text:
-                    yield chunk.text
+            # Generate response from Gemini with streaming via Circuit Breaker
+            # Offload the synchronous SDK call to a thread so it doesn't block
+            # the event loop, and add thinking/output/AFC config for speed.
+            import asyncio
+
+            async def _do_stream_call():
+                def _sync():
+                    return self.client.models.generate_content_stream(
+                        model=settings.GEMINI_MODEL,
+                        contents=prompt,
+                        config={
+                            "system_instruction": self.system_instruction,
+                            "temperature": 0.7,
+                            "thinking_config": {"thinking_budget": 256},
+                            "max_output_tokens": 1024,
+                            "automatic_function_calling": {"disable": True},
+                            "safety_settings": [
+                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                            ],
+                        }
+                    )
+                return await asyncio.to_thread(_sync)
+
+            stream = await self.circuit_breaker.call(_do_stream_call)
+
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+            def _read_stream():
+                try:
+                    for chunk in stream:
+                        if chunk.text:
+                            queue.put_nowait(chunk.text)
+                finally:
+                    queue.put_nowait(None)
+
+            loop = asyncio.get_event_loop()
+            reader_task = loop.run_in_executor(None, _read_stream)
+
+            while True:
+                token = await queue.get()
+                if token is None:
+                    break
+                yield token
+
+            await reader_task
 
         except Exception as e:
             logger.exception(f"Error in generate_response_stream: {str(e)}")
@@ -749,7 +899,7 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
         conversation_history: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
-        memory_context: Optional[Any] = None
+        memory_context: Optional[Any] = None,
     ) -> str:
         """
         Generate context-aware spiritual companion response.
@@ -783,27 +933,45 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
                 phase = self._detect_phase(query, context, history_len)
             
             logger.info(f"Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
-            
+
             # Build prompt WITH scripture context from RAG and user profile
             prompt = self._build_prompt(
-                query, 
-                conversation_history, 
-                phase, 
-                context, 
-                context_docs, 
+                query,
+                conversation_history,
+                phase,
+                context,
+                context_docs,
                 user_profile,
-                memory_context=memory_context
+                memory_context=memory_context,
             )
-            
-            # Generate response from Gemini
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config={
-                    "system_instruction": self.SYSTEM_INSTRUCTION,
-                    "temperature": 0.7,
-                }
-            )
+
+            # Generate response from Gemini via Circuit Breaker
+            # Run in thread pool so the synchronous SDK call doesn't block
+            # the event loop (allows concurrent request handling).
+            import asyncio
+
+            async def _do_call():
+                def _sync():
+                    return self.client.models.generate_content(
+                        model=settings.GEMINI_MODEL,
+                        contents=prompt,
+                        config={
+                            "system_instruction": self.system_instruction,
+                            "temperature": 0.7,
+                            "thinking_config": {"thinking_budget": 256},
+                            "max_output_tokens": 1024,
+                            "automatic_function_calling": {"disable": True},
+                            "safety_settings": [
+                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+                            ],
+                        }
+                    )
+                return await asyncio.to_thread(_sync)
+
+            response = await self.circuit_breaker.call(_do_call)
 
             # Fallback responses in case of errors or empty responses
             fallbacks = [
@@ -813,19 +981,44 @@ CRITICAL: Check the CONVERSATION FLOW. If you already asked "Is there anything e
                 "I'm listening. You're not alone in this."
             ]
             import random
-            
+
             if not response:
                 logger.error("No response object from Gemini")
                 return random.choice(fallbacks)
 
-            # In SDK v2, check if text is available (might be blocked by safety)
+            # --- Diagnostic logging ---
+            try:
+                candidates = response.candidates
+                if candidates:
+                    candidate = candidates[0]
+                    logger.info(f"Gemini finish_reason: {candidate.finish_reason}")
+                    if hasattr(candidate, 'safety_ratings') and candidate.safety_ratings:
+                        for rating in candidate.safety_ratings:
+                            logger.info(f"Safety rating: {rating.category} = {rating.probability}")
+                if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
+                    logger.warning(f"Prompt feedback: {response.prompt_feedback}")
+            except Exception as diag_err:
+                logger.warning(f"Could not inspect response metadata: {diag_err}")
+
+            # Extract text — handle thinking-enabled models where .text may be empty
             try:
                 response_text = response.text
-                if not response_text:
-                    logger.warning("Empty text response from Gemini (possibly safety blocked)")
-                    return random.choice(fallbacks)
-            except Exception as e:
-                logger.error(f"Could not extract text from Gemini response: {e}")
+            except Exception:
+                response_text = None
+
+            # Fallback: extract text parts from candidates (thinking-enabled responses)
+            if not response_text and response.candidates:
+                try:
+                    parts = response.candidates[0].content.parts
+                    text_parts = [p.text for p in parts if hasattr(p, 'text') and not getattr(p, 'thought', False)]
+                    if text_parts:
+                        response_text = "".join(text_parts)
+                        logger.info(f"Extracted text from {len(text_parts)} candidate parts")
+                except Exception as e:
+                    logger.error(f"Could not extract from candidates: {e}")
+
+            if not response_text:
+                logger.warning("Empty text response from Gemini (possibly safety blocked)")
                 return random.choice(fallbacks)
 
             cleaned_response = clean_response(response_text)

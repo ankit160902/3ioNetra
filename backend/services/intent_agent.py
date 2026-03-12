@@ -1,7 +1,6 @@
 import logging
 import json
 from typing import Dict, Any, Optional
-from llm.service import get_llm_service
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -67,36 +66,55 @@ class IntentAgent:
     """
 
     def __init__(self):
+        from llm.service import get_llm_service
         self.llm = get_llm_service()
         self.available = self.llm.available
 
     async def analyze_intent(self, message: str, context_summary: str = "") -> Dict[str, Any]:
-        """Analyze intent using LLM"""
+        """Analyze intent using LLM (fast model for low latency)."""
+        # Fast-path: skip LLM for obvious greetings
+        msg_lower = message.strip().lower()
+        if msg_lower in ("hi", "hey", "hello", "namaste", "pranam", "hii", "hiii"):
+            logger.info(f"Fast-path intent: GREETING for '{message[:30]}'")
+            return {
+                "intent": "GREETING", "emotion": "neutral", "life_domain": "unknown",
+                "entities": {}, "urgency": "low", "summary": message,
+                "needs_direct_answer": False, "recommend_products": False,
+                "product_search_keywords": []
+            }
+
         if not self.available:
             return self._fallback_analysis(message)
 
         prompt = self.INTENT_PROMPT.format(message=message, context=context_summary)
-        
+
         try:
-            # We use a lower temperature for classification tasks
-            response_text = self.llm.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=prompt,
-                config={
-                    "temperature": 0.1,
-                    "response_mime_type": "application/json"
-                }
-            )
-            
+            import asyncio
+
+            # Use fast model for classification (gemini-2.0-flash: ~1s vs 2.5-pro: ~7s)
+            def _sync_call():
+                return self.llm.client.models.generate_content(
+                    model=settings.GEMINI_FAST_MODEL,
+                    contents=prompt,
+                    config={
+                        "temperature": 0.1,
+                        "response_mime_type": "application/json",
+                        "automatic_function_calling": {"disable": True},
+                    }
+                )
+
+            # Run in thread pool so it doesn't block the event loop
+            response_text = await asyncio.to_thread(_sync_call)
+
             raw_text = response_text.text.strip()
             # Handle potential markdown code blocks in response
             if raw_text.startswith("```json"):
                 raw_text = raw_text.replace("```json", "", 1).replace("```", "", 1).strip()
-            
+
             data = json.loads(raw_text)
             logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
             return data
-            
+
         except Exception as e:
             logger.error(f"Error in LLM intent analysis: {e}")
             return self._fallback_analysis(message)

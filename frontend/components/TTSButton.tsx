@@ -16,7 +16,7 @@ interface TTSButtonProps {
     /** Label text shown next to the button */
     label?: string;
     /** Visual variant */
-    variant?: 'response' | 'verse';
+    variant?: 'response' | 'verse' | 'mantra';
     /** Additional CSS class */
     className?: string;
 }
@@ -103,7 +103,8 @@ export default function TTSButton({
         }
     }, [state, text, lang, cleanup]);
 
-    const isVerse = variant === 'verse';
+    const isVerse = variant === 'verse' || variant === 'mantra';
+    const isMantra = variant === 'mantra';
 
     // Icon SVGs
     const PlayIcon = () => (
@@ -136,6 +137,14 @@ export default function TTSButton({
 
     const getLabelText = () => {
         if (label) return label;
+        if (isMantra) {
+            switch (state) {
+                case 'loading': return 'fetching...';
+                case 'playing': return 'pause mantra';
+                case 'paused': return 'resume mantra';
+                default: return 'play mantra';
+            }
+        }
         if (isVerse) {
             switch (state) {
                 case 'loading': return 'fetching...';
@@ -169,7 +178,7 @@ export default function TTSButton({
             onClick={handleClick}
             disabled={state === 'loading'}
             className={`${baseClasses} ${colorClasses} ${className} active:scale-90`}
-            title={isVerse ? 'Play verse in Hindi' : 'Play response in Hindi'}
+            title={isMantra ? 'Play mantra in Hindi' : isVerse ? 'Play verse in Hindi' : 'Play response in Hindi'}
         >
             {getIcon()}
             <span>{getLabelText()}</span>

@@ -1,19 +1,21 @@
 import logging
 import random
-from typing import Tuple, Optional, TYPE_CHECKING, Dict, List
+from typing import Tuple, Optional, TYPE_CHECKING, Dict, List, Set
 
 from models.session import SessionState, ConversationPhase, SignalType
 from models.memory_context import ConversationMemory
-from llm.service import get_llm_service
 from services.panchang_service import get_panchang_service
+
 from services.intent_agent import get_intent_agent
 from services.memory_service import get_memory_service
 from services.product_service import get_product_service
-
 if TYPE_CHECKING:
     from rag.pipeline import RAGPipeline
 
 logger = logging.getLogger(__name__)
+
+# Session-level dedup: tracks which product _ids have been shown per session
+_shown_products: Dict[str, Set[str]] = {}
 
 
 class CompanionEngine:
@@ -26,8 +28,101 @@ class CompanionEngine:
     - Generate grounded empathetic responses
     """
 
+    PRACTICE_PRODUCT_MAP = {
+        "japa": {
+            "detect": ["japa", "jaap", "jap ", "chant", "chanting", "recite", "108 times", "11 times", "21 times"],
+            "search_keywords": ["rudraksha mala", "japa mala"],
+        },
+        "puja": {
+            "detect": ["puja", "pooja", "aarti"],
+            "search_keywords": ["puja thali", "incense", "diya", "puja samagri"],
+        },
+        "meditation": {
+            "detect": ["meditation", "meditate", "dhyana", "dhyan", "sit quietly"],
+            "search_keywords": ["incense", "dhoop", "meditation"],
+        },
+        "diya": {
+            "detect": ["diya", "deep ", "jyoti", "light a lamp", "light a diya"],
+            "search_keywords": ["brass diya", "ghee", "diya"],
+        },
+        "yoga": {
+            "detect": ["yoga", "asana", "pranayama", "surya namaskar"],
+            "search_keywords": ["yoga mat", "yoga"],
+        },
+        "tilak": {
+            "detect": ["tilak", "sindoor", "kumkum", "chandan"],
+            "search_keywords": ["tilak", "sindoor", "chandan"],
+        },
+        "abhishek": {
+            "detect": ["abhishek", "abhishekam"],
+            "search_keywords": ["abhishek"],
+        },
+        "havan": {
+            "detect": ["havan", "hawan", "homam", "yajna", "yagna"],
+            "search_keywords": ["havan", "ghee", "samagri"],
+        },
+        "deity_worship": {
+            "detect": ["murti", "idol", "statue", "bhagwan"],
+            "search_keywords": ["murti", "brass idol"],
+        },
+        "home_temple": {
+            "detect": ["mandir", "home temple", "puja room", "spiritual corner", "altar"],
+            "search_keywords": ["puja box", "3D lamp", "deep"],
+        },
+        "crystal_healing": {
+            "detect": ["crystal", "gemstone", "stone", "healing stone"],
+            "search_keywords": ["bracelet", "crystal"],
+        },
+        "seva": {
+            "detect": ["seva", "temple service", "pind daan", "ganga aarti", "shraddha"],
+            "search_keywords": ["seva", "pind daan", "ganga aarti"],
+        },
+    }
+
+    EMOTION_PRODUCT_MAP = {
+        "anxiety": ["Inner Peace", "Rose Quartz", "Amethyst", "incense"],
+        "grief": ["consultation", "seva", "pind daan"],
+        "confusion": ["consultation", "astrology", "Lapis Lazuli"],
+        "anger": ["Anger Relief", "Black Tourmaline", "incense"],
+        "hopelessness": ["consultation", "Rose Quartz", "Inner Peace"],
+        "stress": ["Antidepression", "Inner Peace", "meditation", "incense"],
+        "fear": ["Triple Protection", "Black Tourmaline", "Hanuman"],
+        "sadness": ["Rose Quartz", "consultation", "seva"],
+    }
+
+    DEITY_PRODUCT_MAP = {
+        "krishna": ["Krishna", "Radha Krishna", "3D lamp"],
+        "shiva": ["Shiva", "Rudraksha"],
+        "hanuman": ["Hanuman", "Panchamukhi"],
+        "ganesh": ["Ganesh", "Ganesha", "murti"],
+        "lakshmi": ["Lakshmi", "Pyrite", "prosperity"],
+        "durga": ["Durga", "murti"],
+        "saraswati": ["Saraswati", "Education"],
+        "shrinathji": ["Shrinathji", "3D box", "golden arch"],
+        "vishnu": ["Vishnu", "Vishnusahasranam"],
+    }
+
+    DOMAIN_PRODUCT_MAP = {
+        "career": ["Career Success", "Success & Focus", "Tiger Eye", "Pyrite", "consultation"],
+        "relationships": ["Rose Quartz", "Early Marriage", "consultation"],
+        "health": ["Weight Loss", "Headache Relief", "7 Chakra", "bracelet"],
+        "spiritual": ["Rudraksha", "mala", "incense", "deep", "murti"],
+        "family": ["puja thali", "deep", "Lakshmi Ganesh", "puja box"],
+        "finance": ["Money Magnet", "Dhan Yog", "Pyrite", "Lakshmi", "Career Success"],
+    }
+
+    CONCEPT_PRODUCT_MAP = {
+        "bhakti": ["murti", "puja thali", "deep", "incense"],
+        "vairagya": ["mala", "Rudraksha"],
+        "karma": ["seva", "consultation"],
+        "dharma": ["mala", "Rudraksha"],
+        "surrender": ["murti", "deep", "seva"],
+    }
+
     def __init__(self, rag_pipeline: Optional["RAGPipeline"] = None) -> None:
+        from llm.service import get_llm_service
         self.llm = get_llm_service()
+
         self.rag_pipeline = rag_pipeline
         self.panchang = get_panchang_service()
         self.intent_agent = get_intent_agent()
@@ -136,40 +231,39 @@ class CompanionEngine:
             ):
                 yield {"type": "token", "content": token}
         else:
-            yield {"type": "token", "content": "I’m here with you. Could you tell me a little more?"}
+            yield {"type": "token", "content": "I'm here with you. Could you tell me a little more?"}
 
-    async def process_message(
+    async def process_message_preamble(
         self,
         session: SessionState,
         message: str,
-    ) -> Tuple[str, bool, List[Dict], List[str], List[Dict], ConversationPhase]:
+    ) -> Dict:
         """
-        Returns:
-            (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase)
+        All analysis, memory, signals, RAG, products — everything EXCEPT LLM response generation.
+        Returns dict with: is_ready_for_wisdom, context_docs, turn_topics, recommended_products,
+        active_phase, user_profile, past_memories, analysis, acknowledgement (if guidance).
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
         import asyncio
-        
+
         # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
         tasks = [
             self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
         ]
-        
-        # Add memory retrieval task if user is authenticated
+
         if hasattr(session, "user_id") and session.user_id:
             tasks.append(self.memory_service.retrieve_relevant_memories(session.user_id, message))
         else:
-            tasks.append(asyncio.sleep(0, result=[])) # Dummy task for consistent unpacking
-            
-        # Execute tasks concurrently
+            tasks.append(asyncio.sleep(0, result=[]))
+
         analysis, past_memories = await asyncio.gather(*tasks)
 
         # 1. Update session signals from LLM analysis
         if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
             session.memory.story.life_area = analysis["life_domain"]
             session.add_signal(SignalType.LIFE_DOMAIN, analysis["life_domain"], 0.95)
-            
+
         if analysis.get("emotion") and analysis["emotion"] != "neutral":
             session.memory.story.emotional_state = analysis["emotion"]
             session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
@@ -179,38 +273,29 @@ class CompanionEngine:
         if entities.get("deity"):
             session.memory.story.preferred_deity = entities["deity"]
         if entities.get("ritual"):
-            # Update primary concern to specifically mention the ritual if it's the main topic
             session.memory.story.primary_concern = f"Performing {entities['ritual']}"
-        
-        # If the primary concern is currently generic, use the LLM's summary
+
         if len(session.memory.story.primary_concern) < 15 and analysis.get("summary"):
             session.memory.story.primary_concern = analysis["summary"]
 
-        # 3. Store in Long-Term Memory if it's a significant shared experience
-        # (Using a simple heuristic: long message, high urgency, or significant topic update)
+        # 3. Store in Long-Term Memory if significant
         is_significant_update = (
-            len(message) > 30 or                    # Lowered from 100 to capture short emotional messages
+            len(message) > 30 or
             analysis.get("urgency") in ["high", "crisis"] or
             (analysis.get("emotion") and analysis["emotion"] not in [None, "neutral"]) or
             (analysis.get("entities", {}).get("ritual")) or
             (analysis.get("life_domain") and analysis.get("life_domain") != "unknown")
         )
-        
+
         if is_significant_update:
             if hasattr(session, "user_id") and session.user_id:
                 logger.info(f"💾 Preserving semantic memory anchor for user {session.user_id} (Reason: significant update)")
-                import asyncio
-                # Use analysis summary if available for better semantic indexing
                 mem_anchor = analysis.get("summary", message)
                 asyncio.create_task(self.memory_service.store_memory(session.user_id, mem_anchor))
 
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
-        
-        # We go to guidance if:
-        # a) Normal readiness threshold (0.7) met
-        # b) User explicitly asked for guidance/info (analysis says needs_direct_answer)
-        # c) The intent is explicitly SEEKING_GUIDANCE or ASKING_PANCHANG
+
         is_direct_ask = analysis.get("needs_direct_answer", False) or \
                         analysis.get("recommend_products", False) or \
                         intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"] or \
@@ -219,20 +304,18 @@ class CompanionEngine:
                         "Routine Request" in turn_topics or \
                         "Puja Guidance" in turn_topics or \
                         "Diet Plan" in turn_topics
-        
-        # Determine current phase for LLM response
+
         current_phase = ConversationPhase.CLARIFICATION
         if intent == "CLOSURE":
             current_phase = ConversationPhase.CLOSURE
-        
-        # Only consider being ready for wisdom if NOT a closure signal
+
         if intent == "CLOSURE":
             is_ready = False
         else:
             is_ready = self._assess_readiness(session) or is_direct_ask
 
         # ------------------------------------------------------------------
-        # Ready for wisdom → return short acknowledgement only
+        # Ready for wisdom → prepare acknowledgement + context docs + products
         # ------------------------------------------------------------------
         if is_ready:
             acknowledgements = [
@@ -241,8 +324,7 @@ class CompanionEngine:
                 "I hear you deeply. Please give me a moment to gather wisdom for your situation.",
                 "Namaste. Your words have touched me. I am seeking the right dharmic path for you."
             ]
-            
-            # If it's a direct ask, we might want a slightly more urgent acknowledgement or none
+
             if is_direct_ask:
                 acknowledgements = [
                     "I understand your question. Let me provide the specific guidance for this.",
@@ -250,131 +332,337 @@ class CompanionEngine:
                     "I see what you are seeking. Let me look that up for you."
                 ]
 
-            import random
-            
             # 📚 SCRIPTURE RETRIEVAL
             context_docs = []
-            # We provide verses if it's a Verse Request, OR if it's a general guidance ask 
-            # and NOT specifically a Product-only inquiry.
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
-            
-            # Default to providing verses for guidance unless it's strictly a product question
             should_get_verses = is_verse_request or (is_ready and not is_product_request)
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
                 try:
+                    from services.context_validator import get_context_validator
+                    ctx_validator = get_context_validator()
                     search_query = self._build_listening_query(message, session.memory)
+                    _type_exclusions = self._get_doc_type_exclusions(intent)
                     context_docs = await self.rag_pipeline.search(
-                        query=search_query,
-                        scripture_filter=None,
-                        language="en",
-                        top_k=3,
-                        intent=analysis.get("intent"),
+                        query=search_query, scripture_filter=None, language="en",
+                        top_k=8, intent=analysis.get("intent"), min_score=0.12,
+                        doc_type_filter=_type_exclusions,
+                    )
+                    context_docs = ctx_validator.validate(
+                        docs=context_docs, intent=intent, allowed_scriptures=None,
+                        temple_interest=getattr(session.memory.story, 'temple_interest', False),
+                        min_score=0.12, max_per_source=2, max_docs=3,
                     )
                 except Exception as e:
-                    logger.warning(f"Guidance-phase RAG failed: {e}")
+                    logger.warning(f"Guidance-phase RAG/validation failed: {e}")
 
             # 🛍️ PRODUCT RECOMMENDATION
             products = []
             is_product_request = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
-            
-            # In Guidance Phase, we are more open to recommending if it fits the context
             should_recommend = is_product_request or analysis.get("recommend_products", False)
-            
+
             if should_recommend:
-                # Use precise keywords if available from LLM analysis
                 search_terms = " ".join(analysis.get("product_search_keywords", []))
                 if not search_terms:
-                    # Fallback to message or extracted topics
-                    search_terms = message
-                
+                    context_terms = self._build_context_search_terms(analysis, session)
+                    search_terms = " ".join(context_terms[:5]) if context_terms else message
                 life_domain = analysis.get("life_domain", "unknown")
                 logger.info(f"Producing selective product recommendations for query terms: {search_terms} | Domain: {life_domain}")
-                products = await self.product_service.search_products(search_terms, life_domain=life_domain)
-                
-                # If no specific products found, but it was an explicit request, show general ones
+                products = await self.product_service.search_products(
+                    search_terms, life_domain=life_domain,
+                    emotion=analysis.get("emotion", ""),
+                    deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
+                )
                 if not products and (is_product_request or analysis.get("intent") == "PRODUCT_SEARCH"):
                     products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
 
-            # Return the response, with the docs and products populated
-            return random.choice(acknowledgements), True, context_docs, turn_topics, products, ConversationPhase.GUIDANCE
+            if not products:
+                products = await self._infer_proactive_products(
+                    session, message, analysis.get("life_domain", "unknown"),
+                    analysis=analysis, is_guidance_phase=True)
+
+            if products:
+                products = self._filter_shown_products(session.session_id, products)
+                self._record_shown_products(session.session_id, products)
+
+            return {
+                "is_ready_for_wisdom": True,
+                "context_docs": context_docs,
+                "turn_topics": turn_topics,
+                "recommended_products": products,
+                "active_phase": ConversationPhase.GUIDANCE,
+                "user_profile": self._build_user_profile(session.memory, session),
+                "past_memories": past_memories,
+                "analysis": analysis,
+                "acknowledgement": random.choice(acknowledgements),
+            }
 
         # ------------------------------------------------------------------
-        # Not ready → generate empathetic follow-up
+        # Not ready → prepare context for listening-phase LLM call
         # ------------------------------------------------------------------
-        if self.available:
-            context_docs = []
+        context_docs = []
 
-            if self.rag_pipeline and self.rag_pipeline.available:
-                try:
-                    # Skip RAG for panchang queries to avoid irrelevant verses
-                    panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
-                    if any(k in message.lower() for k in panchang_keywords):
-                        logger.info("Skipping RAG for Panchang-related query in listening phase")
-                        context_docs = []
-                    else:
-                        search_query = self._build_listening_query(message, session.memory)
-                        context_docs = await self.rag_pipeline.search(
-                            query=search_query,
-                            scripture_filter=None,
-                            language="en",
-                            top_k=3,
-                            intent=analysis.get("intent"),
-                        )
-                except Exception as e:
-                    logger.warning(f"Listening-phase RAG failed: {e}")
+        if self.available and self.rag_pipeline and self.rag_pipeline.available:
+            try:
+                from services.context_validator import get_context_validator
+                ctx_validator = get_context_validator()
+                skip_rag_intents = {"GREETING", "CLOSURE"}
+                panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
+                if intent in skip_rag_intents:
+                    logger.info(f"Skipping RAG for {intent} intent in listening phase")
+                    context_docs = []
+                elif any(k in message.lower() for k in panchang_keywords):
+                    logger.info("Skipping RAG for Panchang-related query in listening phase")
+                    context_docs = []
+                else:
+                    search_query = self._build_listening_query(message, session.memory)
+                    _type_exclusions = self._get_doc_type_exclusions(intent)
+                    context_docs = await self.rag_pipeline.search(
+                        query=search_query, scripture_filter=None, language="en",
+                        top_k=8, intent=analysis.get("intent"), min_score=0.12,
+                        doc_type_filter=_type_exclusions,
+                    )
+                    context_docs = ctx_validator.validate(
+                        docs=context_docs, intent=intent, allowed_scriptures=None,
+                        temple_interest=getattr(session.memory.story, 'temple_interest', False),
+                        min_score=0.12, max_per_source=2, max_docs=3,
+                    )
+            except Exception as e:
+                logger.warning(f"Listening-phase RAG/validation failed: {e}")
 
-            # Build user profile and inject past memories
-            user_profile = self._build_user_profile(session.memory, session)
-            if past_memories:
-                user_profile["past_memories"] = past_memories
+        user_profile = self._build_user_profile(session.memory, session)
+        if past_memories:
+            user_profile["past_memories"] = past_memories
 
-            reply = await self.llm.generate_response(
-                query=message,
-                context_docs=context_docs,
-                conversation_history=session.conversation_history,
-                user_profile=user_profile,
-                phase=current_phase,
-                memory_context=session.memory,
+        # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase)
+        products = []
+        is_explicit_product = analysis.get("intent") == "PRODUCT_SEARCH" or \
+                             "Product Inquiry" in turn_topics
+        should_recommend = is_explicit_product
+
+        if should_recommend:
+            search_terms = " ".join(analysis.get("product_search_keywords", []))
+            if not search_terms:
+                context_terms = self._build_context_search_terms(analysis, session)
+                search_terms = " ".join(context_terms[:5]) if context_terms else message
+            life_domain = analysis.get("life_domain", "unknown")
+            logger.info(f"Producing explicit product recommendations in listening phase for: {search_terms} | Domain: {life_domain}")
+            products = await self.product_service.search_products(
+                search_terms, life_domain=life_domain,
+                emotion=analysis.get("emotion", ""),
+                deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
+            )
+            if not products and analysis.get("intent") == "PRODUCT_SEARCH":
+                products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
+
+        if products:
+            products = self._filter_shown_products(session.session_id, products)
+            self._record_shown_products(session.session_id, products)
+
+        return {
+            "is_ready_for_wisdom": False,
+            "context_docs": context_docs,
+            "turn_topics": turn_topics,
+            "recommended_products": products,
+            "active_phase": current_phase,
+            "user_profile": user_profile,
+            "past_memories": past_memories,
+            "analysis": analysis,
+        }
+
+    async def process_message(
+        self,
+        session: SessionState,
+        message: str,
+    ) -> Tuple:
+        """
+        Returns:
+            (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics,
+             recommended_products, active_phase)
+        """
+        meta = await self.process_message_preamble(session, message)
+
+        if meta["is_ready_for_wisdom"]:
+            return (
+                meta["acknowledgement"], True, meta["context_docs"],
+                meta["turn_topics"], meta["recommended_products"], ConversationPhase.GUIDANCE,
             )
 
-            # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase)
-            products = []
-            # In Listening phase, ONLY recommend if it's an explicit product inquiry or intent
-            is_explicit_product = analysis.get("intent") == "PRODUCT_SEARCH" or \
-                                 "Product Inquiry" in turn_topics
-                                 
-            should_recommend = is_explicit_product
-
-            if should_recommend:
-                # Use precise keywords if available from LLM analysis
-                search_terms = " ".join(analysis.get("product_search_keywords", []))
-                if not search_terms:
-                    search_terms = message
-                    
-                life_domain = analysis.get("life_domain", "unknown")
-                logger.info(f"Producing explicit product recommendations in listening phase for: {search_terms} | Domain: {life_domain}")
-                products = await self.product_service.search_products(search_terms, life_domain=life_domain)
-                
-                if not products and analysis.get("intent") == "PRODUCT_SEARCH":
-                    products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
-
-            return reply, False, context_docs, turn_topics, products, current_phase
+        # Listening phase — make the LLM call
+        if self.available:
+            reply = await self.llm.generate_response(
+                query=message,
+                context_docs=meta["context_docs"],
+                conversation_history=session.conversation_history,
+                user_profile=meta["user_profile"],
+                phase=meta["active_phase"],
+                memory_context=session.memory,
+            )
+            return (reply, False, meta["context_docs"], meta["turn_topics"],
+                    meta["recommended_products"], meta["active_phase"])
 
         # Fallback (no LLM)
         return (
-            "I’m here with you. Could you tell me a little more about what feels most heavy right now?",
+            "I'm here with you. Could you tell me a little more about what feels most heavy right now?",
             False,
             [],
-            [] if "turn_topics" not in locals() else turn_topics,
+            meta["turn_topics"],
             [],
-            ConversationPhase.LISTENING
+            ConversationPhase.LISTENING,
         )
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_acceptance(message: str) -> bool:
+        """Check if a message is an acceptance/acknowledgment of a suggestion."""
+        msg = message.lower().strip()
+        words = msg.split()
+
+        if len(words) > 30:
+            return False
+
+        rejection_keywords = ["no", "don't want", "nahi", "not interested", "something else", "nah", "don't think"]
+        if any(kw in msg for kw in rejection_keywords):
+            return False
+
+        acceptance_keywords = [
+            "ok", "okay", "fine", "sure", "alright", "yes", "haan", "theek",
+            "accha", "will do", "will try", "thanks", "got it", "sounds good",
+            "thank you", "ji", "shukriya", "dhanyavaad",
+        ]
+        if any(kw in msg for kw in acceptance_keywords):
+            return True
+
+        if len(words) < 8 and "?" not in msg:
+            return True
+
+        return False
+
+    def _get_practice_from_history(self, session: SessionState) -> List[str]:
+        """Scan last 2 assistant messages for practice-related keywords."""
+        assistant_msgs = [
+            m["content"].lower()
+            for m in session.conversation_history
+            if m.get("role") == "assistant"
+        ]
+        # Look at the last 2 assistant messages
+        recent = assistant_msgs[-2:] if len(assistant_msgs) >= 2 else assistant_msgs
+
+        matched_keywords: List[str] = []
+        for msg_text in recent:
+            for practice_info in self.PRACTICE_PRODUCT_MAP.values():
+                if any(kw in msg_text for kw in practice_info["detect"]):
+                    for sk in practice_info["search_keywords"]:
+                        if sk not in matched_keywords:
+                            matched_keywords.append(sk)
+
+        return matched_keywords
+
+    def _build_context_search_terms(self, analysis: Dict, session: SessionState) -> List[str]:
+        """Derive product search keywords from conversation context signals."""
+        terms = []
+
+        # 1. Deity (highest signal — most specific)
+        deity = (analysis.get("entities", {}).get("deity", "")
+                 or session.memory.story.preferred_deity or "").lower()
+        if deity:
+            terms.extend(self.DEITY_PRODUCT_MAP.get(deity, []))
+
+        # 2. Emotion
+        emotion = (analysis.get("emotion", "")
+                   or session.memory.story.emotional_state or "").lower()
+        if emotion and emotion != "neutral":
+            terms.extend(self.EMOTION_PRODUCT_MAP.get(emotion, []))
+
+        # 3. Life domain
+        domain = (analysis.get("life_domain", "")
+                  or session.memory.story.life_area or "").lower()
+        if domain and domain != "unknown":
+            terms.extend(self.DOMAIN_PRODUCT_MAP.get(domain, []))
+
+        # 4. Spiritual concepts (lowest priority)
+        for concept in (session.memory.relevant_concepts or []):
+            terms.extend(self.CONCEPT_PRODUCT_MAP.get(concept.lower(), []))
+
+        # 5. Practice keywords from assistant history (reuse existing method)
+        terms.extend(self._get_practice_from_history(session))
+
+        # Deduplicate preserving order, cap at 8
+        seen = set()
+        unique = []
+        for t in terms:
+            if t.lower() not in seen:
+                seen.add(t.lower())
+                unique.append(t)
+        return unique[:8]
+
+    def _filter_shown_products(self, session_id: str, products: List[Dict]) -> List[Dict]:
+        """Remove already-shown products. Falls back to full list if all filtered."""
+        shown = _shown_products.get(session_id, set())
+        filtered = [p for p in products if p.get("_id") not in shown]
+        return filtered if filtered else products
+
+    def _record_shown_products(self, session_id: str, products: List[Dict]) -> None:
+        """Track shown product IDs. Auto-prune cache if too large."""
+        if len(_shown_products) > 1000:
+            _shown_products.clear()
+        if session_id not in _shown_products:
+            _shown_products[session_id] = set()
+        for p in products:
+            if p.get("_id"):
+                _shown_products[session_id].add(p["_id"])
+
+    async def _infer_proactive_products(
+        self,
+        session: SessionState,
+        message: str,
+        life_domain: str,
+        analysis: Dict = None,
+        is_guidance_phase: bool = False,
+    ) -> List[Dict]:
+        """Proactively suggest products when user acknowledges a practice suggestion
+        or when conversation context provides strong product signals (guidance phase)."""
+        # Anti-spam: at least 3 turns since last proactive suggestion
+        if (session.turn_count - session.last_proactive_product_turn) < 3:
+            return []
+
+        # Path A: Acceptance-based (existing behavior, both phases)
+        if self._is_acceptance(message):
+            keywords = self._get_practice_from_history(session)
+            if keywords:
+                search_query = " ".join(keywords)
+                logger.info(f"Proactive product inference (acceptance): searching '{search_query}' for session {session.session_id}")
+                products = await self.product_service.search_products(
+                    search_query, life_domain=life_domain,
+                    emotion=(analysis.get("emotion", "") if analysis else ""),
+                    deity=((analysis.get("entities", {}).get("deity", "") if analysis else "")
+                           or session.memory.story.preferred_deity or ""),
+                )
+                if products:
+                    session.last_proactive_product_turn = session.turn_count
+                    logger.info(f"Proactive products found: {len(products)} items for session {session.session_id}")
+                    return products
+
+        # Path B: Context-based (GUIDANCE phase only, no acceptance needed)
+        if is_guidance_phase and analysis:
+            context_terms = self._build_context_search_terms(analysis, session)
+            if context_terms:
+                search_query = " ".join(context_terms[:5])
+                logger.info(f"Proactive product inference (context): searching '{search_query}' for session {session.session_id}")
+                products = await self.product_service.search_products(
+                    search_query, life_domain=life_domain,
+                    emotion=analysis.get("emotion", ""),
+                    deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
+                )
+                if products:
+                    session.last_proactive_product_turn = session.turn_count
+                    return products
+
+        return []
 
     def _assess_readiness(self, session: SessionState) -> bool:
         """
@@ -512,25 +800,79 @@ class CompanionEngine:
 
         return profile
 
+    def _get_doc_type_exclusions(self, intent: Optional[str]) -> Optional[List[str]]:
+        """
+        Return doc type strings to exclude from RAG for the given intent.
+        Returns None if no exclusions apply.
+        """
+        if not intent:
+            return None
+        exclusions = {
+            "EXPRESSING_EMOTION": ["temple"],
+            "OTHER": ["temple"],
+            "PRODUCT_SEARCH": ["scripture"],
+            "GREETING": ["temple", "scripture"],
+        }
+        return exclusions.get(intent)
+
     def _build_listening_query(
         self, message: str, memory: ConversationMemory
     ) -> str:
-        summary = memory.get_memory_summary()
-        return summary if summary else message[:150]
+        """
+        Build a semantically-rich search query for the RAG pipeline.
+        Prioritises the CURRENT turn message, then enriches with confirmed
+        memory signals (emotion, domain, deity) for better recall.
+        Falls back to the raw message if no memory context is available.
+        """
+        parts = [message.strip()]
+        story = memory.story
 
-    async def reconstruct_memory(self, session: SessionState, history: list) -> None:
-        """Reconstruct high-level memory from historical messages"""
+        # Enrich with confirmed emotional context
+        if story.emotional_state and story.emotional_state not in ("unknown", "neutral", ""):
+            parts.append(f"feeling {story.emotional_state}")
+
+        # Enrich with the confirmed life domain
+        if story.life_area and story.life_area not in ("unknown", ""):
+            parts.append(f"life domain: {story.life_area}")
+
+        # Enrich with deity if user has expressed one
+        if story.preferred_deity:
+            parts.append(f"deity: {story.preferred_deity}")
+
+        # Enrich with the core spiritual/ritual entity if extracted
+        if story.primary_concern and len(story.primary_concern) > 10:
+            parts.append(story.primary_concern[:100])
+
+        enriched = " | ".join(parts)[:400]  # Cap for embedding efficiency
+        logger.debug(f"Enriched RAG query: {enriched[:120]}")
+        return enriched
+
+    async def reconstruct_memory(self, session: SessionState, history: list, snapshot: Optional[Dict] = None) -> None:
+        """Reconstruct high-level memory from historical messages and optional snapshot"""
+        if snapshot:
+            from models.memory_context import ConversationMemory
+            session.memory = ConversationMemory.from_dict(snapshot)
+            logger.info("Initialized memory from persistent snapshot")
+
         if not history:
             return
             
-        logger.info(f"Reconstructing deep memory from {len(history)} past messages...")
+        logger.info(f"Reconstructing/Refining deep memory from {len(history)} past messages...")
         
-        # Process messages in order to rebuild the story
+        user_msg_count = 0
+        # If we had a snapshot, we might want to only process new messages, 
+        # but for safety we re-process to ensure consistency if the history is short.
+        # However, to avoid double-counting signals from the snapshot, 
+        # we only process messages if memory was fresh.
+        
         for msg in history:
             if msg.get("role") == "user":
-                self._update_memory(session.memory, session, msg.get("content", ""))
-            
-        logger.info(f"Memory reconstruction complete. Story concern: {session.memory.story.primary_concern[:50]}...")
+                user_msg_count += 1
+                if not snapshot: # Only auto-extract if we didn't have a snapshot
+                    self._update_memory(session.memory, session, msg.get("content", ""))
+        
+        session.turn_count = user_msg_count
+        logger.info(f"Memory reconstruction complete. User messages: {user_msg_count}. Story concern: {session.memory.story.primary_concern[:50]}...")
 
     def _update_memory(self, memory: ConversationMemory, session: SessionState, text: str) -> List[str]:
         """Extract signals and update narrative story"""

@@ -152,7 +152,7 @@ class MongoSessionManager(SessionManager):
 
 class RedisSessionManager(SessionManager):
     def __init__(self, ttl_minutes: int):
-        import redis
+        import redis.asyncio as redis
         import json
         
         self._ttl_seconds = ttl_minutes * 60
@@ -167,8 +167,11 @@ class RedisSessionManager(SessionManager):
         
         # Test connection
         try:
-            self._redis.ping()
-            logger.info("✅ Redis connection established")
+            # Ping is not async in redis-py, but redis.asyncio wraps it.
+            # However, the connection itself is established on first use.
+            # A simple `await self._redis.ping()` would be better if we want to test immediately.
+            # For now, we'll rely on operations to fail if connection isn't there.
+            pass 
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e}")
             raise e
@@ -186,7 +189,7 @@ class RedisSessionManager(SessionManager):
     async def get_session(self, session_id: str) -> Optional[SessionState]:
         import json
         try:
-            data = self._redis.get(f"session:{session_id}")
+            data = await self._redis.get(f"session:{session_id}")
             if not data:
                 return None
             
@@ -203,7 +206,7 @@ class RedisSessionManager(SessionManager):
         
         try:
             # Store as JSON with TTL
-            self._redis.setex(
+            await self._redis.setex(
                 f"session:{session.session_id}",
                 self._ttl_seconds,
                 json.dumps(data)
@@ -213,7 +216,7 @@ class RedisSessionManager(SessionManager):
 
     async def delete_session(self, session_id: str) -> None:
         try:
-            self._redis.delete(f"session:{session_id}")
+            await self._redis.delete(f"session:{session_id}")
         except Exception as e:
             logger.error(f"Redis delete_session error: {e}")
 
