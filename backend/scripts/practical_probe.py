@@ -1,7 +1,6 @@
 import asyncio
 import os
 import sys
-from typing import List, Dict, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -36,7 +35,7 @@ async def run_practical_probe():
     intent_agent = get_intent_agent()
     
     print(f"\n{'='*105}")
-    print(f"  3ioNetra Practical Planning: Intent Validation (15 Scenarios)")
+    print("  3ioNetra Practical Planning: Intent Validation (15 Scenarios)")
     print(f"{'='*105}")
     print(f"{'ID':<4} | {'SCENARIO':<25} | {'DIRECT?':<8} | {'INTENT':<18} | {'PROD?':<6} | {'STATUS'}")
     print(f"{'='*105}")
@@ -60,14 +59,18 @@ async def run_practical_probe():
             
             all_ok  = direct_ok and intent_ok and rec_ok
             status  = "✅ PASS" if all_ok else "❌ FAIL"
-            if all_ok: passed += 1
+            if all_ok:
+                passed += 1
             
             print(f"{s['id']:<4} | {s['name']:<25} | {str(got_direct):<8} | {got_intent:<18} | {str(got_rec):<6} | {status}")
             
             if not all_ok:
-                if not direct_ok: print(f"     -> Direct: got {got_direct}, expected {s['needs_direct']}")
-                if not intent_ok: print(f"     -> Intent: got {got_intent}, expected one of {s['allowed_intents']}")
-                if not rec_ok:    print(f"     -> Rec:    got {got_rec}, expected {s['should_recommend']}")
+                if not direct_ok:
+                    print(f"     -> Direct: got {got_direct}, expected {s['needs_direct']}")
+                if not intent_ok:
+                    print(f"     -> Intent: got {got_intent}, expected one of {s['allowed_intents']}")
+                if not rec_ok:
+                    print(f"     -> Rec:    got {got_rec}, expected {s['should_recommend']}")
                 
         except Exception as e:
             print(f"{s['id']:<4} | {s['name']:<25} | ERROR: {str(e)[:60]}")

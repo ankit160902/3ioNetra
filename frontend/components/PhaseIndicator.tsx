@@ -109,7 +109,7 @@ export function PhaseIndicatorCompact({
   const current = displayPhasesMap[phase];
 
   return (
-    <div className="flex items-center justify-between px-5 py-1.5 bg-orange-50/40 backdrop-blur-md border-b border-orange-100/50 animate-fade-in shrink-0">
+    <div data-testid="phase-indicator" className="flex items-center justify-between px-5 py-1.5 bg-orange-50/40 backdrop-blur-md border-b border-orange-100/50 animate-fade-in shrink-0">
       <div className="flex items-center gap-3">
         <div className={`
           px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-[0.2em] shadow-sm

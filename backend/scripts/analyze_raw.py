@@ -1,7 +1,6 @@
 
 import json
 import csv
-import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -71,18 +70,21 @@ def analyze_raw():
                         items = data
                     elif isinstance(data, dict):
                         for k, v in data.items():
-                            if isinstance(v, list): items.extend(v)
+                            if isinstance(v, list):
+                                items.extend(v)
                     
                     for item in items:
-                        if not isinstance(item, dict): continue
+                        if not isinstance(item, dict):
+                            continue
                         chapter = item.get('chapter') or item.get('adhyaya') or item.get('book') or item.get('mandala') or item.get('kaanda')
                         verse_num = item.get('verse') or item.get('shloka') or item.get('shloka_number') or item.get('verse_number')
                         if chapter and verse_num:
                             ref = f"{scripture} {chapter}.{verse_num}"
                             seen_refs[ref].append(file_path.name)
                             scripture_counts[scripture] += 1
-            except: pass
-        
+            except Exception:
+                pass
+
         elif file_path.suffix == '.csv':
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -95,7 +97,8 @@ def analyze_raw():
                             ref = f"{scripture} {chapter}.{verse_num}"
                             seen_refs[ref].append(file_path.name)
                             scripture_counts[scripture] += 1
-            except: pass
+            except Exception:
+                pass
 
     duplicates = {ref: files for ref, files in seen_refs.items() if len(files) > 1}
     

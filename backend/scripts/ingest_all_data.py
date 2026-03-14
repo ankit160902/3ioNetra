@@ -1,8 +1,9 @@
-import os
 import sys
 import json
 import csv
 import logging
+import re
+import uuid
 from pathlib import Path
 from typing import List, Dict
 import numpy as np
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from config import settings
+from config import settings  # noqa: E402
 
 # Try to import sentence transformers
 try:
@@ -184,7 +185,6 @@ class UniversalScriptureIngester:
         """Simple markdown stripper"""
         if not text:
             return ""
-        import re
         # Remove bold/italic
         text = re.sub(r'\*\*?(.*?)\*\*?', r'\1', text)
         # Remove headers
@@ -253,48 +253,61 @@ class UniversalScriptureIngester:
         text_parts = []
         
         # Core Info
-        if name: text_parts.append(f"Temple Name: {name}")
-        if state: text_parts.append(f"State: {state}")
+        if name:
+            text_parts.append(f"Temple Name: {name}")
+        if state:
+            text_parts.append(f"State: {state}")
         
         # Merge fields from both formats
         location = temple.get('Location') or temple.get('full_address') or temple.get('city')
-        if location: text_parts.append(f"Location: {location}")
+        if location:
+            text_parts.append(f"Location: {location}")
         
         deity = temple.get('Main deity')
-        if deity: text_parts.append(f"Main Deity: {deity}")
+        if deity:
+            text_parts.append(f"Main Deity: {deity}")
         
         other_deities = temple.get('Other deities')
-        if other_deities: text_parts.append(f"Other Deities: {other_deities}")
+        if other_deities:
+            text_parts.append(f"Other Deities: {other_deities}")
         
         # Descriptions & History
         # Format 1 keys: info, Significance, History, Detailed History, story, Architecture, ...
         # Format 2 keys: history, significance, description, editorial_summary, ...
         
         summary = temple.get('info') or temple.get('description') or temple.get('editorial_summary')
-        if summary: text_parts.append(f"Summary: {summary}")
+        if summary:
+            text_parts.append(f"Summary: {summary}")
         
         significance = temple.get('Significance') or temple.get('significance')
-        if significance: text_parts.append(f"Significance: {significance}")
+        if significance:
+            text_parts.append(f"Significance: {significance}")
         
         history = temple.get('History') or temple.get('Detailed History') or temple.get('detailed_history') or temple.get('history')
-        if history: text_parts.append(f"History: {history}")
+        if history:
+            text_parts.append(f"History: {history}")
         
         story = temple.get('story')
-        if story: text_parts.append(f"Spiritual Story: {story}")
+        if story:
+            text_parts.append(f"Spiritual Story: {story}")
         
         architecture = temple.get('Architecture') or temple.get('Detailed Architecture') or temple.get('Key features of the architecture')
-        if architecture: text_parts.append(f"Architecture: {architecture}")
+        if architecture:
+            text_parts.append(f"Architecture: {architecture}")
         
         # Scriptural
         scriptural = temple.get('mention_in_scripture') or temple.get('Scriptural References')
-        if scriptural: text_parts.append(f"Scriptural References: {scriptural}")
+        if scriptural:
+            text_parts.append(f"Scriptural References: {scriptural}")
         
         # Visiting & Logistics
         guide = temple.get('visiting_guide') or temple.get('transport_info')
-        if guide: text_parts.append(f"Visiting Info: {guide}")
+        if guide:
+            text_parts.append(f"Visiting Info: {guide}")
         
         timings = temple.get('Timings') or f"{temple.get('opening_time', '')} to {temple.get('closing_time', '')}".strip()
-        if timings and timings != "to": text_parts.append(f"Timings: {timings}")
+        if timings and timings != "to":
+            text_parts.append(f"Timings: {timings}")
 
         # Combine and CLEAN markdown
         raw_combined = "\n\n".join(text_parts)
@@ -304,7 +317,6 @@ class UniversalScriptureIngester:
             combined_text = f"Information about {name} temple in {state}."
 
         # Create a standardized verse-like object
-        import uuid
         verse = {
             'id': str(uuid.uuid4()),
             'type': 'temple',
@@ -408,8 +420,6 @@ class UniversalScriptureIngester:
 
         # Essential field check - ensure at least some text and an identifier
         if (verse.get('chapter') or source) and verse.get('text'):
-            import uuid
-            
             # Standardized Verse Output
             final_verse = {
                 'id': str(uuid.uuid4()),
@@ -473,7 +483,6 @@ class UniversalScriptureIngester:
 
     def _infer_topic(self, verse: Dict) -> str:
         """Infer topic from verse content using regex for word boundaries"""
-        import re
         text = ' '.join([str(verse.get(f, '')) for f in ['text', 'meaning', 'sanskrit'] if verse.get(f)]).lower()
 
         topics = {
@@ -506,7 +515,7 @@ class UniversalScriptureIngester:
         """Generate embeddings for all verses"""
         if not self.embedding_model:
             logger.warning("⚠ No embedding model available - using dummy embeddings")
-            return np.zeros((len(verses), 768))
+            return np.zeros((len(verses), settings.EMBEDDING_DIM))
 
         texts = []
         for verse in verses:
@@ -633,8 +642,8 @@ class UniversalScriptureIngester:
         logger.info("=" * 80)
         logger.info(f"📊 Total verses processed: {len(all_verses)}")
         logger.info(f"📁 Output directory: {self.processed_data_dir}")
-        logger.info(f"📄 Files created:")
-        logger.info(f"   • processed_data.json (with embeddings)")
+        logger.info("📄 Files created:")
+        logger.info("   • processed_data.json (with embeddings)")
         logger.info("\n🎯 Data is ready for RAG pipeline!")
 
 

@@ -1,9 +1,11 @@
+import hashlib
 import json
 import logging
 import asyncio
+import re
 from datetime import datetime
-from typing import List, Optional, Dict
-from fastapi import APIRouter, HTTPException, Depends, status, Header
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse
 
 from config import settings
@@ -12,9 +14,10 @@ from models.api_schemas import (
     SessionCreateResponse, SessionStateResponse,
     TextQuery, TextResponse, SaveConversationRequest,
     FeedbackRequest,
-    ConversationPhaseEnum, SourceReference, FlowMetadata
+    ConversationPhaseEnum, FlowMetadata
 )
-from models.session import SessionState, ConversationPhase
+from constants import TRIVIAL_MESSAGES
+from models.session import SessionState, ConversationPhase, SignalType
 from services.session_manager import get_session_manager
 from services.companion_engine import get_companion_engine
 from services.context_synthesizer import get_context_synthesizer
@@ -23,13 +26,8 @@ from services.response_composer import get_response_composer
 from services.auth_service import get_conversation_storage, get_auth_service
 from models.dharmic_query import QueryType
 from routers.auth import get_current_user
-
-# Global pipeline reference that will be set by main.py
-rag_pipeline = None
-
-def set_rag_pipeline(pipeline):
-    global rag_pipeline
-    rag_pipeline = pipeline
+from routers.dependencies import get_rag_pipeline
+from llm.service import clean_response
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -48,7 +46,7 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
             try:
                 storage = get_conversation_storage()
                 # Get latest session (passing None for conversation_id fetches the latest)
-                latest_conv = storage.get_conversation(user["id"], None)
+                latest_conv = await storage.get_conversation(user["id"], None)
                 if latest_conv and latest_conv.get("memory"):
                     from models.memory_context import ConversationMemory
                     snapshot = latest_conv.get("memory")
@@ -65,23 +63,83 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
                 logger.error(f"Failed to inherit memory context: {e}")
 
         # Pre-populate from permanent user record if not already set (fills gaps or updates)
-        if not session.memory.story.profession: session.memory.story.profession = user.get('profession', '')
-        if not session.memory.story.gender: session.memory.story.gender = user.get('gender', '')
-        if not session.memory.story.age_group: session.memory.story.age_group = user.get('age_group', '')
-        if not session.memory.story.rashi: session.memory.story.rashi = user.get('rashi', '')
-        if not session.memory.story.gotra: session.memory.story.gotra = user.get('gotra', '')
-        if not session.memory.story.nakshatra: session.memory.story.nakshatra = user.get('nakshatra', '')
-        if not session.memory.story.preferred_deity: session.memory.story.preferred_deity = user.get('preferred_deity', '')
-        if not session.memory.story.location: session.memory.story.location = user.get('location', '')
+        if not session.memory.story.profession:
+            session.memory.story.profession = user.get('profession', '')
+        if not session.memory.story.gender:
+            session.memory.story.gender = user.get('gender', '')
+        if not session.memory.story.age_group:
+            session.memory.story.age_group = user.get('age_group', '')
+        if not session.memory.story.rashi:
+            session.memory.story.rashi = user.get('rashi', '')
+        if not session.memory.story.gotra:
+            session.memory.story.gotra = user.get('gotra', '')
+        if not session.memory.story.nakshatra:
+            session.memory.story.nakshatra = user.get('nakshatra', '')
+        if not session.memory.story.preferred_deity:
+            session.memory.story.preferred_deity = user.get('preferred_deity', '')
+        if not session.memory.story.location:
+            session.memory.story.location = user.get('location', '')
         
     if user_profile:
         # Override with explicit frontend-provided profile if available
-        if hasattr(user_profile, 'age_group') and user_profile.age_group: session.memory.story.age_group = user_profile.age_group
-        if hasattr(user_profile, 'gender') and user_profile.gender: session.memory.story.gender = user_profile.gender
-        if hasattr(user_profile, 'profession') and user_profile.profession: session.memory.story.profession = user_profile.profession
-        if hasattr(user_profile, 'preferred_deity') and user_profile.preferred_deity: session.memory.story.preferred_deity = user_profile.preferred_deity
-        if hasattr(user_profile, 'location') and user_profile.location: session.memory.story.location = user_profile.location
-        if hasattr(user_profile, 'spiritual_interests') and user_profile.spiritual_interests: session.memory.story.spiritual_interests = user_profile.spiritual_interests
+        if hasattr(user_profile, 'age_group') and user_profile.age_group:
+            session.memory.story.age_group = user_profile.age_group
+        if hasattr(user_profile, 'gender') and user_profile.gender:
+            session.memory.story.gender = user_profile.gender
+        if hasattr(user_profile, 'profession') and user_profile.profession:
+            session.memory.story.profession = user_profile.profession
+        if hasattr(user_profile, 'preferred_deity') and user_profile.preferred_deity:
+            session.memory.story.preferred_deity = user_profile.preferred_deity
+        if hasattr(user_profile, 'location') and user_profile.location:
+            session.memory.story.location = user_profile.location
+        if hasattr(user_profile, 'spiritual_interests') and user_profile.spiritual_interests:
+            session.memory.story.spiritual_interests = user_profile.spiritual_interests
+
+async def _get_or_create_session(
+    query: ConversationalQuery,
+    user: Optional[dict],
+    session_manager,
+    companion_engine,
+) -> SessionState:
+    """Resolve or create a session from a ConversationalQuery."""
+    if query.session_id:
+        session = await session_manager.get_session(query.session_id)
+        if session and user and session.memory.user_id and session.memory.user_id != user.get('id'):
+            session = None
+
+        if not session and user:
+            storage = get_conversation_storage()
+            conv = await storage.get_conversation(user["id"], query.session_id)
+            if conv:
+                logger.info(f"Restoring expired session {query.session_id} from persistent history")
+                session = await session_manager.create_session(
+                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                    min_turns=settings.MIN_CLARIFICATION_TURNS,
+                    max_turns=settings.MAX_CLARIFICATION_TURNS
+                )
+                session.session_id = query.session_id
+                session.conversation_history = conv.get("messages", [])
+                session.is_returning_user = True
+                memory_snapshot = conv.get("memory")
+                await companion_engine.reconstruct_memory(session, session.conversation_history, snapshot=memory_snapshot)
+                session.memory.is_returning_user = True
+                await session_manager.update_session(session)
+
+        if not session:
+            session = await session_manager.create_session(
+                min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                min_turns=settings.MIN_CLARIFICATION_TURNS,
+                max_turns=settings.MAX_CLARIFICATION_TURNS
+            )
+            if query.session_id:
+                session.session_id = query.session_id
+    else:
+        session = await session_manager.create_session(
+            min_signals=settings.MIN_SIGNALS_THRESHOLD,
+            min_turns=settings.MIN_CLARIFICATION_TURNS,
+            max_turns=settings.MAX_CLARIFICATION_TURNS
+        )
+    return session
 
 # ----------------------------------------------------------------------------
 # STANDALONE QUERY ENDPOINTS
@@ -90,11 +148,12 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
 @router.post("/text/query", response_model=TextResponse)
 async def text_query(query: TextQuery):
     """Process standalone text query and return response with citations."""
-    if not rag_pipeline or not rag_pipeline.available:
+    pipeline = get_rag_pipeline()
+    if not pipeline or not pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
-        
+
     try:
-        result = await rag_pipeline.query(
+        result = await pipeline.query(
             query=query.query,
             language=query.language,
             include_citations=query.include_citations,
@@ -147,7 +206,8 @@ async def get_session_state(session_id: str):
             signals_collected=session.get_signals_summary(),
             created_at=session.created_at.isoformat()
         )
-    except HTTPException: raise
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -159,71 +219,128 @@ async def delete_session(session_id: str):
     return {"message": "Session deleted"}
 
 # ----------------------------------------------------------------------------
+# Shared helpers for conversational endpoints
+# ----------------------------------------------------------------------------
+
+def _init_services():
+    """Return the 5 core services used by both conversation endpoints."""
+    return (
+        get_session_manager(),
+        get_companion_engine(),
+        get_context_synthesizer(),
+        get_safety_validator(),
+        get_response_composer(),
+    )
+
+
+async def _preflight(query, user, session_manager, companion_engine, safety_validator):
+    """Session create/restore + user context population + crisis check.
+
+    Returns (session, is_crisis, crisis_response).
+    """
+    session = await _get_or_create_session(query, user, session_manager, companion_engine)
+    await _populate_session_with_user_context(session, user, query.user_profile)
+    is_crisis, crisis_response = await safety_validator.check_crisis_signals(session, query.message)
+    if is_crisis:
+        session.add_message('user', query.message)
+        # Populate emotion signal for crisis — IntentAgent is skipped in crisis path
+        from models.session import Signal
+        session.signals_collected[SignalType.EMOTION] = Signal(signal_type=SignalType.EMOTION, value='despair')
+        session.add_message('assistant', crisis_response)
+        await session_manager.update_session(session)
+    return session, is_crisis, crisis_response
+
+
+async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, streaming=False):
+    """Add user message, increment turn, run engine + speculative RAG in parallel.
+
+    Returns (engine_result_or_meta, speculative_docs).
+    """
+    session.add_message('user', query.message)
+    session.turn_count += 1
+
+    msg_lower = query.message.strip().lower()
+    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 3
+
+    if streaming:
+        engine_fn = companion_engine.process_message_preamble(session, query.message)
+    else:
+        engine_fn = companion_engine.process_message(session, query.message)
+
+    if skip:
+        engine_result = await engine_fn
+        return engine_result, []
+
+    rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=5)
+    engine_result, speculative_docs = await asyncio.gather(engine_fn, rag_task)
+    return engine_result, speculative_docs
+
+
+async def _build_guidance_context(session, query, speculative_docs, context_synthesizer, rag_pipeline):
+    """Synthesise dharmic query and fetch additional RAG docs if speculative set is empty.
+
+    Returns (dharmic_query, retrieved_docs).
+    """
+    session.phase = ConversationPhase.GUIDANCE
+    session.dharmic_query = context_synthesizer.synthesize_from_memory(session)
+    dharmic_query = session.dharmic_query
+
+    retrieved_docs = speculative_docs if speculative_docs else []
+    if not retrieved_docs and dharmic_query.query_type != QueryType.PANCHANG:
+        retrieved_docs = await rag_pipeline.search(
+            query=dharmic_query.build_search_query(),
+            scripture_filter=dharmic_query.allowed_scriptures,
+            language=query.language,
+            top_k=5
+        )
+    return dharmic_query, retrieved_docs
+
+
+def _make_flow_metadata(session, turn_topics):
+    return FlowMetadata(
+        detected_domain=session.memory.story.life_area,
+        emotional_state=session.memory.story.emotional_state,
+        topics=turn_topics,
+        readiness_score=round(session.memory.readiness_for_wisdom, 2),
+    )
+
+
+async def _postprocess_and_save(text, session, query_message, safety_validator, session_manager, companion_engine, is_guidance):
+    """Validate, append professional help, save to session. Returns final text."""
+    # Context-aware cleanup: when user complains about "just a [thing]", strip the substring
+    if 'just a' in query_message.lower():
+        text = re.sub(r'\bjust as\b', 'equally', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bjust a\b', 'merely a', text, flags=re.IGNORECASE)
+    final_text = await safety_validator.validate_response(text)
+    needs_help, help_type = safety_validator.check_needs_professional_help(session, query_message)
+    if needs_help:
+        final_text = safety_validator.append_professional_help(final_text, help_type, False)
+    session.add_message('assistant', final_text)
+    # Record practice suggestions for future product inference
+    companion_engine.record_suggestion(session, final_text)
+    if is_guidance:
+        session.memory.readiness_for_wisdom = 0.3
+    await session_manager.update_session(session)
+    return final_text
+
+
+# ----------------------------------------------------------------------------
 # MAIN CONVERSATIONAL ENDPOINT
 # ----------------------------------------------------------------------------
 
 @router.post("/conversation", response_model=ConversationalResponse)
 async def conversational_query(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """Main conversational endpoint with empathetic companion flow."""
+    rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
 
-    session_manager = get_session_manager()
-    companion_engine = get_companion_engine()
-    context_synthesizer = get_context_synthesizer()
-    safety_validator = get_safety_validator()
-    response_composer = get_response_composer()
+    session_manager, companion_engine, context_synthesizer, safety_validator, response_composer = _init_services()
 
-    # Get or create session
-    if query.session_id:
-        session = await session_manager.get_session(query.session_id)
-        if session and user and session.memory.user_id and session.memory.user_id != user.get('id'):
-            session = None
-            
-        if not session and user:
-            # Try to restore from persistent history if session expired
-            storage = get_conversation_storage()
-            conv = storage.get_conversation(user["id"], query.session_id)
-            if conv:
-                logger.info(f"Restoring expired session {query.session_id} from persistent history")
-                session = await session_manager.create_session(
-                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
-                    min_turns=settings.MIN_CLARIFICATION_TURNS,
-                    max_turns=settings.MAX_CLARIFICATION_TURNS
-                )
-                session.session_id = query.session_id # Keep the same ID
-                session.conversation_history = conv.get("messages", [])
-                session.is_returning_user = True
-                memory_snapshot = conv.get("memory")
-                await companion_engine.reconstruct_memory(session, session.conversation_history, snapshot=memory_snapshot)
-                session.memory.is_returning_user = True
-                await session_manager.update_session(session)
-
-        if not session:
-            session = await session_manager.create_session(
-                min_signals=settings.MIN_SIGNALS_THRESHOLD,
-                min_turns=settings.MIN_CLARIFICATION_TURNS,
-                max_turns=settings.MAX_CLARIFICATION_TURNS
-            )
-            # If the frontend provided an ID but it wasn't in DB either, 
-            # we still use it to maintain frontend continuity
-            if query.session_id:
-                session.session_id = query.session_id
-    else:
-        session = await session_manager.create_session(
-            min_signals=settings.MIN_SIGNALS_THRESHOLD,
-            min_turns=settings.MIN_CLARIFICATION_TURNS,
-            max_turns=settings.MAX_CLARIFICATION_TURNS
-        )
-
-    await _populate_session_with_user_context(session, user, query.user_profile)
-
-    # Safety check
-    is_crisis, crisis_response = await safety_validator.check_crisis_signals(session, query.message)
+    session, is_crisis, crisis_response = await _preflight(
+        query, user, session_manager, companion_engine, safety_validator
+    )
     if is_crisis:
-        session.add_message('user', query.message)
-        session.add_message('assistant', crisis_response)
-        await session_manager.update_session(session)
         return ConversationalResponse(
             session_id=session.session_id,
             phase=ConversationPhaseEnum(session.phase.value),
@@ -233,40 +350,15 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             is_complete=False
         )
 
-    session.add_message('user', query.message)
-    session.turn_count += 1
-
-    # Skip speculative RAG for trivial messages (greetings, short phrases)
-    # — the engine will do its own targeted RAG if/when needed.
-    msg_lower = query.message.strip().lower()
-    _trivial = {"hi", "hey", "hello", "namaste", "pranam", "ok", "okay",
-                "thanks", "thank you", "bye", "hii", "hiii", "yes", "no"}
-    skip_speculative_rag = msg_lower in _trivial or len(query.message.split()) < 3
-
-    if skip_speculative_rag:
-        engine_result = await companion_engine.process_message(session, query.message)
-        speculative_docs = []
-    else:
-        # Engine + RAG in parallel
-        engine_task = companion_engine.process_message(session, query.message)
-        rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=5)
-        engine_result, speculative_docs = await asyncio.gather(engine_task, rag_task)
-
-    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase = engine_result
+    engine_result, speculative_docs = await _run_speculative_rag(
+        session, query, rag_pipeline, companion_engine, streaming=False
+    )
+    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config = engine_result
 
     if is_ready_for_wisdom:
-        session.phase = ConversationPhase.GUIDANCE
-        session.dharmic_query = context_synthesizer.synthesize_from_memory(session)
-        dharmic_query = session.dharmic_query
-
-        retrieved_docs = speculative_docs if speculative_docs else []
-        if not retrieved_docs and dharmic_query.query_type != QueryType.PANCHANG:
-            retrieved_docs = await rag_pipeline.search(
-                query=dharmic_query.build_search_query(),
-                scripture_filter=dharmic_query.allowed_scriptures,
-                language=query.language,
-                top_k=5
-            )
+        dharmic_query, retrieved_docs = await _build_guidance_context(
+            session, query, speculative_docs, context_synthesizer, rag_pipeline
+        )
 
         reduce_scripture = safety_validator.should_reduce_scripture_density(session)
         response_text = await response_composer.compose_with_memory(
@@ -278,17 +370,12 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             phase=ConversationPhase.GUIDANCE,
             original_query=query.message,
             user_id=session.memory.user_id,
+            model_override=route_model,
+            config_override=route_config,
         )
-        response_text = await safety_validator.validate_response(response_text)
-        
-        # Professional help check
-        needs_help, help_type = safety_validator.check_needs_professional_help(session, query.message)
-        if needs_help:
-            response_text = safety_validator.append_professional_help(response_text, help_type, False)
-
-        session.add_message('assistant', response_text)
-        session.memory.readiness_for_wisdom = 0.3
-        await session_manager.update_session(session)
+        response_text = await _postprocess_and_save(
+            response_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=True
+        )
 
         return ConversationalResponse(
             session_id=session.session_id,
@@ -298,16 +385,18 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             turn_count=session.turn_count,
             is_complete=True,
             recommended_products=recommended_products,
-            flow_metadata=FlowMetadata(detected_domain=session.memory.story.life_area, emotional_state=session.memory.story.emotional_state, topics=turn_topics, readiness_score=round(session.memory.readiness_for_wisdom, 2))
+            flow_metadata=_make_flow_metadata(session, turn_topics),
         )
     else:
-        session.add_message('assistant', companion_response)
-        await session_manager.update_session(session)
+        companion_response = (await _postprocess_and_save(
+            companion_response, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=False
+        ))
+
         return ConversationalResponse(
             session_id=session.session_id, phase=ConversationPhaseEnum.listening, response=companion_response,
             signals_collected=session.get_signals_summary(), turn_count=session.turn_count, is_complete=False,
             recommended_products=recommended_products,
-            flow_metadata=FlowMetadata(detected_domain=session.memory.story.life_area, emotional_state=session.memory.story.emotional_state, topics=turn_topics, readiness_score=round(session.memory.readiness_for_wisdom, 2))
+            flow_metadata=_make_flow_metadata(session, turn_topics),
         )
 
 # ----------------------------------------------------------------------------
@@ -317,113 +406,42 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 @router.post("/conversation/stream")
 async def conversational_query_stream(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """Streaming conversational endpoint — SSE token-by-token responses."""
+    rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
 
-    session_manager = get_session_manager()
-    companion_engine = get_companion_engine()
-    context_synthesizer = get_context_synthesizer()
-    safety_validator = get_safety_validator()
-    response_composer = get_response_composer()
+    session_manager, companion_engine, context_synthesizer, safety_validator, response_composer = _init_services()
 
-    # --- Session get/create (identical to non-streaming endpoint) ---
-    if query.session_id:
-        session = await session_manager.get_session(query.session_id)
-        if session and user and session.memory.user_id and session.memory.user_id != user.get('id'):
-            session = None
-
-        if not session and user:
-            storage = get_conversation_storage()
-            conv = storage.get_conversation(user["id"], query.session_id)
-            if conv:
-                logger.info(f"Restoring expired session {query.session_id} from persistent history")
-                session = await session_manager.create_session(
-                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
-                    min_turns=settings.MIN_CLARIFICATION_TURNS,
-                    max_turns=settings.MAX_CLARIFICATION_TURNS
-                )
-                session.session_id = query.session_id
-                session.conversation_history = conv.get("messages", [])
-                session.is_returning_user = True
-                memory_snapshot = conv.get("memory")
-                await companion_engine.reconstruct_memory(session, session.conversation_history, snapshot=memory_snapshot)
-                session.memory.is_returning_user = True
-                await session_manager.update_session(session)
-
-        if not session:
-            session = await session_manager.create_session(
-                min_signals=settings.MIN_SIGNALS_THRESHOLD,
-                min_turns=settings.MIN_CLARIFICATION_TURNS,
-                max_turns=settings.MAX_CLARIFICATION_TURNS
-            )
-            if query.session_id:
-                session.session_id = query.session_id
-    else:
-        session = await session_manager.create_session(
-            min_signals=settings.MIN_SIGNALS_THRESHOLD,
-            min_turns=settings.MIN_CLARIFICATION_TURNS,
-            max_turns=settings.MAX_CLARIFICATION_TURNS
-        )
-
-    await _populate_session_with_user_context(session, user, query.user_profile)
+    session, is_crisis, crisis_response = await _preflight(
+        query, user, session_manager, companion_engine, safety_validator
+    )
 
     async def event_generator():
         yield ": connected\n\n"  # SSE comment — flushes HTTP response immediately
         try:
-            # --- Safety check ---
-            is_crisis, crisis_response = await safety_validator.check_crisis_signals(session, query.message)
             if is_crisis:
-                session.add_message('user', query.message)
-                session.add_message('assistant', crisis_response)
-                await session_manager.update_session(session)
                 yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': session.phase.value, 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
                 yield f"event: token\ndata: {json.dumps({'text': crisis_response})}\n\n"
                 yield f"event: done\ndata: {json.dumps({'full_response': crisis_response, 'recommended_products': [], 'flow_metadata': {'detected_domain': None, 'emotional_state': None, 'topics': [], 'readiness_score': 0}})}\n\n"
                 return
 
-            session.add_message('user', query.message)
-            session.turn_count += 1
-
-            # --- Speculative RAG (parallel with preamble for non-trivial messages) ---
-            msg_lower = query.message.strip().lower()
-            _trivial = {"hi", "hey", "hello", "namaste", "pranam", "ok", "okay",
-                        "thanks", "thank you", "bye", "hii", "hiii", "yes", "no"}
-            skip_speculative_rag = msg_lower in _trivial or len(query.message.split()) < 3
-
-            if skip_speculative_rag:
-                meta = await companion_engine.process_message_preamble(session, query.message)
-                speculative_docs = []
-            else:
-                preamble_task = companion_engine.process_message_preamble(session, query.message)
-                rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=5)
-                meta, speculative_docs = await asyncio.gather(preamble_task, rag_task)
+            meta, speculative_docs = await _run_speculative_rag(
+                session, query, rag_pipeline, companion_engine, streaming=True
+            )
 
             is_ready = meta["is_ready_for_wisdom"]
-            context_docs = meta["context_docs"]
             turn_topics = meta["turn_topics"]
             recommended_products = meta["recommended_products"]
             active_phase = meta["active_phase"]
 
-            # --- Yield metadata event ---
             yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': 'guidance' if is_ready else active_phase.value, 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
 
             full_text_parts: list[str] = []
 
             if is_ready:
-                # --- Guidance phase: stream via response_composer ---
-                session.phase = ConversationPhase.GUIDANCE
-                session.dharmic_query = context_synthesizer.synthesize_from_memory(session)
-                dharmic_query = session.dharmic_query
-
-                retrieved_docs = speculative_docs if speculative_docs else []
-                if not retrieved_docs and dharmic_query.query_type != QueryType.PANCHANG:
-                    retrieved_docs = await rag_pipeline.search(
-                        query=dharmic_query.build_search_query(),
-                        scripture_filter=dharmic_query.allowed_scriptures,
-                        language=query.language,
-                        top_k=5
-                    )
-
+                dharmic_query, retrieved_docs = await _build_guidance_context(
+                    session, query, speculative_docs, context_synthesizer, rag_pipeline
+                )
                 reduce_scripture = safety_validator.should_reduce_scripture_density(session)
 
                 async for token in response_composer.compose_stream(
@@ -435,11 +453,12 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     phase=ConversationPhase.GUIDANCE,
                     original_query=query.message,
                     user_id=session.memory.user_id,
+                    model_override=meta.get("model_override"),
+                    config_override=meta.get("config_override"),
                 ):
                     full_text_parts.append(token)
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
             else:
-                # --- Listening phase: stream via LLM service ---
                 if companion_engine.available:
                     async for token in companion_engine.llm.generate_response_stream(
                         query=query.message,
@@ -448,27 +467,21 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                         user_profile=meta["user_profile"],
                         phase=meta["active_phase"],
                         memory_context=session.memory,
+                        model_override=meta.get("model_override"),
+                        config_override=meta.get("config_override"),
                     ):
                         full_text_parts.append(token)
                         yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
                 else:
-                    full_text_parts.append("I'm here with you. Could you tell me a little more about what feels most heavy right now?")
-                    yield f"event: token\ndata: {json.dumps({'text': full_text})}\n\n"
+                    fallback_text = "I'm here with you. Could you tell me a little more about what feels most heavy right now?"
+                    full_text_parts.append(fallback_text)
+                    yield f"event: token\ndata: {json.dumps({'text': fallback_text})}\n\n"
 
-            # --- Post-processing ---
-            from llm.service import clean_response
             full_text = "".join(full_text_parts)
-            cleaned_text = await asyncio.to_thread(clean_response, full_text)
-            final_text = await safety_validator.validate_response(cleaned_text)
-
-            needs_help, help_type = safety_validator.check_needs_professional_help(session, query.message)
-            if needs_help:
-                final_text = safety_validator.append_professional_help(final_text, help_type, False)
-
-            session.add_message('assistant', final_text)
-            if is_ready:
-                session.memory.readiness_for_wisdom = 0.3
-            await session_manager.update_session(session)
+            cleaned_text = clean_response(full_text)
+            final_text = await _postprocess_and_save(
+                cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+            )
 
             flow_meta = {
                 "detected_domain": session.memory.story.life_area,
@@ -500,12 +513,10 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
         raise HTTPException(status_code=400, detail="Feedback must be 'like' or 'dislike'")
     try:
         from services.auth_service import get_mongo_client
-        from datetime import datetime
         db = get_mongo_client()
         if db is None:
             raise HTTPException(status_code=500, detail="Database not available")
-        import hashlib
-        response_hash = hashlib.md5(request.response_text.encode()).hexdigest()
+        response_hash = hashlib.sha256(request.response_text.encode()).hexdigest()
         db.feedback.update_one(
             {
                 "session_id": request.session_id,
@@ -539,21 +550,25 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
 
 @router.get("/user/conversations")
 async def get_user_conversations(user: dict = Depends(get_current_user)):
-    if not user: raise HTTPException(status_code=401)
+    if not user:
+        raise HTTPException(status_code=401)
     storage = get_conversation_storage()
-    return {"conversations": storage.get_conversations_list(user["id"])}
+    return {"conversations": await storage.get_conversations_list(user["id"])}
 
 @router.get("/user/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
-    if not user: raise HTTPException(status_code=401)
+    if not user:
+        raise HTTPException(status_code=401)
     storage = get_conversation_storage()
-    conv = storage.get_conversation(user["id"], conversation_id)
-    if not conv: raise HTTPException(status_code=404)
+    conv = await storage.get_conversation(user["id"], conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404)
     return conv
 
 @router.post("/user/conversations")
 async def save_conversation(request: SaveConversationRequest, user: dict = Depends(get_current_user)):
-    if not user: raise HTTPException(status_code=401)
+    if not user:
+        raise HTTPException(status_code=401)
     
     # 1. Get memory snapshot if active session exists
     session_manager = get_session_manager()
@@ -569,12 +584,18 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
             profile_updates = {}
             
             # Persist only high-confidence/stable fields
-            if story.profession: profile_updates["profession"] = story.profession
-            if story.gender: profile_updates["gender"] = story.gender
-            if story.rashi: profile_updates["rashi"] = story.rashi
-            if story.gotra: profile_updates["gotra"] = story.gotra
-            if story.nakshatra: profile_updates["nakshatra"] = story.nakshatra
-            if story.preferred_deity: profile_updates["preferred_deity"] = story.preferred_deity
+            if story.profession:
+                profile_updates["profession"] = story.profession
+            if story.gender:
+                profile_updates["gender"] = story.gender
+            if story.rashi:
+                profile_updates["rashi"] = story.rashi
+            if story.gotra:
+                profile_updates["gotra"] = story.gotra
+            if story.nakshatra:
+                profile_updates["nakshatra"] = story.nakshatra
+            if story.preferred_deity:
+                profile_updates["preferred_deity"] = story.preferred_deity
             
             if profile_updates:
                 auth_service.update_user_profile(user["id"], profile_updates)
@@ -584,10 +605,10 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
 
     # 3. Save conversation with memory snapshot
     storage = get_conversation_storage()
-    conv_id = storage.save_conversation(
-        user_id=user["id"], 
-        conversation_id=request.conversation_id, 
-        title=request.title, 
+    conv_id = await storage.save_conversation(
+        user_id=user["id"],
+        conversation_id=request.conversation_id,
+        title=request.title,
         messages=request.messages,
         memory=memory_snapshot
     )
@@ -596,14 +617,16 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
 
 @router.delete("/user/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str, user: dict = Depends(get_current_user)):
-    if not user: raise HTTPException(status_code= status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     try:
         storage = get_conversation_storage()
-        deleted = storage.delete_conversation(user["id"], conversation_id)
+        deleted = await storage.delete_conversation(user["id"], conversation_id)
         if not deleted:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
         return {"message": "Conversation deleted", "conversation_id": conversation_id}
-    except HTTPException: raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error deleting conversation: {e}")
         raise HTTPException(status_code=500, detail=str(e))

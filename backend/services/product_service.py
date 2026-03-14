@@ -2,7 +2,6 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 from .auth_service import get_mongo_client
-from models.product import Product
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +24,16 @@ class ProductService:
         if self.collection is None:
             return []
         query = {"is_active": True} if active_only else {}
-        cursor = self.collection.find(query)
-        products = []
-        for doc in cursor:
-            doc = self._serialize_doc(doc)
-            products.append(doc)
-        return products
+        try:
+            cursor = self.collection.find(query)
+            products = []
+            for doc in cursor:
+                doc = self._serialize_doc(doc)
+                products.append(doc)
+            return products
+        except Exception as e:
+            logger.error(f"get_all_products DB error: {e}")
+            return []
 
     async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
                               emotion: str = "", deity: str = "") -> List[Dict[str, Any]]:
@@ -46,35 +49,52 @@ class ProductService:
             if t not in stop_words and len(t) > 2 and t not in seen:
                 keywords.append(t)
                 seen.add(t)
-        
+
         if not keywords or self.collection is None:
             return []
 
-        # Strategy:
-        # 1. Broad OR search across name, category, and description
-        # 2. Ranking: We'll fetch a larger set and rank by term match density and variety
-        
-        regex_pattern = "|".join(keywords)
-        
-        query = {
-            "is_active": True,
-            "$or": [
-                {"name": {"$regex": regex_pattern, "$options": "i"}},
-                {"category": {"$regex": regex_pattern, "$options": "i"}},
-                {"description": {"$regex": regex_pattern, "$options": "i"}}
-            ]
-        }
-        
-        # Increase limit to 50 to ensure we find specific items in a large catalog
-        cursor = self.collection.find(query).limit(50) 
+        # Primary path: MongoDB $text search using the products_text_search
+        # index (Issue 29). Falls back to regex if text index is unavailable.
+        search_string = " ".join(keywords)
         raw_products = []
-        for doc in cursor:
-            doc = self._serialize_doc(doc)
-            raw_products.append(doc)
+        used_text_search = False
+
+        try:
+            text_query = {
+                "$text": {"$search": search_string},
+                "is_active": True,
+            }
+            cursor = self.collection.find(
+                text_query,
+                {"_text_score": {"$meta": "textScore"}},
+            ).sort([("_text_score", {"$meta": "textScore"})]).limit(50)
+
+            for doc in cursor:
+                doc = self._serialize_doc(doc)
+                raw_products.append(doc)
+            used_text_search = True
+        except Exception as e:
+            logger.warning(f"$text search failed, falling back to regex: {e}")
+            # Fallback: regex-based search if text index is unavailable
+            regex_pattern = "|".join(re.escape(kw) for kw in keywords)
+            query = {
+                "is_active": True,
+                "$or": [
+                    {"name": {"$regex": regex_pattern, "$options": "i"}},
+                    {"category": {"$regex": regex_pattern, "$options": "i"}},
+                    {"description": {"$regex": regex_pattern, "$options": "i"}},
+                ],
+            }
+            cursor = self.collection.find(query).limit(50)
+            for doc in cursor:
+                doc = self._serialize_doc(doc)
+                raw_products.append(doc)
             
         # Re-rank based on keyword match density and multi-term boosting
         def calculate_score(product):
-            score = 0
+            # When $text search was used, seed score from textScore (Issue 29).
+            # textScore * 10 gives a range (~5-20) comparable to keyword boosts.
+            score = product.get("_text_score", 0) * 10 if used_text_search else 0
             matched_keywords = 0
             name_lower = product.get("name", "").lower()
             cat_lower = product.get("category", "").lower()
@@ -159,6 +179,11 @@ class ProductService:
 
         # Sort by score descending
         sorted_products = sorted(raw_products, key=calculate_score, reverse=True)
+
+        # Clean up internal _text_score field before returning (Issue 29)
+        for p in sorted_products:
+            p.pop("_text_score", None)
+
         return sorted_products[:limit]
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
@@ -169,20 +194,24 @@ class ProductService:
         if category:
             query["category"] = {"$regex": category, "$options": "i"}
         
-        cursor = self.collection.find(query).limit(limit)
-        products = []
-        for doc in cursor:
-            doc = self._serialize_doc(doc)
-            products.append(doc)
-        
-        # If no products found in category, return top active products
-        if not products and category:
-            cursor = self.collection.find({"is_active": True}).limit(limit)
+        try:
+            cursor = self.collection.find(query).limit(limit)
+            products = []
             for doc in cursor:
                 doc = self._serialize_doc(doc)
                 products.append(doc)
-                
-        return products
+
+            # If no products found in category, return top active products
+            if not products and category:
+                cursor = self.collection.find({"is_active": True}).limit(limit)
+                for doc in cursor:
+                    doc = self._serialize_doc(doc)
+                    products.append(doc)
+
+            return products
+        except Exception as e:
+            logger.error(f"get_recommended_products DB error: {e}")
+            return []
 
 # Singleton instance
 _product_service: Optional[ProductService] = None

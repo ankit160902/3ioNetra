@@ -1,0 +1,1042 @@
+[
+  {
+    "id": 1,
+    "message": "hi",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 2,
+    "message": "hello",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 3,
+    "message": "namaste",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 4,
+    "message": "pranam guruji",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 5,
+    "message": "Jai Shri Ram",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 6,
+    "message": "hello, I need some help with my morning prayers",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 7,
+    "message": "namaste, mujhe guidance chahiye",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 8,
+    "message": "hey there! I've been feeling really lost lately",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "confusion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 9,
+    "message": "Om Shanti, I want to learn about meditation",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 10,
+    "message": "Hare Krishna! Can you guide me?",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 11,
+    "message": "I am going through a very difficult divorce and I don't know how to handle the pain. Can spirituality help me?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "grief",
+      "life_domain": "relationships",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 12,
+    "message": "What should my daily puja routine look like? I want to start a disciplined spiritual practice.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "hope",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 13,
+    "message": "I keep failing at my business ventures. Is there a mantra or spiritual remedy I can try?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "frustration",
+      "life_domain": "finance",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 14,
+    "message": "How do I perform Satyanarayan Puja at home? Please give me step-by-step instructions.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 15,
+    "message": "mujhe career mein bahut confusion ho raha hai, kya karu samajh nahi aa raha",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "confusion",
+      "life_domain": "career",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 16,
+    "message": "My mother is very sick and doctors say it's serious. Which prayers should I do for her recovery?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "fear",
+      "life_domain": "health",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 17,
+    "message": "I want to start reading the Bhagavad Gita but I don't know which chapter to start with. Can you suggest a plan?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "hope",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 18,
+    "message": "My husband and I fight every day. How can I bring peace into my marriage through spiritual practice?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "stress",
+      "life_domain": "relationships",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 19,
+    "message": "I feel anxious all the time and can't sleep. Is there a meditation technique or mantra for anxiety?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "anxiety",
+      "life_domain": "health",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 20,
+    "message": "How should I prepare for Navratri fasting? What are the do's and don'ts?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 21,
+    "message": "Which gemstone should I wear for career growth according to my rashi?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "hope",
+      "life_domain": "career",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 22,
+    "message": "Can you recommend a good mantra for financial stability? We are drowning in debt.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "stress",
+      "life_domain": "finance",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 23,
+    "message": "I want to do a havan for my son's exam success. How do I arrange it at home?",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "neutral",
+      "life_domain": "family",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 24,
+    "message": "How can I overcome my anger issues? I keep losing my temper and it's destroying my family.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "anger",
+      "life_domain": "family",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 25,
+    "message": "Suggest me a morning sadhana routine. I have about 30 minutes before work.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 26,
+    "message": "I lost my father last month and I can't stop crying. The grief is unbearable.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "grief",
+      "life_domain": "family",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 27,
+    "message": "mujhe bahut tension ho raha hai, neend nahi aati raat ko",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "anxiety",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 28,
+    "message": "I am so happy today! I got promoted at work and I feel truly blessed by God.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "joy",
+      "life_domain": "career",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 29,
+    "message": "I'm so angry at God. Why does He let innocent people suffer? Why did my child have to die?",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "anger",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 30,
+    "message": "I feel completely alone. Nobody in my family understands me. I have no friends left.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "loneliness",
+      "life_domain": "relationships",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 31,
+    "message": "Today during meditation I felt such deep peace. It was like Lord Krishna was sitting right next to me.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 32,
+    "message": "I'm scared about the future. Everything feels uncertain and I don't know what will happen to my family.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "fear",
+      "life_domain": "family",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 33,
+    "message": "bahut dukhi hoon aaj, sab kuch bikhar gaya hai zindagi mein",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "sadness",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  },
+  {
+    "id": 34,
+    "message": "I'm grateful for everything. After that puja you suggested, things have really improved in my life.",
+    "context_summary": "User previously asked for puja guidance for career issues.",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "gratitude",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 35,
+    "message": "I just feel so frustrated. I've been praying for months and nothing has changed in my situation.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "frustration",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 36,
+    "message": "What is karma? How does it actually work in Hinduism?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 37,
+    "message": "kya karma ka matlab hai? ye kaise kaam karta hai?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 38,
+    "message": "Can you explain the concept of dharma? What does it mean for a householder?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 39,
+    "message": "Who is Lord Hanuman and why do people worship him on Tuesdays?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 40,
+    "message": "What are the four Vedas? Give me a brief overview of each.",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 41,
+    "message": "Om Namah Shivaya ka arth batao",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 42,
+    "message": "What is the difference between Atman and Brahman in Vedantic philosophy?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 43,
+    "message": "How many avatars does Lord Vishnu have? Tell me about each Dashavatar.",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 44,
+    "message": "What is the significance of the Gayatri Mantra? When was it first composed?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 45,
+    "message": "Why is the number 108 considered sacred in Hinduism?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 46,
+    "message": "What is today's tithi and nakshatra?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_PANCHANG",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 47,
+    "message": "Aaj ka panchang batao",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_PANCHANG",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 48,
+    "message": "Is there a shubh muhurat for griha pravesh this week?",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_PANCHANG",
+      "emotion": "neutral",
+      "life_domain": "family",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 49,
+    "message": "When is the next Ekadashi? I want to observe the fast.",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_PANCHANG",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 50,
+    "message": "What is the Rahu Kaal time today? I don't want to start anything important during that period.",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_PANCHANG",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 51,
+    "message": "I want to buy a rudraksha mala. Can you help me find one?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 52,
+    "message": "Where can I get authentic puja samagri for Lakshmi Puja? I need dhoop, agarbatti, and kumkum.",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 53,
+    "message": "I need to buy a brass Ganesh murti for my home temple. Do you have recommendations?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 54,
+    "message": "mujhe havan ke liye samagri chahiye, kahan se milegi?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 55,
+    "message": "Can you suggest a good quality copper lota and panchpatra set for daily puja?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 56,
+    "message": "I want to purchase a Bhagavad Gita with Hindi translation. Which edition is best?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 57,
+    "message": "Need tulsi mala and chandan for my japa practice. Where can I buy them online?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 58,
+    "message": "I need items for Shradh ceremony. Can you give me a complete list and where to get them?",
+    "context_summary": "",
+    "expected": {
+      "intent": "PRODUCT_SEARCH",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 59,
+    "message": "Thank you so much for your guidance. You've been really helpful.",
+    "context_summary": "User received guidance on puja routine.",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "gratitude",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 60,
+    "message": "bye",
+    "context_summary": "",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 61,
+    "message": "ok, that's all I needed. Dhanyavaad.",
+    "context_summary": "User asked about Ekadashi timings.",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "gratitude",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 62,
+    "message": "nothing else, thanks",
+    "context_summary": "User was asking about meditation techniques.",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 63,
+    "message": "that's enough for today. I'll try what you suggested.",
+    "context_summary": "User received a morning sadhana plan.",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "hope",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 64,
+    "message": "shukriya, bahut accha laga aapki baatein sunke. Alvida!",
+    "context_summary": "",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "gratitude",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 65,
+    "message": "Jai Shri Krishna, I'll come back tomorrow. Good night.",
+    "context_summary": "",
+    "expected": {
+      "intent": "CLOSURE",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 66,
+    "message": "What's the weather like today?",
+    "context_summary": "",
+    "expected": {
+      "intent": "OTHER",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 67,
+    "message": "Can you write me a Python script to parse JSON files?",
+    "context_summary": "",
+    "expected": {
+      "intent": "OTHER",
+      "emotion": "neutral",
+      "life_domain": "career",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 68,
+    "message": "lol 😂",
+    "context_summary": "",
+    "expected": {
+      "intent": "OTHER",
+      "emotion": "joy",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 69,
+    "message": "hmm",
+    "context_summary": "",
+    "expected": {
+      "intent": "OTHER",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 70,
+    "message": "Tell me a joke about a pandit and a barber",
+    "context_summary": "",
+    "expected": {
+      "intent": "OTHER",
+      "emotion": "joy",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 71,
+    "message": "I don't want to live anymore. Life has no meaning and I'm thinking of ending it all.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "grief",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "crisis"
+    }
+  },
+  {
+    "id": 72,
+    "message": "I've been having thoughts of hurting myself. The pain is just too much to bear.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "sadness",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "crisis"
+    }
+  },
+  {
+    "id": 73,
+    "message": "I feel so depressed that I can barely get out of bed. I've lost all hope. Sometimes I wonder if everyone would be better off without me.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "sadness",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "crisis"
+    }
+  },
+  {
+    "id": 74,
+    "message": "mar jaana chahta hoon, koi faayda nahi hai jine ka",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "grief",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "crisis"
+    }
+  },
+  {
+    "id": 75,
+    "message": "I tried to harm myself last night. I'm scared of what I might do next.",
+    "context_summary": "",
+    "expected": {
+      "intent": "EXPRESSING_EMOTION",
+      "emotion": "fear",
+      "life_domain": "health",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "crisis"
+    }
+  },
+  {
+    "id": 76,
+    "message": "🙏",
+    "context_summary": "",
+    "expected": {
+      "intent": "GREETING",
+      "emotion": "devotion",
+      "life_domain": "spiritual",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "low"
+    }
+  },
+  {
+    "id": 77,
+    "message": "I need guidance on meditation AND also want to buy some incense sticks for it",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "neutral",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": true,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 78,
+    "message": "What is moksha and how do I achieve it? Also feeling quite anxious about my spiritual progress.",
+    "context_summary": "",
+    "expected": {
+      "intent": "ASKING_INFO",
+      "emotion": "anxiety",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 79,
+    "message": "kya aap mujhe Hanuman Chalisa ka paath sikha sakte hain? bahut darr lagta hai raat ko",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "fear",
+      "life_domain": "spiritual",
+      "needs_direct_answer": true,
+      "recommend_products": false,
+      "urgency": "normal"
+    }
+  },
+  {
+    "id": 80,
+    "message": "I just lost my job and my wife left me. I have nothing. I feel like I'm falling into a dark pit with no way out. Please help me.",
+    "context_summary": "",
+    "expected": {
+      "intent": "SEEKING_GUIDANCE",
+      "emotion": "grief",
+      "life_domain": "career",
+      "needs_direct_answer": false,
+      "recommend_products": false,
+      "urgency": "high"
+    }
+  }
+]

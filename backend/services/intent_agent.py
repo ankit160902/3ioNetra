@@ -1,7 +1,8 @@
 import logging
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from config import settings
+from models.session import IntentType
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,12 @@ class IntentAgent:
        - SEEKING_GUIDANCE: planning/advice requests like "give me a routine", "plan me a puja", "how should I"
        - PRODUCT_SEARCH: ONLY when user explicitly asks to buy/find/order something
 
-    2. "emotion": The dominant emotion (e.g., grief, anxiety, hope, joy, neutral)
+    2. "emotion": The dominant emotion. Detect IMPLICIT emotions — look beyond surface words:
+       "zero friends", "eat lunch alone", "nobody would notice" → loneliness
+       "cant walk properly", "stuck at home" → grief, frustration
+       "dont want to live", "nothing matters" → despair
+       "cant stop drinking", "always relapse" → shame
+       NEVER return "neutral" when the user describes a painful situation. Choose from: grief, anxiety, loneliness, frustration, anger, despair, hopelessness, shame, confusion, joy, gratitude, hope, curiosity, neutral.
 
     3. "life_domain": Primary area of concern. Choose from:
        [career, family, relationships, health, spiritual, finance]
@@ -77,7 +83,7 @@ class IntentAgent:
         if msg_lower in ("hi", "hey", "hello", "namaste", "pranam", "hii", "hiii"):
             logger.info(f"Fast-path intent: GREETING for '{message[:30]}'")
             return {
-                "intent": "GREETING", "emotion": "neutral", "life_domain": "unknown",
+                "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown",
                 "entities": {}, "urgency": "low", "summary": message,
                 "needs_direct_answer": False, "recommend_products": False,
                 "product_search_keywords": []
@@ -112,6 +118,7 @@ class IntentAgent:
                 raw_text = raw_text.replace("```json", "", 1).replace("```", "", 1).strip()
 
             data = json.loads(raw_text)
+            data["intent"] = IntentType(data.get("intent", "OTHER"))
             logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
             return data
 
@@ -123,15 +130,15 @@ class IntentAgent:
         """Keyword-based fallback if LLM is unavailable"""
         message_lower = message.lower()
         
-        intent = "OTHER"
+        intent = IntentType.OTHER
         if any(w in message_lower for w in ["hi", "hello", "hey", "namaste"]):
-            intent = "GREETING"
+            intent = IntentType.GREETING
         elif "?" in message or any(w in message_lower for w in ["how", "what", "guide", "help"]):
-            intent = "SEEKING_GUIDANCE"
+            intent = IntentType.SEEKING_GUIDANCE
         elif any(w in message_lower for w in ["panchang", "tithi", "nakshatra"]):
-            intent = "ASKING_PANCHANG"
+            intent = IntentType.ASKING_PANCHANG
         elif any(w in message_lower for w in ["bye", "thanks", "thank you", "ok", "no", "nothing"]):
-            intent = "CLOSURE"
+            intent = IntentType.CLOSURE
 
         return {
             "intent": intent,

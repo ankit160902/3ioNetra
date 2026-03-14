@@ -5,7 +5,6 @@ and the end-to-end context selection logic.
 Run from backend/:
     python3 scripts/test_context_validation.py
 """
-import asyncio
 import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))

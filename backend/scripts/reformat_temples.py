@@ -1,7 +1,6 @@
 
 import json
 import os
-import random
 
 # Source and Target Paths
 SOURCE_FILE = 'backend/data/raw/temples.json'
@@ -29,7 +28,8 @@ def extract_main_deity(description, name):
         if deity.lower() in text_to_search:
             return deity
             
-    if "devi" in text_to_search: return "Devi"
+    if "devi" in text_to_search:
+        return "Devi"
     
     return "Main Deity"
 

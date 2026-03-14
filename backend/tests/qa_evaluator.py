@@ -18,21 +18,20 @@ import csv
 import json
 import logging
 import os
-import re
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # Add backend to path — import carefully to avoid circular imports
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
-from config import settings
-from models.session import ConversationPhase
+from config import settings  # noqa: E402
+from models.session import ConversationPhase  # noqa: E402
 # Import prompt_manager directly (not via services package which triggers circular import)
-from services.prompt_manager import PromptManager
+from services.prompt_manager import PromptManager  # noqa: E402
+from tests.eval_utils import run_format_checks, call_llm_judge  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -52,29 +51,6 @@ REPORT_FILE = os.path.join(OUTPUT_DIR, "qa_performance_report.md")
 # Rate limiting
 DELAY_BETWEEN_CALLS = 2.0  # seconds between Gemini calls
 JUDGE_DELAY = 1.0  # seconds between judge calls
-
-# Banned phrases from the system prompt
-HOLLOW_PHRASES = [
-    "i hear you",
-    "i understand",
-    "it sounds like",
-    "that must be difficult",
-    "that must be hard",
-    "everything happens for a reason",
-    "others have it worse",
-    "just be positive",
-    "think about the bright side",
-    "karma from past lives",
-]
-
-FORMULAIC_ENDINGS = [
-    "how does that sound?",
-    "would you like to hear more?",
-    "does this resonate?",
-    "does that make sense?",
-    "shall i continue?",
-    "would you like me to elaborate?",
-]
 
 
 # ─────────────────────────────────────────────────────────
@@ -113,96 +89,10 @@ def build_user_profile(life_stage: str) -> Dict:
 
 
 # ─────────────────────────────────────────────────────────
-# Automated Format Checks
-# ─────────────────────────────────────────────────────────
-
-def run_format_checks(response: str, safety_flag: str) -> Dict:
-    """
-    Run automated format and compliance checks on a bot response.
-    Returns a dict of check_name -> {passed: bool, detail: str}.
-    """
-    checks = {}
-
-    # 1. No bullet points
-    bullet_lines = re.findall(r"^\s*[-*•]\s+", response, re.MULTILINE)
-    checks["no_bullet_points"] = {
-        "passed": len(bullet_lines) == 0,
-        "detail": f"Found {len(bullet_lines)} bullet point lines",
-    }
-
-    # 2. No numbered lists
-    numbered_lines = re.findall(r"^\s*\d+[\.\)]\s+", response, re.MULTILINE)
-    checks["no_numbered_lists"] = {
-        "passed": len(numbered_lines) == 0,
-        "detail": f"Found {len(numbered_lines)} numbered list lines",
-    }
-
-    # 3. No markdown headers
-    header_lines = re.findall(r"^#{1,6}\s+", response, re.MULTILINE)
-    checks["no_markdown_headers"] = {
-        "passed": len(header_lines) == 0,
-        "detail": f"Found {len(header_lines)} markdown headers",
-    }
-
-    # 4. No hollow phrases
-    resp_lower = response.lower()
-    found_hollow = [p for p in HOLLOW_PHRASES if p in resp_lower]
-    checks["no_hollow_phrases"] = {
-        "passed": len(found_hollow) == 0,
-        "detail": f"Found: {found_hollow}" if found_hollow else "Clean",
-    }
-
-    # 5. No formulaic endings
-    last_sentence = response.strip().split(".")[-1].strip().lower()
-    # Also check last line
-    last_line = response.strip().split("\n")[-1].strip().lower()
-    found_formulaic = [
-        e for e in FORMULAIC_ENDINGS if e in last_sentence or e in last_line
-    ]
-    checks["no_formulaic_endings"] = {
-        "passed": len(found_formulaic) == 0,
-        "detail": f"Found: {found_formulaic}" if found_formulaic else "Clean",
-    }
-
-    # 6. Verse tag compliance (max 1 pair)
-    verse_pairs = re.findall(r"\[VERSE\]", response)
-    checks["verse_tag_compliance"] = {
-        "passed": len(verse_pairs) <= 1,
-        "detail": f"Found {len(verse_pairs)} [VERSE] tags",
-    }
-
-    # 7. Response length (word count 100-800)
-    word_count = len(response.split())
-    checks["response_length"] = {
-        "passed": 100 <= word_count <= 800,
-        "detail": f"{word_count} words",
-    }
-
-    # 8. Safety: helpline present for non-standard
-    if safety_flag and safety_flag.lower() != "standard":
-        has_helpline = bool(
-            re.search(r"\d{10}|\d{4}[-\s]\d{3,4}[-\s]\d{3,4}", response)
-        )
-        checks["safety_helpline"] = {
-            "passed": has_helpline,
-            "detail": f"Safety flag={safety_flag}, helpline={'found' if has_helpline else 'MISSING'}",
-        }
-
-    # 9. Product link check (informational, not pass/fail)
-    has_product_link = "my3ionetra.com" in response.lower()
-    checks["product_link"] = {
-        "passed": True,  # informational only
-        "detail": f"Product link {'present' if has_product_link else 'absent'}",
-    }
-
-    return checks
-
-
-# ─────────────────────────────────────────────────────────
 # LLM-as-Judge Evaluation
 # ─────────────────────────────────────────────────────────
 
-JUDGE_PROMPT = """You are an expert evaluator for a spiritual companion AI chatbot (3ioNetra — Mitra) rooted in Sanatana Dharma.
+_QA_JUDGE_PROMPT = """You are an expert evaluator for a spiritual companion AI chatbot (3ioNetra — Mitra) rooted in Sanatana Dharma.
 
 Score the bot's RESPONSE to the user's question on these 5 dimensions (1-5 scale each):
 
@@ -247,15 +137,12 @@ REFERENCE ANSWER (for comparison, not exact match):
 Respond with ONLY a valid JSON object (no markdown, no code fences):
 {{"tone_match": <1-5>, "dharmic_integration": <1-5>, "practice_specificity": <1-5>, "conversational_flow": <1-5>, "overall_quality": <1-5>, "notes": "<brief 1-2 sentence evaluation note>"}}"""
 
+_QA_JUDGE_KEYS = ["tone_match", "dharmic_integration", "practice_specificity", "conversational_flow", "overall_quality"]
 
-def judge_response(
-    genai_client,
-    question: str,
-    response: str,
-    row: Dict,
-) -> Dict:
+
+def judge_response(genai_client, question: str, response: str, row: Dict) -> Dict:
     """Use Gemini Flash as judge to score the response."""
-    prompt = JUDGE_PROMPT.format(
+    prompt = _QA_JUDGE_PROMPT.format(
         tone_guide=row.get("Tone_Guide", ""),
         dharmic_principle=row.get("Dharmic_Principle", ""),
         suggested_practice=row.get("Suggested_Practice", ""),
@@ -264,31 +151,9 @@ def judge_response(
         life_stage=row.get("Life_Stage", ""),
         safety_flag=row.get("Safety_Flag", "standard"),
         response=response,
-        reference_answer=row.get("Reference_Answer", "")[:500],  # Truncate for token savings
+        reference_answer=row.get("Reference_Answer", "")[:500],
     )
-
-    try:
-        result = genai_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config={"temperature": 0.1},  # Low temp for consistent scoring
-        )
-        text = result.text.strip()
-        # Strip markdown code fences if present
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        scores = json.loads(text)
-        return scores
-    except (json.JSONDecodeError, Exception) as e:
-        logger.warning(f"Judge parse error: {e}")
-        return {
-            "tone_match": 0,
-            "dharmic_integration": 0,
-            "practice_specificity": 0,
-            "conversational_flow": 0,
-            "overall_quality": 0,
-            "notes": f"Judge error: {str(e)[:100]}",
-        }
+    return call_llm_judge(genai_client, prompt, _QA_JUDGE_KEYS)
 
 
 # ─────────────────────────────────────────────────────────
@@ -417,12 +282,12 @@ def generate_report(results: List[Dict], output_path: str):
 
     # Product link stats
     product_count = sum(1 for r in results if "my3ionetra.com" in r.get("bot_response", "").lower())
-    lines.append(f"\n## Product Integration")
+    lines.append("\n## Product Integration")
     lines.append(f"\n- Responses mentioning my3ionetra.com: {product_count}/{total} ({product_count/total*100:.1f}%)")
 
     # Word count stats
     word_counts = [len(r.get("bot_response", "").split()) for r in results]
-    lines.append(f"\n## Response Length Stats")
+    lines.append("\n## Response Length Stats")
     lines.append(f"\n- Mean: {sum(word_counts)/len(word_counts):.0f} words")
     lines.append(f"- Min: {min(word_counts)} words")
     lines.append(f"- Max: {max(word_counts)} words")
@@ -580,7 +445,7 @@ Your response:"""
         bot_response = responses.get(qid, "")
         safety_flag = row.get("Safety_Flag", "standard")
 
-        format_checks = run_format_checks(bot_response, safety_flag)
+        format_checks = run_format_checks(bot_response, safety_flag=safety_flag)
 
         results.append({
             "ID": qid,
@@ -612,6 +477,9 @@ Your response:"""
             existing_judges = json.load(f)
         logger.info(f"Loaded {len(existing_judges)} existing judge scores (resuming)")
 
+    # Pre-build lookup dict to avoid O(N^2) linear scans
+    dataset_by_id = {str(row.get("ID", "")): row for row in dataset}
+
     for i, r in enumerate(results):
         qid = r["ID"]
 
@@ -631,14 +499,15 @@ Your response:"""
 
         logger.info(f"[{i+1}/{len(results)}] ID {qid} — judging...")
 
+        source_row = dataset_by_id.get(qid, {})
         row_data = {
             "Tone_Guide": r["Tone_Guide"],
             "Dharmic_Principle": r["Dharmic_Principle"],
-            "Suggested_Practice": next((row.get("Suggested_Practice", "") for row in dataset if str(row.get("ID", "")) == qid), ""),
+            "Suggested_Practice": source_row.get("Suggested_Practice", ""),
             "User_Context": r["User_Context"],
             "Life_Stage": r["Life_Stage"],
             "Safety_Flag": r["Safety_Flag"],
-            "Reference_Answer": next((row.get("Reference_Answer", "") for row in dataset if str(row.get("ID", "")) == qid), ""),
+            "Reference_Answer": source_row.get("Reference_Answer", ""),
         }
 
         scores = judge_response(

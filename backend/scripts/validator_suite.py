@@ -5,7 +5,7 @@ import json
 import time
 from datetime import datetime
 import httpx
-from typing import List, Dict, Any
+from typing import Dict
 
 # Add backend to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -177,7 +177,7 @@ async def run_suite(limit_per_cat: int = 2):
         
     print(f"\n{'='*50}")
     print(f"VALIDATION COMPLETE: {passed}/{total} Passed")
-    print(f"Report saved to: docs/validation_report.json")
+    print("Report saved to: docs/validation_report.json")
     print(f"{'='*50}\n")
 
 if __name__ == "__main__":

@@ -28,16 +28,16 @@ import sys
 import time
 from collections import defaultdict
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 # Add backend to path
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BACKEND_DIR)
 
-from config import settings
-from models.session import ConversationPhase
-from services.prompt_manager import PromptManager
+from config import settings  # noqa: E402
+from models.session import ConversationPhase  # noqa: E402
+from services.prompt_manager import PromptManager  # noqa: E402
+from tests.eval_utils import run_format_checks, call_llm_judge  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -60,20 +60,6 @@ SAMPLE_FILE = os.path.join(OUTPUT_DIR, "csv_sample_ids.json")
 DELAY_BETWEEN_CALLS = 2.0
 JUDGE_DELAY = 1.0
 
-HOLLOW_PHRASES = [
-    "i hear you", "i understand", "it sounds like",
-    "that must be difficult", "that must be hard",
-    "everything happens for a reason", "others have it worse",
-    "just be positive", "think about the bright side",
-    "karma from past lives",
-]
-
-FORMULAIC_ENDINGS = [
-    "how does that sound?", "would you like to hear more?",
-    "does this resonate?", "does that make sense?",
-    "shall i continue?", "would you like me to elaborate?",
-]
-
 
 # ─────────────────────────────────────────────────────────
 # CSV Loading & Stratified Sampling
@@ -82,7 +68,7 @@ FORMULAIC_ENDINGS = [
 def load_csv(csv_path: str) -> List[Dict]:
     """Load the full 50K CSV dataset."""
     rows = []
-    with open(csv_path, "r", encoding="utf-8") as f:
+    with open(csv_path, "r", encoding="cp1252") as f:
         reader = csv.DictReader(f)
         for i, row in enumerate(reader):
             row["_row_id"] = str(i + 1)
@@ -108,7 +94,6 @@ def stratified_sample(rows: List[Dict], n: int, seed: int = 42) -> List[Dict]:
 
     # Proportional allocation
     allocations = {}
-    remaining = n
     cats_sorted = sorted(by_category.keys())
     for cat in cats_sorted:
         count = len(by_category[cat])
@@ -172,78 +157,6 @@ def build_user_profile(row: Dict) -> Dict:
         "profession": LIFE_STAGE_PROFESSION.get(row.get("life_stage", ""), ""),
         "life_stage": row.get("life_stage", ""),
     }
-
-
-# ─────────────────────────────────────────────────────────
-# Automated Format Checks
-# ─────────────────────────────────────────────────────────
-
-def run_format_checks(response: str) -> Dict:
-    """Run automated format and compliance checks."""
-    checks = {}
-
-    # 1. No bullet points
-    bullet_lines = re.findall(r"^\s*[-*•]\s+", response, re.MULTILINE)
-    checks["no_bullet_points"] = {
-        "passed": len(bullet_lines) == 0,
-        "detail": f"Found {len(bullet_lines)} bullet point lines",
-    }
-
-    # 2. No numbered lists
-    numbered_lines = re.findall(r"^\s*\d+[\.\)]\s+", response, re.MULTILINE)
-    checks["no_numbered_lists"] = {
-        "passed": len(numbered_lines) == 0,
-        "detail": f"Found {len(numbered_lines)} numbered list lines",
-    }
-
-    # 3. No markdown headers
-    header_lines = re.findall(r"^#{1,6}\s+", response, re.MULTILINE)
-    checks["no_markdown_headers"] = {
-        "passed": len(header_lines) == 0,
-        "detail": f"Found {len(header_lines)} markdown headers",
-    }
-
-    # 4. No hollow phrases
-    resp_lower = response.lower()
-    found_hollow = [p for p in HOLLOW_PHRASES if p in resp_lower]
-    checks["no_hollow_phrases"] = {
-        "passed": len(found_hollow) == 0,
-        "detail": f"Found: {found_hollow}" if found_hollow else "Clean",
-    }
-
-    # 5. No formulaic endings
-    last_sentence = response.strip().split(".")[-1].strip().lower()
-    last_line = response.strip().split("\n")[-1].strip().lower()
-    found_formulaic = [
-        e for e in FORMULAIC_ENDINGS if e in last_sentence or e in last_line
-    ]
-    checks["no_formulaic_endings"] = {
-        "passed": len(found_formulaic) == 0,
-        "detail": f"Found: {found_formulaic}" if found_formulaic else "Clean",
-    }
-
-    # 6. Verse tag compliance (max 1 pair)
-    verse_pairs = re.findall(r"\[VERSE\]", response)
-    checks["verse_tag_compliance"] = {
-        "passed": len(verse_pairs) <= 1,
-        "detail": f"Found {len(verse_pairs)} [VERSE] tags",
-    }
-
-    # 7. Response length (100-800 words)
-    word_count = len(response.split())
-    checks["response_length"] = {
-        "passed": 100 <= word_count <= 800,
-        "detail": f"{word_count} words",
-    }
-
-    # 8. No product link mentions
-    has_product_link = "my3ionetra.com" in response.lower()
-    checks["no_product_link"] = {
-        "passed": not has_product_link,
-        "detail": f"Product link {'present' if has_product_link else 'absent'}",
-    }
-
-    return checks
 
 
 # ─────────────────────────────────────────────────────────
@@ -388,7 +301,7 @@ def run_content_checks(response: str, row: Dict) -> Dict:
 # LLM-as-Judge Evaluation
 # ─────────────────────────────────────────────────────────
 
-JUDGE_PROMPT = """You are an expert evaluator for a spiritual companion AI chatbot (3ioNetra — Mitra) rooted in Sanatana Dharma.
+_CSV_JUDGE_PROMPT = """You are an expert evaluator for a spiritual companion AI chatbot (3ioNetra — Mitra) rooted in Sanatana Dharma.
 
 Score the bot's RESPONSE to the user's question on these 5 dimensions (1-5 scale each):
 
@@ -434,10 +347,12 @@ BOT'S RESPONSE:
 Respond with ONLY a valid JSON object (no markdown, no code fences):
 {{"demographic_appropriateness": <1-5>, "emotional_attunement": <1-5>, "dharmic_integration": <1-5>, "practice_specificity": <1-5>, "overall_quality": <1-5>, "notes": "<brief 1-2 sentence evaluation note>"}}"""
 
+_CSV_JUDGE_KEYS = ["demographic_appropriateness", "emotional_attunement", "dharmic_integration", "practice_specificity", "overall_quality"]
+
 
 def judge_response(genai_client, question: str, response: str, row: Dict) -> Dict:
     """Use Gemini Flash as judge to score the response."""
-    prompt = JUDGE_PROMPT.format(
+    prompt = _CSV_JUDGE_PROMPT.format(
         user_age=row.get("user_age", ""),
         user_gender=row.get("user_gender", ""),
         life_stage=row.get("life_stage", ""),
@@ -449,28 +364,7 @@ def judge_response(genai_client, question: str, response: str, row: Dict) -> Dic
         question=question,
         response=response,
     )
-
-    try:
-        result = genai_client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-            config={"temperature": 0.1},
-        )
-        text = result.text.strip()
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        scores = json.loads(text)
-        return scores
-    except (json.JSONDecodeError, Exception) as e:
-        logger.warning(f"Judge parse error: {e}")
-        return {
-            "demographic_appropriateness": 0,
-            "emotional_attunement": 0,
-            "dharmic_integration": 0,
-            "practice_specificity": 0,
-            "overall_quality": 0,
-            "notes": f"Judge error: {str(e)[:100]}",
-        }
+    return call_llm_judge(genai_client, prompt, _CSV_JUDGE_KEYS)
 
 
 # ─────────────────────────────────────────────────────────
@@ -637,7 +531,7 @@ def generate_report(results: List[Dict], output_path: str) -> str:
 
     # Response Length Stats
     word_counts = [len(r.get("bot_response", "").split()) for r in results]
-    lines.append(f"\n## Response Length Stats")
+    lines.append("\n## Response Length Stats")
     lines.append(f"\n- Mean: {sum(word_counts)/len(word_counts):.0f} words")
     lines.append(f"- Min: {min(word_counts)} words")
     lines.append(f"- Max: {max(word_counts)} words")
@@ -809,7 +703,7 @@ Your response:"""
         rid = row["_row_id"]
         bot_response = responses.get(rid, "")
 
-        format_checks = run_format_checks(bot_response)
+        format_checks = run_format_checks(bot_response, check_product_link_fail=True)
         content_checks = run_content_checks(bot_response, row)
 
         results.append({

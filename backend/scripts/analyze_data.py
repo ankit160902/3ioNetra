@@ -1,13 +1,11 @@
 
 import json
 import csv
-import os
 from pathlib import Path
 from collections import defaultdict
 
 def get_data():
     raw_dir = Path("/Users/ankit1609/Desktop/3ioNetra/3ionetra/backend/data/raw")
-    all_refs = []
     scripture_counts = defaultdict(int)
     duplicates = []
     
@@ -82,10 +80,12 @@ def get_data():
                         items = data
                     elif isinstance(data, dict):
                         for k, v in data.items():
-                            if isinstance(v, list): items.extend(v)
+                            if isinstance(v, list):
+                                items.extend(v)
                     
                     for item in items:
-                        if not isinstance(item, dict): continue
+                        if not isinstance(item, dict):
+                            continue
                         # Use same logic as ingester
                         chapter = item.get('chapter') or item.get('adhyaya') or item.get('book') or item.get('mandala') or item.get('kaanda')
                         verse_num = item.get('verse') or item.get('shloka') or item.get('shloka_number') or item.get('verse_number')
@@ -96,7 +96,7 @@ def get_data():
                             else:
                                 seen_refs[ref] = [file_path.name]
                             scripture_counts[scripture] += 1
-            except Exception as e:
+            except Exception:
                 pass
         
         elif file_path.suffix == '.csv':
@@ -114,7 +114,7 @@ def get_data():
                             else:
                                 seen_refs[ref] = [file_path.name]
                             scripture_counts[scripture] += 1
-            except Exception as e:
+            except Exception:
                 pass
 
     # Identify duplicates

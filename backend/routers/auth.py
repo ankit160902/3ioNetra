@@ -1,6 +1,7 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, Header, Depends, status
 from typing import Optional, Dict
-from config import settings
 from models.api_schemas import UserRegisterRequest, UserLoginRequest, AuthResponse, UserResponse
 from services.auth_service import get_auth_service
 
@@ -10,19 +11,19 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 # Helper function to verify auth token
 # ----------------------------------------------------------------------------
 
-def get_current_user(authorization: Optional[str] = Header(None)):
+async def get_current_user(authorization: Optional[str] = Header(None)):
     """Extract and verify user from Authorization header"""
     if not authorization:
         return None
-        
+
     try:
         # Expected format: "Bearer <token>"
         if " " not in authorization:
             return None
-            
+
         token = authorization.split(" ")[1]
         auth_service = get_auth_service()
-        user = auth_service.verify_token(token)
+        user = await asyncio.to_thread(auth_service.verify_token, token)
         return user
     except Exception:
         return None

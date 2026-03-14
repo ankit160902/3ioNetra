@@ -1,15 +1,11 @@
 import asyncio
 import os
 import sys
-import json
-from typing import List, Dict, Any
 
 # Add backend directory to sys.path for imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from services.intent_agent import get_intent_agent
-from services.companion_engine import get_companion_engine
-from models.session import ConversationPhase
 
 scenarios = [
     # 💼 Career, Purpose & Finance
@@ -79,11 +75,15 @@ async def run_logic_probe():
                 # Career burnout can be career or spiritual
                 # Fear of death can be health or spiritual
                 allowed_domains = [s['expected_domain'].lower()]
-                if s['expected_domain'].lower() == "career": allowed_domains.append("finance")
-                if s['name'] == "The Burnout": allowed_domains.append("spiritual")
-                if s['name'] == "Fear of Death": allowed_domains.append("health")
+                if s['expected_domain'].lower() == "career":
+                    allowed_domains.append("finance")
+                if s['name'] == "The Burnout":
+                    allowed_domains.append("spiritual")
+                if s['name'] == "Fear of Death":
+                    allowed_domains.append("health")
                 # Grief is both family and spiritual
-                if "Grief" in s['name']: allowed_domains.append("spiritual")
+                if "Grief" in s['name']:
+                    allowed_domains.append("spiritual")
                 
                 domain_ok = rec_domain in allowed_domains
                 
@@ -92,13 +92,16 @@ async def run_logic_probe():
                 rec_ok = analysis.get('recommend_products') == s['should_recommend']
             
             status = "✅ PASS" if (domain_ok and rec_ok) else "❌ FAIL"
-            if status == "✅ PASS": passed += 1
+            if status == "✅ PASS":
+                passed += 1
             
             print(f"{s['id']:<4} | {s['name']:<25} | {rec_domain:<12} | {analysis.get('intent', '???'):<18} | {str(analysis.get('recommend_products')):<6} | {status}")
             
             if status == "❌ FAIL":
-                if not domain_ok: print(f"    -> Domain mismatch: got {rec_domain}, expected {s.get('expected_domain')}")
-                if not rec_ok: print(f"    -> Recommend mismatch: got {analysis.get('recommend_products')}, expected {s.get('should_recommend')}")
+                if not domain_ok:
+                    print(f"    -> Domain mismatch: got {rec_domain}, expected {s.get('expected_domain')}")
+                if not rec_ok:
+                    print(f"    -> Recommend mismatch: got {analysis.get('recommend_products')}, expected {s.get('should_recommend')}")
                 
         except Exception as e:
             print(f"{s['id']:<4} | {s['name']:<25} | ERROR: {str(e)}")

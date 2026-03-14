@@ -1,10 +1,8 @@
 import logging
-import math
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 try:
-    from skyfield.api import load
     from jyotishganit.core.astronomical import get_timescale, get_ephemeris, calculate_ayanamsa
     from jyotishganit.components.panchanga import (
         calculate_tithi, calculate_nakshatra, calculate_yoga, 
@@ -27,6 +25,9 @@ class PanchangService:
         self.available = JYOTISH_AVAILABLE
         self._ts = None
         self._eph = None
+        self._cached_result = None
+        self._cached_at = None
+        self._cache_ttl = timedelta(minutes=30)
 
     def _ensure_data(self):
         """Ensure astronomical data is loaded."""
@@ -48,6 +49,11 @@ class PanchangService:
         Calculate Panchang for a given datetime and location.
         Defaults to New Delhi (28.6139, 77.2090) and IST (+5.5).
         """
+        using_defaults = (latitude == 28.6139 and longitude == 77.2090 and timezone_offset == 5.5)
+        now = datetime.now()
+        if using_defaults and self._cached_result and self._cached_at and now - self._cached_at < self._cache_ttl:
+            return self._cached_result
+
         if not self._ensure_data():
             return {"error": "Panchang service unavailable"}
 
@@ -55,7 +61,7 @@ class PanchangService:
             # Convert to UTC Skyfield time for ayanamsa
             utc_dt = dt - timedelta(hours=timezone_offset)
             t = self._ts.utc(utc_dt.year, utc_dt.month, utc_dt.day, utc_dt.hour, utc_dt.minute, utc_dt.second)
-            
+
             # Calculate Ayanamsa (True Chitra Paksha / Lahiri)
             ayanamsa = calculate_ayanamsa(t)
 
@@ -66,7 +72,7 @@ class PanchangService:
             karana = calculate_karana(dt, timezone_offset)
             vaara = calculate_vaara(dt)
 
-            return {
+            result = {
                 "date": dt.strftime("%Y-%m-%d"),
                 "time": dt.strftime("%H:%M:%S"),
                 "tithi": tithi,
@@ -77,6 +83,10 @@ class PanchangService:
                 "ayanamsa": round(ayanamsa, 4),
                 "location": {"lat": latitude, "lon": longitude}
             }
+            if using_defaults:
+                self._cached_result = result
+                self._cached_at = now
+            return result
         except Exception as e:
             logger.exception(f"Error calculating panchang: {e}")
             return {"error": str(e)}

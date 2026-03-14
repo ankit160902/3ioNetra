@@ -4,7 +4,7 @@ Configuration management for 3ioNetra Spiritual Companion
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional, List
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -80,11 +80,17 @@ class Settings(BaseSettings):
     PROCESSED_DIR: str = "./data/processed"
 
     # ------------------------------------------------------------------
-    # MongoDB Settings (FIXED)
+    # MongoDB Settings
     # ------------------------------------------------------------------
     MONGODB_URI: str = Field(default="", env="MONGODB_URI")
     DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
     DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
+    MONGO_MAX_POOL_SIZE: int = Field(default=50, env="MONGO_MAX_POOL_SIZE")
+    MONGO_MIN_POOL_SIZE: int = Field(default=5, env="MONGO_MIN_POOL_SIZE")
+    MONGO_MAX_IDLE_TIME_MS: int = Field(default=30000, env="MONGO_MAX_IDLE_TIME_MS")
+    MONGO_READ_PREFERENCE: str = Field(default="primaryPreferred", env="MONGO_READ_PREFERENCE")
+    ENABLE_AUTO_MIGRATIONS: bool = Field(default=True, env="ENABLE_AUTO_MIGRATIONS")
+    MAX_CONVERSATIONS_PER_USER: int = Field(default=100, env="MAX_CONVERSATIONS_PER_USER")
 
     # ------------------------------------------------------------------
     # Redis Settings
@@ -154,7 +160,40 @@ Start this journey today. Visit https://my3ionetra.com/.
     # ------------------------------------------------------------------
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
     OPENAI_API_KEY: str = Field(default="", env="OPENAI_API_KEY")
+    ANTHROPIC_API_KEY: str = Field(default="", env="ANTHROPIC_API_KEY")
+    COHERE_API_KEY: str = Field(default="", env="COHERE_API_KEY")
     HUGGINGFACE_TOKEN: str = Field(default="", env="HUGGINGFACE_TOKEN")
+
+    # ------------------------------------------------------------------
+    # Evaluation Model Settings
+    # ------------------------------------------------------------------
+    EVAL_GEMINI_MODEL: str = "gemini-2.5-pro"
+    EVAL_CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+    EVAL_OPENAI_MODEL: str = "gpt-4o"
+    EVAL_GEMINI_FAST_MODEL: str = "gemini-2.0-flash"
+    EVAL_CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
+    EVAL_OPENAI_MINI_MODEL: str = "gpt-4o-mini"
+
+    # ------------------------------------------------------------------
+    # Reranker Settings
+    # ------------------------------------------------------------------
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_TYPE: str = "cross-encoder"  # "cross-encoder" or "api"
+
+    # ------------------------------------------------------------------
+    # Model Routing Settings
+    # ------------------------------------------------------------------
+    MODEL_ROUTING_ENABLED: bool = Field(default=False, env="MODEL_ROUTING_ENABLED")
+    MODEL_ECONOMY: str = "gemini-2.0-flash"
+    MODEL_STANDARD: str = "gemini-2.5-pro"
+    MODEL_PREMIUM: str = "gemini-2.5-pro"
+    MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")
+
+    # ------------------------------------------------------------------
+    # Circuit Breaker Settings
+    # ------------------------------------------------------------------
+    CIRCUIT_BREAKER_THRESHOLD: int = 5
+    CIRCUIT_BREAKER_TIMEOUT: int = 60
 
     # ------------------------------------------------------------------
     # Logging

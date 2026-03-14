@@ -32,6 +32,7 @@ pydub
 
 # Data Processing
 numpy
+rank-bm25
 
 # Utilities
 python-multipart
@@ -42,3 +43,8 @@ python-dotenv
 loguru
 email-validator
 redis
+
+# Multi-model evaluation (optional)
+anthropic>=0.39.0
+openai>=1.50.0
+cohere>=5.0,<6.0

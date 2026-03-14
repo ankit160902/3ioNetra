@@ -47,7 +47,7 @@ async def test_wellness_flow():
             print(f"🤖 Bot (Listening): {companion_reply}")
             session.add_message("assistant", companion_reply)
         else:
-            print(f"🤖 Bot (Ready!): Generating Guidance...")
+            print("🤖 Bot (Ready!): Generating Guidance...")
             
             # 2. Guidance Generation (Simulating main.py logic)
             session.phase = ConversationPhase.GUIDANCE

@@ -3,12 +3,15 @@ LLM Service - Spiritual Companion with Context-Aware Responses
 Provides empathetic, phase-aware interactions using Gemini AI
 """
 
+import asyncio
 import logging
+import random
+import re
 from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, field
-from enum import Enum
+from dataclasses import dataclass
 from config import settings
 from services.resilience import CircuitBreaker
+from models.session import ConversationPhase
 
 
 logger = logging.getLogger(__name__)
@@ -17,8 +20,6 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------
 # Enums & Data Models
 # --------------------------------------------------
-
-from models.session import ConversationPhase
 
 
 @dataclass
@@ -46,8 +47,6 @@ class UserContext:
 # --------------------------------------------------
 # Utilities
 # --------------------------------------------------
-
-import re
 
 def clean_response(text: str) -> str:
     """Remove trailing questions and clean formatting, especially from [VERSE] tags"""
@@ -227,6 +226,7 @@ class LLMService:
         self.api_key = api_key or settings.GEMINI_API_KEY
         self.available = False
         self.client = None
+        self.last_usage = {"input_tokens": 0, "output_tokens": 0}
         from services.prompt_manager import get_prompt_manager
         self.prompt_manager = get_prompt_manager()
 
@@ -240,8 +240,8 @@ class LLMService:
         # Initialize Circuit Breaker for Gemini API
         self.circuit_breaker = CircuitBreaker(
             name="GeminiAPI",
-            failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD if hasattr(settings, 'CIRCUIT_BREAKER_THRESHOLD') else 5,
-            recovery_timeout=settings.CIRCUIT_BREAKER_TIMEOUT if hasattr(settings, 'CIRCUIT_BREAKER_TIMEOUT') else 60
+            failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD,
+            recovery_timeout=settings.CIRCUIT_BREAKER_TIMEOUT
         )
 
         if not GEMINI_AVAILABLE:
@@ -259,7 +259,7 @@ class LLMService:
             self.available = True
             logger.info("✅ LLM Service initialized with Gemini")
 
-        except Exception as e:
+        except Exception:
             self.available = False
             logger.exception("❌ Failed to initialize Gemini")
 
@@ -321,6 +321,7 @@ class LLMService:
         logger.info(f"Analyzing video via Gemini: {video_path}")
         
         try:
+            from google.genai import types
             # 1. Upload the file to Gemini Files API
             # Note: SDK v2 handles file uploads differently
             file_ref = self.client.files.upload(path=video_path)
@@ -468,6 +469,27 @@ class LLMService:
         return ConversationPhase.LISTENING
 
     # --------------------------------------------------
+    # Generation Config
+    # --------------------------------------------------
+
+    def _build_gen_config(self, config_override: Optional[Dict] = None) -> Dict:
+        """Build the Gemini generation config dict."""
+        gen_config = config_override.copy() if config_override else {
+            "temperature": 0.7,
+            "thinking_config": {"thinking_budget": 256},
+            "max_output_tokens": 1024,
+            "automatic_function_calling": {"disable": True},
+            "safety_settings": [
+                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
+                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
+            ],
+        }
+        gen_config["system_instruction"] = self.system_instruction
+        return gen_config
+
+    # --------------------------------------------------
     # Prompt Building
     # --------------------------------------------------
 
@@ -555,6 +577,14 @@ class LLMService:
                 for i, mem in enumerate(user_profile.get('past_memories'), 1):
                     profile_parts.append(f"   {i}. \"{mem}\"")
                 has_data = True
+
+            # Previous suggestions context (so LLM can deepen on acceptance)
+            if user_profile.get('last_suggestions'):
+                suggestions = user_profile['last_suggestions']
+                profile_parts.append("\n   YOUR RECENT SUGGESTIONS TO THIS USER:")
+                for s in suggestions[-2:]:
+                    profile_parts.append(f"   • Turn {s['turn']}: You suggested {s['practice']}")
+                has_data = True
             
             if has_data:
                 profile_text = "\n" + "="*70 + "\n"
@@ -604,11 +634,16 @@ class LLMService:
             
             # Extract specific facts from story
             facts = []
-            if story.rashi: facts.append(f"• Rashi: {story.rashi}")
-            if story.gotra: facts.append(f"• Gotra: {story.gotra}")
-            if story.nakshatra: facts.append(f"• Nakshatra: {story.nakshatra}")
-            if story.temple_visits: facts.append(f"• Temple Visits: {', '.join(story.temple_visits)}")
-            if story.purchase_history: facts.append(f"• Purchase History: {', '.join(story.purchase_history)}")
+            if story.rashi:
+                facts.append(f"• Rashi: {story.rashi}")
+            if story.gotra:
+                facts.append(f"• Gotra: {story.gotra}")
+            if story.nakshatra:
+                facts.append(f"• Nakshatra: {story.nakshatra}")
+            if story.temple_visits:
+                facts.append(f"• Temple Visits: {', '.join(story.temple_visits)}")
+            if story.purchase_history:
+                facts.append(f"• Purchase History: {', '.join(story.purchase_history)}")
             
             # Also extract specific user quotes as "Facts"
             if hasattr(memory_context, 'user_quotes'):
@@ -737,15 +772,16 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 {'═'*70}
 ⚠️ RETURNING USER DETECTION:
 {'═'*70}
-{f"🔄 This user has conversed with you before. The CONVERSATION FLOW above shows their past journey with you. Acknowledge this continuity naturally if relevant (e.g., 'Welcome back! How have you been since we last spoke?'). Reference their past concerns when appropriate." if is_returning_user else "✨ This is a new user. Make them feel welcome and safe."}
+{"🔄 This user has conversed with you before. The CONVERSATION FLOW above shows their past journey with you. Acknowledge this continuity naturally if relevant (e.g., 'Welcome back! How have you been since we last spoke?'). Reference their past concerns when appropriate." if is_returning_user else "✨ This is a new user. Make them feel welcome and safe."}
 
-BEFORE YOU RESPOND — CHECK THESE:
-- Read the CONVERSATION FLOW above. Don't repeat something you already said.
-- Don't open with "I hear you", "It sounds like", "I understand" — say something specific to what they just shared.
-- No numbered lists or bullet points in your response. Flowing sentences only.
-- Don't end with questions like "How does that sound?" or "Would you like to hear more?" or "Does this resonate?" — just end.
-- One verse maximum per response, only if it truly fits. Don't force it.
-- You are a companion having a real conversation — not a therapist running an assessment.
+BEFORE YOU RESPOND — CHECK THESE (violations = failure):
+1. SCAN your first 5 words. If they contain "I hear you", "I understand", or "It sounds like" — DELETE and rewrite. Start with something specific: "That is a lot to carry", "Twelve years is a lifetime of love", "Of course you are angry."
+2. SCAN for echoed dismissive words. If the user complained about "adjust", "get over it", "move on", or "just a [thing]" — make sure NONE of those words or substrings appear in your response. "just a" must not appear even inside other phrases like "just as" or "just a moment". Rephrase completely.
+3. NO numbered lists (1. 2. 3.), NO bullet points (- or *), NO bold (**text**), NO headers (#). Even for ritual how-to — use flowing prose with "First... then... after that..." transitions.
+4. Don't end with "How does that sound?", "Would you like to hear more?", or "Does this resonate?" — just end.
+5. One verse maximum, only if it truly fits.
+6. You are a companion, not a therapist running an assessment.
+7. When discussing a specific deity, always use their NAME at least once (Shiva, Krishna, Hanuman, Durga) — never just "He" or "His".
 
 Your response:
 """
@@ -794,6 +830,8 @@ Your response:
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
         memory_context: Optional[Any] = None,
+        model_override: Optional[str] = None,
+        config_override: Optional[Dict] = None,
     ):
         """
         Stream context-aware spiritual companion response.
@@ -804,28 +842,31 @@ Your response:
             language: Response language (default: "en")
             conversation_history: Previous messages in conversation
             user_profile: User profile data for personalization
+            model_override: Override the default model (for routing)
+            config_override: Override generation config (for routing)
 
         Yields:
             Tokens as they are generated
         """
-        
+
         # Fallback if Gemini not available
         if not self.available:
             yield "I'm here with you. Please share what's on your mind."
             return
-        
+
         try:
             # Extract context from query and history
             context = self._extract_context(query, conversation_history)
-            
+
             # Get history length for logging and logic
             history_len = len(conversation_history) if conversation_history else 0
-            
+
             # Detect conversation phase if not provided
             if phase is None:
                 phase = self._detect_phase(query, context, history_len)
-            
-            logger.info(f"Streaming Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
+
+            active_model = model_override or settings.GEMINI_MODEL
+            logger.info(f"Streaming Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0} | Model: {active_model}")
 
             # Build prompt WITH scripture context from RAG and user profile
             prompt = self._build_prompt(
@@ -838,29 +879,16 @@ Your response:
                 memory_context=memory_context,
             )
 
+            gen_config = self._build_gen_config(config_override)
+
             # Generate response from Gemini with streaming via Circuit Breaker
-            # Offload the synchronous SDK call to a thread so it doesn't block
-            # the event loop, and add thinking/output/AFC config for speed.
-            import asyncio
 
             async def _do_stream_call():
                 def _sync():
                     return self.client.models.generate_content_stream(
-                        model=settings.GEMINI_MODEL,
+                        model=active_model,
                         contents=prompt,
-                        config={
-                            "system_instruction": self.system_instruction,
-                            "temperature": 0.7,
-                            "thinking_config": {"thinking_budget": 256},
-                            "max_output_tokens": 1024,
-                            "automatic_function_calling": {"disable": True},
-                            "safety_settings": [
-                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
-                            ],
-                        }
+                        config=gen_config,
                     )
                 return await asyncio.to_thread(_sync)
 
@@ -900,39 +928,43 @@ Your response:
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
         memory_context: Optional[Any] = None,
+        model_override: Optional[str] = None,
+        config_override: Optional[Dict] = None,
     ) -> str:
         """
         Generate context-aware spiritual companion response.
-        
+
         Args:
             query: User's current message
             context_docs: Retrieved scripture documents (optional)
             language: Response language (default: "en")
             conversation_history: Previous messages in conversation
-            user_id: User identifier for context
             user_profile: User profile data (name, age, profession, etc.) for personalization
-            
+            model_override: Override the default model (for routing)
+            config_override: Override generation config (for routing)
+
         Returns:
             Generated response text
         """
-        
+
         # Fallback if Gemini not available
         if not self.available:
             logger.warning("Gemini not available, returning fallback response")
             return "I'm here with you. Please share what's on your mind."
-        
+
         try:
             # Extract context from query and history
             context = self._extract_context(query, conversation_history)
-            
+
             # Get history length for logging and logic
             history_len = len(conversation_history) if conversation_history else 0
-            
+
             # Detect conversation phase if not provided
             if phase is None:
                 phase = self._detect_phase(query, context, history_len)
-            
-            logger.info(f"Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0}")
+
+            active_model = model_override or settings.GEMINI_MODEL
+            logger.info(f"Phase: {phase.value} | History len: {history_len} | RAG docs: {len(context_docs) if context_docs else 0} | Model: {active_model}")
 
             # Build prompt WITH scripture context from RAG and user profile
             prompt = self._build_prompt(
@@ -945,29 +977,16 @@ Your response:
                 memory_context=memory_context,
             )
 
+            gen_config = self._build_gen_config(config_override)
+
             # Generate response from Gemini via Circuit Breaker
-            # Run in thread pool so the synchronous SDK call doesn't block
-            # the event loop (allows concurrent request handling).
-            import asyncio
 
             async def _do_call():
                 def _sync():
                     return self.client.models.generate_content(
-                        model=settings.GEMINI_MODEL,
+                        model=active_model,
                         contents=prompt,
-                        config={
-                            "system_instruction": self.system_instruction,
-                            "temperature": 0.7,
-                            "thinking_config": {"thinking_budget": 256},
-                            "max_output_tokens": 1024,
-                            "automatic_function_calling": {"disable": True},
-                            "safety_settings": [
-                                {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_ONLY_HIGH"},
-                                {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
-                            ],
-                        }
+                        config=gen_config,
                     )
                 return await asyncio.to_thread(_sync)
 
@@ -980,7 +999,6 @@ Your response:
                 "I'm with you. Please tell me more about what's on your mind.",
                 "I'm listening. You're not alone in this."
             ]
-            import random
 
             if not response:
                 logger.error("No response object from Gemini")
@@ -999,6 +1017,16 @@ Your response:
                     logger.warning(f"Prompt feedback: {response.prompt_feedback}")
             except Exception as diag_err:
                 logger.warning(f"Could not inspect response metadata: {diag_err}")
+
+            # Track token usage for cost tracking
+            try:
+                usage = getattr(response, "usage_metadata", None)
+                self.last_usage = {
+                    "input_tokens": getattr(usage, "prompt_token_count", 0) if usage else 0,
+                    "output_tokens": getattr(usage, "candidates_token_count", 0) if usage else 0,
+                }
+            except Exception:
+                self.last_usage = {"input_tokens": 0, "output_tokens": 0}
 
             # Extract text — handle thinking-enabled models where .text may be empty
             try:
@@ -1032,7 +1060,6 @@ Your response:
                 "I'm with you. Please tell me more about what's on your mind.",
                 "I'm listening. You're not alone in this."
             ]
-            import random
             return random.choice(fallbacks)
 
 

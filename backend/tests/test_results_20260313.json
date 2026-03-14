@@ -1,0 +1,1887 @@
+{
+  "timestamp": "2026-03-13 12:00:35",
+  "total": 219,
+  "counts": {
+    "PASS": 94,
+    "PARTIAL": 44,
+    "FAIL": 1,
+    "SKIP": 80
+  },
+  "pass_rate": 67.6,
+  "segments": {
+    "DEPLOY": {
+      "PASS": 3,
+      "PARTIAL": 1,
+      "FAIL": 0,
+      "SKIP": 5
+    },
+    "AUTH": {
+      "PASS": 7,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 11
+    },
+    "SES": {
+      "PASS": 4,
+      "PARTIAL": 2,
+      "FAIL": 0,
+      "SKIP": 5
+    },
+    "FLOW": {
+      "PASS": 5,
+      "PARTIAL": 5,
+      "FAIL": 1,
+      "SKIP": 0
+    },
+    "INTENT": {
+      "PASS": 14,
+      "PARTIAL": 2,
+      "FAIL": 0,
+      "SKIP": 1
+    },
+    "RAG": {
+      "PASS": 5,
+      "PARTIAL": 4,
+      "FAIL": 0,
+      "SKIP": 1
+    },
+    "CTXV": {
+      "PASS": 2,
+      "PARTIAL": 7,
+      "FAIL": 0,
+      "SKIP": 0
+    },
+    "LLM": {
+      "PASS": 5,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 4
+    },
+    "SAFE": {
+      "PASS": 8,
+      "PARTIAL": 4,
+      "FAIL": 0,
+      "SKIP": 4
+    },
+    "PROD": {
+      "PASS": 2,
+      "PARTIAL": 7,
+      "FAIL": 0,
+      "SKIP": 1
+    },
+    "TTS": {
+      "PASS": 4,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 3
+    },
+    "PANCH": {
+      "PASS": 2,
+      "PARTIAL": 1,
+      "FAIL": 0,
+      "SKIP": 1
+    },
+    "MEM": {
+      "PASS": 1,
+      "PARTIAL": 5,
+      "FAIL": 0,
+      "SKIP": 0
+    },
+    "UI": {
+      "PASS": 0,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 32
+    },
+    "STRM": {
+      "PASS": 5,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 4
+    },
+    "HIST": {
+      "PASS": 5,
+      "PARTIAL": 3,
+      "FAIL": 0,
+      "SKIP": 2
+    },
+    "FB": {
+      "PASS": 4,
+      "PARTIAL": 1,
+      "FAIL": 0,
+      "SKIP": 0
+    },
+    "INGEST": {
+      "PASS": 4,
+      "PARTIAL": 0,
+      "FAIL": 0,
+      "SKIP": 2
+    },
+    "PERF": {
+      "PASS": 2,
+      "PARTIAL": 1,
+      "FAIL": 0,
+      "SKIP": 2
+    },
+    "EDGE": {
+      "PASS": 12,
+      "PARTIAL": 1,
+      "FAIL": 0,
+      "SKIP": 2
+    }
+  },
+  "results": [
+    {
+      "id": "DEPLOY-01",
+      "title": "Health endpoint",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=healthy, version=1.1.3",
+      "latency_ms": 6
+    },
+    {
+      "id": "DEPLOY-02",
+      "title": "Readiness endpoint",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status_code=200, body={\"status\":\"ready\"}",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-03",
+      "title": "Docker Compose",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Requires Docker environment",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-04",
+      "title": "CORS configuration",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "cannot unpack non-iterable Response object",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-05",
+      "title": "Environment variables",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires restart without env vars",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-06",
+      "title": "Root endpoint",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "body={\"app\": \"3ioNetra API\", \"version\": \"1.1.3\", \"mode\": \"modular_refined\"}",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-07",
+      "title": "Graceful shutdown",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires SIGTERM test",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-08",
+      "title": "Frontend NEXT_PUBLIC_API_URL",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Frontend config check",
+      "latency_ms": 0
+    },
+    {
+      "id": "DEPLOY-09",
+      "title": "Production Dockerfile",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires Docker build",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-01",
+      "title": "Step 1 validation #1",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-02",
+      "title": "Step 1 validation #2",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-03",
+      "title": "Step 1 validation #3",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-04",
+      "title": "Step 1 validation #4",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-05",
+      "title": "Step 1 validation #5",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-06",
+      "title": "Register Step 2",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "user_id=f0d1708b4c04dfbb847d84eb, fields=id,name,email",
+      "latency_ms": 71
+    },
+    {
+      "id": "AUTH-07",
+      "title": "Step 2 validation #7",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-08",
+      "title": "Step 2 validation #8",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-09",
+      "title": "Step 2 validation #9",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-10",
+      "title": "Step 2 validation #10",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-11",
+      "title": "Step 2 validation #11",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI form validation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-12",
+      "title": "Duplicate email registration",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=400, body={\"detail\":\"Email already registered or database unavailable\"}",
+      "latency_ms": 20
+    },
+    {
+      "id": "AUTH-13",
+      "title": "Step 2 Back button",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI navigation \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "AUTH-14",
+      "title": "Login valid credentials",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200, has_token=True",
+      "latency_ms": 138
+    },
+    {
+      "id": "AUTH-15",
+      "title": "Login wrong password",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=401",
+      "latency_ms": 29
+    },
+    {
+      "id": "AUTH-16",
+      "title": "Login non-existent email",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=401",
+      "latency_ms": 15
+    },
+    {
+      "id": "AUTH-17",
+      "title": "Token verification",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 46
+    },
+    {
+      "id": "AUTH-18",
+      "title": "Logout clears state",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "logout_status=200",
+      "latency_ms": 20
+    },
+    {
+      "id": "SES-01",
+      "title": "Create new session",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "session_id=edccd0d6-c2b..., phase=listening",
+      "latency_ms": 518
+    },
+    {
+      "id": "SES-02",
+      "title": "Get session state",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "phase=listening, turn_count=0",
+      "latency_ms": 11
+    },
+    {
+      "id": "SES-03",
+      "title": "Get non-existent session",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=404",
+      "latency_ms": 27
+    },
+    {
+      "id": "SES-04",
+      "title": "Delete session",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "delete=200, get_after=404",
+      "latency_ms": 48
+    },
+    {
+      "id": "SES-05",
+      "title": "Session TTL expiry",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires 60-minute wait",
+      "latency_ms": 0
+    },
+    {
+      "id": "SES-06",
+      "title": "Session activity refresh",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires timed waits",
+      "latency_ms": 0
+    },
+    {
+      "id": "SES-07",
+      "title": "Redis session backend",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Session created OK (cannot verify Redis key directly)",
+      "latency_ms": 12
+    },
+    {
+      "id": "SES-08",
+      "title": "MongoDB fallback",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires stopping Redis",
+      "latency_ms": 0
+    },
+    {
+      "id": "SES-09",
+      "title": "InMemory fallback",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires stopping Redis+MongoDB",
+      "latency_ms": 0
+    },
+    {
+      "id": "SES-10",
+      "title": "Session isolation",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Session isolation verified by separate session IDs (full test needs 2 users)",
+      "latency_ms": 0
+    },
+    {
+      "id": "SES-11",
+      "title": "Session ID in localStorage",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI/localStorage \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "FLOW-01",
+      "title": "Initial phase LISTENING",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "phase=listening",
+      "latency_ms": 17
+    },
+    {
+      "id": "FLOW-02",
+      "title": "Greeting stays LISTENING",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "phase=listening, is_complete=False",
+      "latency_ms": 3457
+    },
+    {
+      "id": "FLOW-03",
+      "title": "Direct ask \u2192 GUIDANCE",
+      "priority": "P0",
+      "status": "FAIL",
+      "details": "",
+      "latency_ms": 0
+    },
+    {
+      "id": "FLOW-04",
+      "title": "Signal threshold \u2192 GUIDANCE",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "phase=listening, signals={'emotion': 'anxiety', 'life_domain': 'career'}",
+      "latency_ms": 6387
+    },
+    {
+      "id": "FLOW-05",
+      "title": "Force transition max turns",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "phase_after_4_turns=guidance",
+      "latency_ms": 0
+    },
+    {
+      "id": "FLOW-06",
+      "title": "Oscillation control",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "post_guidance_phases=[guidance, guidance]",
+      "latency_ms": 0
+    },
+    {
+      "id": "FLOW-07",
+      "title": "CLOSURE intent",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "response_snippet=you are most welcome. remember, just those three breaths tonight before you slee",
+      "latency_ms": 5666
+    },
+    {
+      "id": "FLOW-08",
+      "title": "Memory readiness 0.7",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Readiness threshold tested indirectly via FLOW-04/05",
+      "latency_ms": 0
+    },
+    {
+      "id": "FLOW-09",
+      "title": "PANCHANG intent",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "mentions_panchang=True, snippet=of course. today is krishna dashami, and the nakshatra is purva ashadha.\n\nthis n",
+      "latency_ms": 7054
+    },
+    {
+      "id": "FLOW-10",
+      "title": "PRODUCT_SEARCH intent",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "product_count=5",
+      "latency_ms": 6399
+    },
+    {
+      "id": "FLOW-11",
+      "title": "Trivial message skip",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "latency=6368ms (fast = no RAG)",
+      "latency_ms": 6368
+    },
+    {
+      "id": "INTENT-01",
+      "title": "GREETING intent",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "responded=OK(listening)",
+      "latency_ms": 4478
+    },
+    {
+      "id": "INTENT-02",
+      "title": "SEEKING_GUIDANCE intent",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "domain_detected=OK(spiritual), emotion_detected=OK(anxiety)",
+      "latency_ms": 7713
+    },
+    {
+      "id": "INTENT-03",
+      "title": "EXPRESSING_EMOTION intent",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "emotion_detected=OK(anxiety)",
+      "latency_ms": 6495
+    },
+    {
+      "id": "INTENT-04",
+      "title": "ASKING_INFO intent",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "processed=OK(spiritual)",
+      "latency_ms": 5388
+    },
+    {
+      "id": "INTENT-05",
+      "title": "ASKING_PANCHANG intent",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "panchang_in_response=True",
+      "latency_ms": 6789
+    },
+    {
+      "id": "INTENT-06",
+      "title": "PRODUCT_SEARCH intent",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "products=5",
+      "latency_ms": 7228
+    },
+    {
+      "id": "INTENT-07",
+      "title": "CLOSURE intent",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "closure_words=False",
+      "latency_ms": 5571
+    },
+    {
+      "id": "INTENT-08",
+      "title": "OTHER intent",
+      "priority": "P2",
+      "status": "PASS",
+      "details": "processed=OK(listening)",
+      "latency_ms": 7427
+    },
+    {
+      "id": "INTENT-09",
+      "title": "Life domain \u2014 career",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "detected_domain=career",
+      "latency_ms": 8709
+    },
+    {
+      "id": "INTENT-10",
+      "title": "Life domain \u2014 family",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "detected_domain=family",
+      "latency_ms": 7411
+    },
+    {
+      "id": "INTENT-11",
+      "title": "Life domain \u2014 relationships",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "detected_domain=relationships",
+      "latency_ms": 6133
+    },
+    {
+      "id": "INTENT-12",
+      "title": "Life domain \u2014 health",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "detected_domain=health",
+      "latency_ms": 7960
+    },
+    {
+      "id": "INTENT-13",
+      "title": "Entity extraction",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "topics=['General Life']",
+      "latency_ms": 7342
+    },
+    {
+      "id": "INTENT-14",
+      "title": "Urgency \u2014 crisis",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_helpline=True",
+      "latency_ms": 91
+    },
+    {
+      "id": "INTENT-15",
+      "title": "Product keywords contextual",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Contextual keyword resolution tested via INTENT-06",
+      "latency_ms": 0
+    },
+    {
+      "id": "INTENT-16",
+      "title": "No products for grief",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "product_count=0 (expected 0)",
+      "latency_ms": 6491
+    },
+    {
+      "id": "INTENT-17",
+      "title": "Fallback \u2014 LLM unavailable",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires disabling Gemini API",
+      "latency_ms": 0
+    },
+    {
+      "id": "RAG-01",
+      "title": "Hybrid search returns results",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "count=2, first_score=0.5340155315960362",
+      "latency_ms": 433
+    },
+    {
+      "id": "RAG-02",
+      "title": "Query expansion short queries",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "results=1 (expansion not directly observable)",
+      "latency_ms": 1438
+    },
+    {
+      "id": "RAG-03",
+      "title": "Neural reranking",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "results=0, has_score_field=False",
+      "latency_ms": 349
+    },
+    {
+      "id": "RAG-04",
+      "title": "Min similarity filtering",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "irrelevant_query_results=0 (expected few/0)",
+      "latency_ms": 323
+    },
+    {
+      "id": "RAG-05",
+      "title": "Scripture filter",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "results=2, all_gita=True",
+      "latency_ms": 1100
+    },
+    {
+      "id": "RAG-06",
+      "title": "Redis caching",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "first=1152ms, second=1272ms, cached_faster=False",
+      "latency_ms": 0
+    },
+    {
+      "id": "RAG-07",
+      "title": "Memory-mapped embeddings",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "embeddings.npy exists=True, size=282.4MB",
+      "latency_ms": 0
+    },
+    {
+      "id": "RAG-08",
+      "title": "RAG unavailable handling",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Requires RAG to be broken",
+      "latency_ms": 0
+    },
+    {
+      "id": "RAG-09",
+      "title": "Standalone text query",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "has_answer=True, has_citations=True, lang=en",
+      "latency_ms": 6105
+    },
+    {
+      "id": "RAG-10",
+      "title": "Doc-type filter",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Type filtering tested indirectly via emotional queries in FLOW tests",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-01",
+      "title": "Gate 1 \u2014 Relevance",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Relevance filtering verified via RAG-04 (irrelevant query returns few results)",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-02",
+      "title": "Gate 2 \u2014 Content quality",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Content gate verified by absence of placeholder text in responses",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-03",
+      "title": "Gate 3 \u2014 Type (emotional)",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "no_spatial_refs=True",
+      "latency_ms": 6488
+    },
+    {
+      "id": "CTXV-04",
+      "title": "Gate 3 \u2014 Type (how-to)",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Procedural boost verified by how-to queries returning step-like responses",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-05",
+      "title": "Gate 4 \u2014 Scripture allowlist",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Scripture filtering tested via RAG-05",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-06",
+      "title": "Gate 4 \u2014 Graceful fallback",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Fallback behavior verified by system always returning responses (never empty)",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-07",
+      "title": "Gate 5 \u2014 Diversity",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Diversity gate verified indirectly",
+      "latency_ms": 0
+    },
+    {
+      "id": "CTXV-08",
+      "title": "Full pipeline 5 gates",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "response_len=582",
+      "latency_ms": 7213
+    },
+    {
+      "id": "CTXV-09",
+      "title": "Empty input returns empty",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Edge case verified by unit test logic (no empty docs pass through)",
+      "latency_ms": 0
+    },
+    {
+      "id": "LLM-01",
+      "title": "Gemini API call succeeds",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "words=92, no_markdown=True",
+      "latency_ms": 6480
+    },
+    {
+      "id": "LLM-02",
+      "title": "Circuit breaker CLOSED\u2192OPEN",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Requires forcing 3 API failures",
+      "latency_ms": 0
+    },
+    {
+      "id": "LLM-03",
+      "title": "Circuit breaker OPEN\u2192HALF_OPEN",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires 60s wait after circuit trip",
+      "latency_ms": 0
+    },
+    {
+      "id": "LLM-04",
+      "title": "Streaming response",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "events=8, meta=True, tokens=True, done=True",
+      "latency_ms": 5809
+    },
+    {
+      "id": "LLM-05",
+      "title": "Response no markdown",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "has_markdown=False, len=511",
+      "latency_ms": 6809
+    },
+    {
+      "id": "LLM-06",
+      "title": "Verse tag format",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "has_verse_tags=True",
+      "latency_ms": 7100
+    },
+    {
+      "id": "LLM-07",
+      "title": "Fast model for intent",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires log inspection for model used",
+      "latency_ms": 0
+    },
+    {
+      "id": "LLM-08",
+      "title": "LLM unavailable fallback",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Requires disabling Gemini",
+      "latency_ms": 0
+    },
+    {
+      "id": "LLM-09",
+      "title": "clean_response post-processing",
+      "priority": "P2",
+      "status": "PASS",
+      "details": "no_artifacts=True",
+      "latency_ms": 6353
+    },
+    {
+      "id": "SAFE-01",
+      "title": "Crisis \u2014 kill myself",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_helplines=True",
+      "latency_ms": 98
+    },
+    {
+      "id": "SAFE-02",
+      "title": "Crisis \u2014 end my life",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_helplines=True",
+      "latency_ms": 154
+    },
+    {
+      "id": "SAFE-03",
+      "title": "Crisis \u2014 no point living",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_helplines=True",
+      "latency_ms": 64
+    },
+    {
+      "id": "SAFE-04",
+      "title": "Crisis \u2014 case insensitive",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_helplines=True",
+      "latency_ms": 59
+    },
+    {
+      "id": "SAFE-05",
+      "title": "Crisis in history",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "history_crisis_detected=True",
+      "latency_ms": 60
+    },
+    {
+      "id": "SAFE-06",
+      "title": "Severity signal crisis",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires session state manipulation",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-07",
+      "title": "Hopelessness + severe",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires session state manipulation",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-08",
+      "title": "Addiction \u2014 professional help",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_addiction_resources=True",
+      "latency_ms": 7206
+    },
+    {
+      "id": "SAFE-09",
+      "title": "Severe mental health",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_mh_resources=True",
+      "latency_ms": 6873
+    },
+    {
+      "id": "SAFE-10",
+      "title": "Professional help no repeat",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires session state tracking",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-11",
+      "title": "Banned \u2014 just be positive",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Banned phrase replacement is internal SafetyValidator logic",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-12",
+      "title": "Banned \u2014 karma past life",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Banned phrase replacement is internal SafetyValidator logic",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-13",
+      "title": "Banned \u2014 everything happens",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Banned phrase replacement is internal SafetyValidator logic",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-14",
+      "title": "Reduce scripture for distress",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Scripture density reduction verified indirectly",
+      "latency_ms": 0
+    },
+    {
+      "id": "SAFE-15",
+      "title": "False positive \u2014 kill non-crisis",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "no_false_positive=True",
+      "latency_ms": 5866
+    },
+    {
+      "id": "SAFE-16",
+      "title": "Crisis detection disabled",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires config override",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-01",
+      "title": "Product search by keyword",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "products=5",
+      "latency_ms": 5727
+    },
+    {
+      "id": "PROD-02",
+      "title": "Life domain category boost",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Product ranking logic is internal; verified by PROD-01 returning relevant results",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-03",
+      "title": "Deity name boost",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Product ranking logic is internal; verified by PROD-01 returning relevant results",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-04",
+      "title": "Emotion-based category boost",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Product ranking logic is internal; verified by PROD-01 returning relevant results",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-05",
+      "title": "Stop word removal",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Product ranking logic is internal; verified by PROD-01 returning relevant results",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-06",
+      "title": "Multi-term match boost",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Product ranking logic is internal; verified by PROD-01 returning relevant results",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-07",
+      "title": "Product dedup per session",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Dedup verified indirectly across multi-turn",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-08",
+      "title": "Anti-spam cooldown",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Cooldown is internal session tracking",
+      "latency_ms": 0
+    },
+    {
+      "id": "PROD-09",
+      "title": "No products for grief",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "products=0 (expected 0)",
+      "latency_ms": 8608
+    },
+    {
+      "id": "PROD-10",
+      "title": "Product cards render",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI rendering \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "TTS-01",
+      "title": "Hindi TTS synthesis",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200, size=12864B, type=audio/mpeg",
+      "latency_ms": 424
+    },
+    {
+      "id": "TTS-02",
+      "title": "English TTS synthesis",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=200, size=14400B",
+      "latency_ms": 356
+    },
+    {
+      "id": "TTS-03",
+      "title": "Text length limit",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=200, input_len=8500",
+      "latency_ms": 29512
+    },
+    {
+      "id": "TTS-04",
+      "title": "Empty text rejected",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=500",
+      "latency_ms": 0
+    },
+    {
+      "id": "TTS-05",
+      "title": "TTS unavailable",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires uninstalling gTTS",
+      "latency_ms": 0
+    },
+    {
+      "id": "TTS-06",
+      "title": "TTSButton verse playback",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "TTS-07",
+      "title": "TTSButton full response",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "PANCH-01",
+      "title": "Panchang default location",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "tithi=Krishna Dashami, nakshatra=Purva Ashadha",
+      "latency_ms": 0
+    },
+    {
+      "id": "PANCH-02",
+      "title": "Custom location",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "tithi=Krishna Dashami",
+      "latency_ms": 5
+    },
+    {
+      "id": "PANCH-03",
+      "title": "Panchang unavailable",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires disabling service",
+      "latency_ms": 0
+    },
+    {
+      "id": "PANCH-04",
+      "title": "Panchang in chat",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Tested via FLOW-09 / INTENT-05",
+      "latency_ms": 0
+    },
+    {
+      "id": "MEM-01",
+      "title": "UserStory builds",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "domain=career, emotion=Peace, signals=2",
+      "latency_ms": 7749
+    },
+    {
+      "id": "MEM-02",
+      "title": "Returning user memory",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "Memory inheritance tested indirectly through auth flow",
+      "latency_ms": 0
+    },
+    {
+      "id": "MEM-03",
+      "title": "Emotional arc tracking",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Emotional arc is internal session state",
+      "latency_ms": 0
+    },
+    {
+      "id": "MEM-04",
+      "title": "User quotes captured",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Quote capture is internal session state",
+      "latency_ms": 0
+    },
+    {
+      "id": "MEM-05",
+      "title": "Profile sync on save",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Profile sync verified via conversation save flow",
+      "latency_ms": 0
+    },
+    {
+      "id": "MEM-06",
+      "title": "Memory summary",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Memory summary is internal method",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-01",
+      "title": "Login page renders",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-02",
+      "title": "Register mode switch",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-03",
+      "title": "Password visibility toggle",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-04",
+      "title": "Error display red banner",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-05",
+      "title": "Loading state spinner",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-06",
+      "title": "Empty state welcome screen",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-07",
+      "title": "Header renders",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-08",
+      "title": "User message bubble",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-09",
+      "title": "Assistant message bubble",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-10",
+      "title": "Chat input field",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-11",
+      "title": "Input disabled during processing",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-12",
+      "title": "Auto-scroll to latest",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-13",
+      "title": "Verse rendering blockquote",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-14",
+      "title": "Streaming cursor animation",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-15",
+      "title": "Loading indicator",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-16",
+      "title": "PhaseIndicator displays",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-17",
+      "title": "Phase indicator updates",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-18",
+      "title": "Flow metadata on user message",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-19",
+      "title": "Sidebar toggle",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-20",
+      "title": "Sidebar conversation list",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-21",
+      "title": "Sidebar select conversation",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-22",
+      "title": "Sidebar new session button",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-23",
+      "title": "Sidebar user info and logout",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-24",
+      "title": "Sidebar mobile overlay",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-25",
+      "title": "Mobile viewport",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-26",
+      "title": "Tablet viewport",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-27",
+      "title": "Desktop viewport",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-28",
+      "title": "Thumbs up button",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-29",
+      "title": "Thumbs down button",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-30",
+      "title": "Feedback toggle",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-31",
+      "title": "Fade-in animation",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "UI-32",
+      "title": "Scrollbar hidden",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "UI test \u2014 requires browser/Cypress",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-01",
+      "title": "SSE connection established",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "events=8, has_comment=True",
+      "latency_ms": 6297
+    },
+    {
+      "id": "STRM-02",
+      "title": "Metadata event",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_metadata=True, has_session_id=True",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-03",
+      "title": "Token events",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "token_count=5, combined_len=467",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-04",
+      "title": "Done event",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "has_done=True, has_full_response=True",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-05",
+      "title": "Error event",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires forcing stream error",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-06",
+      "title": "Typewriter animation",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-07",
+      "title": "Typewriter cleanup",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-08",
+      "title": "Stream fallback",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Requires network failure simulation",
+      "latency_ms": 0
+    },
+    {
+      "id": "STRM-09",
+      "title": "Crisis via stream",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "has_helpline=True",
+      "latency_ms": 62
+    },
+    {
+      "id": "HIST-01",
+      "title": "Save conversation",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200, conv_id=6f6c0242-93e",
+      "latency_ms": 540
+    },
+    {
+      "id": "HIST-02",
+      "title": "Auto-save on message change",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "Frontend debounce \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "HIST-03",
+      "title": "List conversations",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200, count=1",
+      "latency_ms": 52
+    },
+    {
+      "id": "HIST-04",
+      "title": "Load specific conversation",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200, has_messages=True",
+      "latency_ms": 35
+    },
+    {
+      "id": "HIST-05",
+      "title": "Delete conversation",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 132
+    },
+    {
+      "id": "HIST-06",
+      "title": "Unauthenticated rejected",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=401",
+      "latency_ms": 1
+    },
+    {
+      "id": "HIST-07",
+      "title": "Load and resume in UI",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    },
+    {
+      "id": "HIST-08",
+      "title": "Expired session restoration",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Session restoration is internal backend logic",
+      "latency_ms": 0
+    },
+    {
+      "id": "HIST-09",
+      "title": "Memory snapshot saved",
+      "priority": "P1",
+      "status": "PARTIAL",
+      "details": "Memory persistence verified via HIST-01 save",
+      "latency_ms": 0
+    },
+    {
+      "id": "HIST-10",
+      "title": "Redis-cached list",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Caching verified indirectly via response times",
+      "latency_ms": 0
+    },
+    {
+      "id": "FB-01",
+      "title": "Submit like feedback",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 42
+    },
+    {
+      "id": "FB-02",
+      "title": "Submit dislike feedback",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 47
+    },
+    {
+      "id": "FB-03",
+      "title": "Invalid feedback rejected",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=400",
+      "latency_ms": 24
+    },
+    {
+      "id": "FB-04",
+      "title": "Feedback upsert",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 41
+    },
+    {
+      "id": "FB-05",
+      "title": "Feedback dedup by hash",
+      "priority": "P2",
+      "status": "PARTIAL",
+      "details": "Dedup verified via FB-04 upsert behavior",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-01",
+      "title": "CSV ingestion",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "verses.json exists, 96397 verses",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-02",
+      "title": "JSON ingestion temples",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "temple_entries=4809",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-03",
+      "title": "PDF ingestion",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires running pdf_ingester.py",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-04",
+      "title": "Deduplication",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "total_refs=96397, unique=96397, dupes=0",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-05",
+      "title": "Embeddings generation",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "shape=(96397, 768), dtype=float32",
+      "latency_ms": 0
+    },
+    {
+      "id": "INGEST-06",
+      "title": "Video ingestion",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires running video_ingester.py",
+      "latency_ms": 0
+    },
+    {
+      "id": "PERF-01",
+      "title": "Time to first token",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "TTFT=5967ms (target <3s)",
+      "latency_ms": 5967
+    },
+    {
+      "id": "PERF-02",
+      "title": "E2E response latency",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "latency=6769ms (target <8s)",
+      "latency_ms": 6769
+    },
+    {
+      "id": "PERF-03",
+      "title": "Concurrent users",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "success=5/5, avg_latency=7732ms",
+      "latency_ms": 0
+    },
+    {
+      "id": "PERF-04",
+      "title": "Memory usage",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires memory profiling",
+      "latency_ms": 0
+    },
+    {
+      "id": "PERF-05",
+      "title": "Startup time",
+      "priority": "P2",
+      "status": "SKIP",
+      "details": "Requires cold start measurement",
+      "latency_ms": 0
+    },
+    {
+      "id": "EDGE-01",
+      "title": "Unicode Devanagari input",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "response_len=370",
+      "latency_ms": 6772
+    },
+    {
+      "id": "EDGE-02",
+      "title": "Unicode emoji input",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "status=200",
+      "latency_ms": 5852
+    },
+    {
+      "id": "EDGE-03",
+      "title": "XSS attempt",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200 (backend doesn't execute scripts)",
+      "latency_ms": 6491
+    },
+    {
+      "id": "EDGE-04",
+      "title": "NoSQL injection attempt",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "status=200 (treated as plain text)",
+      "latency_ms": 5829
+    },
+    {
+      "id": "EDGE-05",
+      "title": "Rapid fire messages",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "success=3/3",
+      "latency_ms": 0
+    },
+    {
+      "id": "EDGE-06",
+      "title": "Very long message",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "input_len=14000, status=200",
+      "latency_ms": 17727
+    },
+    {
+      "id": "EDGE-07",
+      "title": "Empty message rejected",
+      "priority": "P0",
+      "status": "PARTIAL",
+      "details": "status=200",
+      "latency_ms": 5350
+    },
+    {
+      "id": "EDGE-08",
+      "title": "No hollow phrases",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "hollow_found=none",
+      "latency_ms": 6157
+    },
+    {
+      "id": "EDGE-09",
+      "title": "No product mentions in LLM",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "banned_found=none",
+      "latency_ms": 6619
+    },
+    {
+      "id": "EDGE-10",
+      "title": "Session with no signals",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "response_len=468",
+      "latency_ms": 7383
+    },
+    {
+      "id": "EDGE-11",
+      "title": "Pivot on rejection",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "offers_alternative=True",
+      "latency_ms": 7071
+    },
+    {
+      "id": "EDGE-12",
+      "title": "Mixed language Hinglish",
+      "priority": "P1",
+      "status": "PASS",
+      "details": "response_len=361",
+      "latency_ms": 7298
+    },
+    {
+      "id": "EDGE-13",
+      "title": "No data leakage",
+      "priority": "P0",
+      "status": "PASS",
+      "details": "no_cross_session_leak=True",
+      "latency_ms": 6354
+    },
+    {
+      "id": "EDGE-14",
+      "title": "Network disconnection mid-stream",
+      "priority": "P1",
+      "status": "SKIP",
+      "details": "Requires network simulation",
+      "latency_ms": 0
+    },
+    {
+      "id": "EDGE-15",
+      "title": "Browser refresh preserves session",
+      "priority": "P0",
+      "status": "SKIP",
+      "details": "UI \u2014 requires browser",
+      "latency_ms": 0
+    }
+  ]
+}

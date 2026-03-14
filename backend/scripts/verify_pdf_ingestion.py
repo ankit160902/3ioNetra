@@ -1,8 +1,7 @@
 import asyncio
-import os
 from pathlib import Path
 from reportlab.pdfgen import canvas
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 # Add parent to path
 import sys

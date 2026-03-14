@@ -1,12 +1,13 @@
 """
 Response Composer - Single authority for response generation
 """
+from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 
 from models.dharmic_query import DharmicQueryObject
 from models.memory_context import ConversationMemory
-from models.session import SessionState, ConversationPhase
+from models.session import ConversationPhase
 from services.panchang_service import get_panchang_service
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ class ResponseComposer:
         original_query: Optional[str] = None,
         user_id: Optional[str] = None,
         past_memories: List[str] = None,
+        model_override: Optional[str] = None,
+        config_override: Optional[Dict] = None,
     ) -> str:
         """
         Compose a response using:
@@ -43,15 +46,11 @@ class ResponseComposer:
         - original user query (for natural response)
         """
 
-        # Use original query for the LLM prompt if available, 
+        # Use original query for the LLM prompt if available,
         # otherwise fallback to build_search_query
         llm_query = original_query
         if not llm_query:
-            llm_query = (
-                dharmic_query.build_search_query()
-                if hasattr(dharmic_query, "build_search_query")
-                else dharmic_query.get_search_query()
-            )
+            llm_query = dharmic_query.build_search_query()
 
         if not llm_query:
             logger.error("No query text available for ResponseComposer")
@@ -78,6 +77,8 @@ class ResponseComposer:
                 user_profile=user_profile,
                 phase=phase,
                 memory_context=memory,
+                model_override=model_override,
+                config_override=config_override,
             )
 
         logger.info("LLM unavailable, using fallback")
@@ -94,15 +95,13 @@ class ResponseComposer:
         original_query: Optional[str] = None,
         user_id: Optional[str] = None,
         past_memories: List[str] = None,
+        model_override: Optional[str] = None,
+        config_override: Optional[Dict] = None,
     ):
         """
         Stream response synthesis using LLMService.generate_response_stream.
         """
-        llm_query = original_query or (
-            dharmic_query.build_search_query()
-            if hasattr(dharmic_query, "build_search_query")
-            else dharmic_query.get_search_query()
-        )
+        llm_query = original_query or dharmic_query.build_search_query()
 
         if not llm_query:
             yield self._compose_fallback(dharmic_query)
@@ -124,6 +123,8 @@ class ResponseComposer:
                 user_profile=user_profile,
                 phase=phase,
                 memory_context=memory,
+                model_override=model_override,
+                config_override=config_override,
             ):
                 yield chunk
         else:
@@ -178,7 +179,6 @@ class ResponseComposer:
 
         # Add current Panchang context for relevant guidance
         if self.panchang.available:
-            from datetime import datetime
             p_data = self.panchang.get_panchang(datetime.now())
             if "error" not in p_data:
                 profile["current_panchang"] = {

@@ -2,7 +2,6 @@
 Pre-download Hugging Face models to be baked into the Docker image.
 Saves models to local directories for offline use.
 """
-import os
 import logging
 from sentence_transformers import SentenceTransformer, CrossEncoder
 from pathlib import Path
@@ -35,7 +34,7 @@ def download_models():
     model.save(str(emb_path))
     
     # 2. Reranker Model
-    reranker_model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_model_name = settings.RERANKER_MODEL
     logger.info(f"Downloading & saving reranker model '{reranker_model_name}' to {reranker_path}...")
     reranker = CrossEncoder(reranker_model_name)
     reranker.save(str(reranker_path))

@@ -12,6 +12,8 @@ Rules applied in order:
 import logging
 from typing import List, Dict, Optional
 
+from models.session import IntentType
+
 logger = logging.getLogger(__name__)
 
 # Placeholder strings that sneak past empty-string checks
@@ -20,7 +22,9 @@ _CONTENT_PLACEHOLDERS = {
     "n/a", "na", "unknown", "undefined", "",
 }
 
-EMOTIONAL_HEALING_INTENTS = {"EXPRESSING_EMOTION", "OTHER"}
+EMOTIONAL_HEALING_INTENTS = {IntentType.EXPRESSING_EMOTION, IntentType.OTHER}
+
+_SPATIAL_MARKERS = frozenset({"maidan", "ground", "complex", "road", "street", "near ", "located", "address"})
 
 
 class ContextValidator:
@@ -31,7 +35,7 @@ class ContextValidator:
         validator = ContextValidator()
         clean_docs = validator.validate(
             docs=raw_rag_docs,
-            intent="EXPRESSING_EMOTION",
+            intent=IntentType.EXPRESSING_EMOTION,
             allowed_scriptures=["Bhagavad Gita", "Ramayana"],
             temple_interest=False,
             min_score=0.15,
@@ -41,7 +45,7 @@ class ContextValidator:
     def validate(
         self,
         docs: List[Dict],
-        intent: Optional[str] = None,
+        intent: Optional[IntentType] = None,
         allowed_scriptures: Optional[List[str]] = None,
         temple_interest: bool = False,
         min_score: float = 0.12,
@@ -123,7 +127,7 @@ class ContextValidator:
     # ---------------------------------------------------------------
 
     def _gate_type(
-        self, docs: List[Dict], intent: Optional[str], temple_interest: bool
+        self, docs: List[Dict], intent: Optional[IntentType], temple_interest: bool
     ) -> List[Dict]:
         """
         Remove docs whose type is semantically wrong for this intent.
@@ -138,7 +142,7 @@ class ContextValidator:
             return docs
 
         is_emotional = intent in EMOTIONAL_HEALING_INTENTS
-        is_howto = intent in {"SEEKING_GUIDANCE", "ASKING_INFO"}
+        is_howto = intent in {IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO}
 
         kept = []
         deferred = []  # Added at the end, lower priority
@@ -148,8 +152,7 @@ class ContextValidator:
             doc_text = (doc.get("text", "") + " " + doc.get("reference", "")).lower()
 
             # Detect spatial/location-only documents
-            spatial_markers = {"maidan", "ground", "complex", "road", "street", "near ", "located", "address"}
-            is_spatial = doc_type == "temple" or any(m in doc_text for m in spatial_markers)
+            is_spatial = doc_type == "temple" or any(m in doc_text for m in _SPATIAL_MARKERS)
 
             if is_emotional and is_spatial and not temple_interest:
                 logger.debug(

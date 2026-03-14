@@ -1,22 +1,21 @@
 import logging
 import random
-from typing import Tuple, Optional, TYPE_CHECKING, Dict, List, Set
+from typing import Tuple, Optional, TYPE_CHECKING, Dict, List
 
-from models.session import SessionState, ConversationPhase, SignalType
+from config import settings
+from models.session import SessionState, ConversationPhase, SignalType, IntentType
 from models.memory_context import ConversationMemory
 from services.panchang_service import get_panchang_service
 
+from services.cost_tracker import get_cost_tracker, extract_tokens_from_response
 from services.intent_agent import get_intent_agent
 from services.memory_service import get_memory_service
+from services.model_router import get_model_router
 from services.product_service import get_product_service
 if TYPE_CHECKING:
     from rag.pipeline import RAGPipeline
 
 logger = logging.getLogger(__name__)
-
-# Session-level dedup: tracks which product _ids have been shown per session
-_shown_products: Dict[str, Set[str]] = {}
-
 
 class CompanionEngine:
     """
@@ -128,6 +127,7 @@ class CompanionEngine:
         self.intent_agent = get_intent_agent()
         self.memory_service = get_memory_service(rag_pipeline)
         self.product_service = get_product_service()
+        self.model_router = get_model_router()
         self.available = self.llm.available
         logger.info(f"CompanionEngine initialized (LLM available={self.available})")
 
@@ -187,14 +187,14 @@ class CompanionEngine:
         intent = analysis.get("intent")
         is_direct_ask = analysis.get("needs_direct_answer", False) or \
                         analysis.get("recommend_products", False) or \
-                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"] or \
+                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
                         "Verse Request" in turn_topics
         
         current_phase = ConversationPhase.CLARIFICATION
-        if intent == "CLOSURE":
+        if intent == IntentType.CLOSURE:
             current_phase = ConversationPhase.CLOSURE
         
-        is_ready = False if intent == "CLOSURE" else (self._assess_readiness(session) or is_direct_ask)
+        is_ready = False if intent == IntentType.CLOSURE else (self._assess_readiness(session) or is_direct_ask)
 
         if is_ready:
             # Metadata for frontend
@@ -298,7 +298,7 @@ class CompanionEngine:
 
         is_direct_ask = analysis.get("needs_direct_answer", False) or \
                         analysis.get("recommend_products", False) or \
-                        intent in ["SEEKING_GUIDANCE", "ASKING_INFO", "ASKING_PANCHANG", "PRODUCT_SEARCH"] or \
+                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
                         "Verse Request" in turn_topics or \
                         "Product Inquiry" in turn_topics or \
                         "Routine Request" in turn_topics or \
@@ -306,10 +306,10 @@ class CompanionEngine:
                         "Diet Plan" in turn_topics
 
         current_phase = ConversationPhase.CLARIFICATION
-        if intent == "CLOSURE":
+        if intent == IntentType.CLOSURE:
             current_phase = ConversationPhase.CLOSURE
 
-        if intent == "CLOSURE":
+        if intent == IntentType.CLOSURE:
             is_ready = False
         else:
             is_ready = self._assess_readiness(session) or is_direct_ask
@@ -359,7 +359,7 @@ class CompanionEngine:
 
             # 🛍️ PRODUCT RECOMMENDATION
             products = []
-            is_product_request = "Product Inquiry" in turn_topics or analysis.get("intent") == "PRODUCT_SEARCH"
+            is_product_request = "Product Inquiry" in turn_topics or analysis.get("intent") == IntentType.PRODUCT_SEARCH
             should_recommend = is_product_request or analysis.get("recommend_products", False)
 
             if should_recommend:
@@ -374,7 +374,7 @@ class CompanionEngine:
                     emotion=analysis.get("emotion", ""),
                     deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
                 )
-                if not products and (is_product_request or analysis.get("intent") == "PRODUCT_SEARCH"):
+                if not products and (is_product_request or analysis.get("intent") == IntentType.PRODUCT_SEARCH):
                     products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
 
             if not products:
@@ -383,8 +383,16 @@ class CompanionEngine:
                     analysis=analysis, is_guidance_phase=True)
 
             if products:
-                products = self._filter_shown_products(session.session_id, products)
-                self._record_shown_products(session.session_id, products)
+                products = self._filter_shown_products(session, products)
+                self._record_shown_products(session, products)
+
+            # Model routing decision
+            routing = self.model_router.route(
+                intent_analysis=analysis,
+                phase=ConversationPhase.GUIDANCE,
+                session=session,
+                has_rag_context=bool(context_docs),
+            )
 
             return {
                 "is_ready_for_wisdom": True,
@@ -396,6 +404,8 @@ class CompanionEngine:
                 "past_memories": past_memories,
                 "analysis": analysis,
                 "acknowledgement": random.choice(acknowledgements),
+                "model_override": routing.model_name,
+                "config_override": routing.config_override,
             }
 
         # ------------------------------------------------------------------
@@ -407,7 +417,7 @@ class CompanionEngine:
             try:
                 from services.context_validator import get_context_validator
                 ctx_validator = get_context_validator()
-                skip_rag_intents = {"GREETING", "CLOSURE"}
+                skip_rag_intents = {IntentType.GREETING, IntentType.CLOSURE}
                 panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
                 if intent in skip_rag_intents:
                     logger.info(f"Skipping RAG for {intent} intent in listening phase")
@@ -437,7 +447,7 @@ class CompanionEngine:
 
         # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase)
         products = []
-        is_explicit_product = analysis.get("intent") == "PRODUCT_SEARCH" or \
+        is_explicit_product = analysis.get("intent") == IntentType.PRODUCT_SEARCH or \
                              "Product Inquiry" in turn_topics
         should_recommend = is_explicit_product
 
@@ -453,12 +463,26 @@ class CompanionEngine:
                 emotion=analysis.get("emotion", ""),
                 deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
             )
-            if not products and analysis.get("intent") == "PRODUCT_SEARCH":
+            if not products and analysis.get("intent") == IntentType.PRODUCT_SEARCH:
                 products = await self.product_service.get_recommended_products(category=life_domain if life_domain != "unknown" else None)
 
+        # Proactive product inference in listening phase (acceptance-based only)
+        if not products:
+            products = await self._infer_proactive_products(
+                session, message, analysis.get("life_domain", "unknown"),
+                analysis=analysis, is_guidance_phase=False)
+
         if products:
-            products = self._filter_shown_products(session.session_id, products)
-            self._record_shown_products(session.session_id, products)
+            products = self._filter_shown_products(session, products)
+            self._record_shown_products(session, products)
+
+        # Model routing decision
+        routing = self.model_router.route(
+            intent_analysis=analysis,
+            phase=current_phase,
+            session=session,
+            has_rag_context=bool(context_docs),
+        )
 
         return {
             "is_ready_for_wisdom": False,
@@ -469,6 +493,8 @@ class CompanionEngine:
             "user_profile": user_profile,
             "past_memories": past_memories,
             "analysis": analysis,
+            "model_override": routing.model_name,
+            "config_override": routing.config_override,
         }
 
     async def process_message(
@@ -479,7 +505,7 @@ class CompanionEngine:
         """
         Returns:
             (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics,
-             recommended_products, active_phase)
+             recommended_products, active_phase, model_override, config_override)
         """
         meta = await self.process_message_preamble(session, message)
 
@@ -487,6 +513,7 @@ class CompanionEngine:
             return (
                 meta["acknowledgement"], True, meta["context_docs"],
                 meta["turn_topics"], meta["recommended_products"], ConversationPhase.GUIDANCE,
+                meta.get("model_override"), meta.get("config_override"),
             )
 
         # Listening phase — make the LLM call
@@ -498,9 +525,31 @@ class CompanionEngine:
                 user_profile=meta["user_profile"],
                 phase=meta["active_phase"],
                 memory_context=session.memory,
+                model_override=meta.get("model_override"),
+                config_override=meta.get("config_override"),
             )
+
+            # Cost tracking
+            if settings.MODEL_COST_TRACKING_ENABLED:
+                try:
+                    usage = self.llm.last_usage
+                    analysis = meta.get("analysis", {})
+                    routing_model = meta.get("model_override", settings.GEMINI_MODEL)
+                    get_cost_tracker().log(
+                        session_id=session.session_id,
+                        model_name=routing_model,
+                        tier="standard",
+                        input_tokens=usage.get("input_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
+                        intent=str(analysis.get("intent", "")),
+                        phase=meta["active_phase"].value,
+                    )
+                except Exception as e:
+                    logger.debug(f"Cost tracking failed: {e}")
+
             return (reply, False, meta["context_docs"], meta["turn_topics"],
-                    meta["recommended_products"], meta["active_phase"])
+                    meta["recommended_products"], meta["active_phase"],
+                    meta.get("model_override"), meta.get("config_override"))
 
         # Fallback (no LLM)
         return (
@@ -510,6 +559,8 @@ class CompanionEngine:
             meta["turn_topics"],
             [],
             ConversationPhase.LISTENING,
+            None,
+            None,
         )
 
     # ------------------------------------------------------------------
@@ -600,21 +651,40 @@ class CompanionEngine:
                 unique.append(t)
         return unique[:8]
 
-    def _filter_shown_products(self, session_id: str, products: List[Dict]) -> List[Dict]:
+    def _filter_shown_products(self, session: SessionState, products: List[Dict]) -> List[Dict]:
         """Remove already-shown products. Falls back to full list if all filtered."""
-        shown = _shown_products.get(session_id, set())
-        filtered = [p for p in products if p.get("_id") not in shown]
+        filtered = [p for p in products if p.get("_id") not in session.shown_product_ids]
         return filtered if filtered else products
 
-    def _record_shown_products(self, session_id: str, products: List[Dict]) -> None:
-        """Track shown product IDs. Auto-prune cache if too large."""
-        if len(_shown_products) > 1000:
-            _shown_products.clear()
-        if session_id not in _shown_products:
-            _shown_products[session_id] = set()
+    def _record_shown_products(self, session: SessionState, products: List[Dict]) -> None:
+        """Track shown product IDs in the session state."""
         for p in products:
             if p.get("_id"):
-                _shown_products[session_id].add(p["_id"])
+                session.shown_product_ids.add(p["_id"])
+
+    def record_suggestion(self, session: SessionState, assistant_text: str) -> None:
+        """Scan assistant's response for practice keywords and record for later product matching."""
+        text_lower = assistant_text.lower()
+        for practice_name, practice_info in self.PRACTICE_PRODUCT_MAP.items():
+            if any(kw in text_lower for kw in practice_info["detect"]):
+                entry = {
+                    "turn": session.turn_count,
+                    "practice": practice_name,
+                    "product_keywords": practice_info["search_keywords"],
+                }
+                session.last_suggestions.append(entry)
+                if len(session.last_suggestions) > 3:
+                    session.last_suggestions = session.last_suggestions[-3:]
+                break  # Record first match only (strongest signal)
+
+    def _get_keywords_from_suggestions(self, session: SessionState) -> List[str]:
+        """Get product keywords from tracked suggestions (preferred over raw text scan)."""
+        keywords = []
+        for entry in session.last_suggestions:
+            for kw in entry["product_keywords"]:
+                if kw not in keywords:
+                    keywords.append(kw)
+        return keywords
 
     async def _infer_proactive_products(
         self,
@@ -626,13 +696,16 @@ class CompanionEngine:
     ) -> List[Dict]:
         """Proactively suggest products when user acknowledges a practice suggestion
         or when conversation context provides strong product signals (guidance phase)."""
-        # Anti-spam: at least 3 turns since last proactive suggestion
-        if (session.turn_count - session.last_proactive_product_turn) < 3:
+        # Anti-spam: smart cooldown — shorter gap for acceptance (high conversion)
+        turns_since_last = session.turn_count - session.last_proactive_product_turn
+        is_acceptance = self._is_acceptance(message)
+        min_gap = 2 if is_acceptance else 3
+        if turns_since_last < min_gap:
             return []
 
         # Path A: Acceptance-based (existing behavior, both phases)
-        if self._is_acceptance(message):
-            keywords = self._get_practice_from_history(session)
+        if is_acceptance:
+            keywords = self._get_keywords_from_suggestions(session) or self._get_practice_from_history(session)
             if keywords:
                 search_query = " ".join(keywords)
                 logger.info(f"Proactive product inference (acceptance): searching '{search_query}' for session {session.session_id}")
@@ -798,6 +871,10 @@ class CompanionEngine:
         if session and getattr(session, 'is_returning_user', False):
             profile["is_returning_user"] = True
 
+        # Pass tracked practice suggestions so LLM can deepen on acceptance
+        if session and session.last_suggestions:
+            profile["last_suggestions"] = session.last_suggestions
+
         return profile
 
     def _get_doc_type_exclusions(self, intent: Optional[str]) -> Optional[List[str]]:
@@ -808,10 +885,10 @@ class CompanionEngine:
         if not intent:
             return None
         exclusions = {
-            "EXPRESSING_EMOTION": ["temple"],
-            "OTHER": ["temple"],
-            "PRODUCT_SEARCH": ["scripture"],
-            "GREETING": ["temple", "scripture"],
+            IntentType.EXPRESSING_EMOTION: ["temple"],
+            IntentType.OTHER: ["temple"],
+            IntentType.PRODUCT_SEARCH: ["scripture"],
+            IntentType.GREETING: ["temple", "scripture"],
         }
         return exclusions.get(intent)
 
@@ -1028,21 +1105,27 @@ class CompanionEngine:
             
             # UC 21/Self-Improvement/General Life
             if has_word(["exam", "exams", "concentration", "focus"], text):
-                if "General Life" in dids: domain_scores["General Life"] += 30
+                if "General Life" in dids:
+                    domain_scores["General Life"] += 30
             
             # UC 25/28/30 Spiritual Growth Wins over Career/Family/Self-Imp
             if has_word(["gita", "upanishad", "dharma", "ethics", "unethical", "ethics", "humility", "void", "meaning", "purpose"], text):
-                if "Spiritual Growth" in dids: domain_scores["Spiritual Growth"] += 50
+                if "Spiritual Growth" in dids:
+                    domain_scores["Spiritual Growth"] += 50
 
             # Procedural Tie-breakers
             if "Diet Plan" in turn_topics and "Ayurveda & Wellness" in dids:
                 domain_scores["Ayurveda & Wellness"] += 40
             if "Routine Request" in turn_topics:
-                if "Yoga Practice" in dids: domain_scores["Yoga Practice"] += 40
-                if "Meditation & Mind" in dids: domain_scores["Meditation & Mind"] += 40
+                if "Yoga Practice" in dids:
+                    domain_scores["Yoga Practice"] += 40
+                if "Meditation & Mind" in dids:
+                    domain_scores["Meditation & Mind"] += 40
             if "Puja Guidance" in turn_topics:
-                if "Family" in dids: domain_scores["Family"] += 40
-                if "Spiritual Growth" in dids: domain_scores["Spiritual Growth"] += 40
+                if "Family" in dids:
+                    domain_scores["Family"] += 40
+                if "Spiritual Growth" in dids:
+                    domain_scores["Spiritual Growth"] += 40
 
             # UC 24: Family vs Ayurveda
             if "Family" in dids and has_word(["baby", "parenting", "kids"], text):

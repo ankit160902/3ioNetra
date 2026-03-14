@@ -1,21 +1,24 @@
 
-import asyncio
 import os
-import sys
 from datetime import datetime
 from pymongo import MongoClient
-import uuid
 import hashlib
 import secrets
 import random
 
-# MongoDB Connection (Using the correct URI from your .env)
-MONGO_URI = "mongodb+srv://ankit:ozHqxvsmsM5MLFpq@cluster0.zmoledd.mongodb.net/"
-DB_NAME = "spiritual_voice_bot"
+from config import settings
 
-# Connect to DB
-client = MongoClient(MONGO_URI)
-db = client[DB_NAME]
+# MongoDB Connection — reads from .env via config.py (never hardcode credentials)
+def _build_mongo_uri():
+    uri = settings.MONGODB_URI
+    if not uri:
+        raise RuntimeError("MONGODB_URI not set. Check your .env file.")
+    if settings.DATABASE_PASSWORD:
+        uri = uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+    return uri
+
+client = MongoClient(_build_mongo_uri())
+db = client[settings.DATABASE_NAME]
 users_collection = db["users"]
 
 # Correct Password Hashing (Matching auth_service.py)
@@ -108,7 +111,7 @@ def create_mock_user(index, custom_first=None, custom_last=None):
         
         "spiritual_profile": {
             "rashi": rashi,
-            "gothra": gotra,
+            "gotra": gotra,
             "nakshatra": "Rohini",
             "kundli": None
         },

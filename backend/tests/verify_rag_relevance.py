@@ -1,4 +1,3 @@
-import os
 import asyncio
 import sys
 from pathlib import Path
@@ -8,7 +7,6 @@ import json
 sys.path.append(str(Path(__file__).parent.parent))
 
 from rag.pipeline import RAGPipeline
-from config import settings
 
 async def verify_relevance():
     print("🚀 Initializing RAG Pipeline for Relevance Testing...")

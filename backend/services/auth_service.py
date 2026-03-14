@@ -1,15 +1,26 @@
 """
 Authentication Service - MongoDB-based user management
 """
+import asyncio
 import hashlib
+import hmac
 import secrets
 from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
-from pymongo import MongoClient
-from pymongo.errors import DuplicateKeyError
+from pymongo import MongoClient, ReadPreference
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from config import settings
+
+# Map config string names to pymongo ReadPreference constants (Issue 25)
+_READ_PREF_MAP = {
+    "primary": ReadPreference.PRIMARY,
+    "primaryPreferred": ReadPreference.PRIMARY_PREFERRED,
+    "secondary": ReadPreference.SECONDARY,
+    "secondaryPreferred": ReadPreference.SECONDARY_PREFERRED,
+    "nearest": ReadPreference.NEAREST,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +46,22 @@ def get_mongo_client():
         if settings.DATABASE_PASSWORD:
             mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
         
-        # Increase connection robustness for slow DNS environments
+        # Resolve read preference from config (Issue 25)
+        read_pref = _READ_PREF_MAP.get(
+            settings.MONGO_READ_PREFERENCE, ReadPreference.PRIMARY_PREFERRED
+        )
+
+        # Connection with explicit pool sizing for production workloads
         _mongo_client = MongoClient(
-            mongo_uri, 
-            serverSelectionTimeoutMS=10000, # Reduced but more frequent retries
+            mongo_uri,
+            serverSelectionTimeoutMS=10000,
             connectTimeoutMS=10000,
             socketTimeoutMS=10000,
-            retryWrites=True
+            retryWrites=True,
+            maxPoolSize=settings.MONGO_MAX_POOL_SIZE,
+            minPoolSize=settings.MONGO_MIN_POOL_SIZE,
+            maxIdleTimeMS=settings.MONGO_MAX_IDLE_TIME_MS,
+            read_preference=read_pref,
         )
         
         # Access database
@@ -49,18 +69,35 @@ def get_mongo_client():
         
         # Test connection with a simple command to catch DNS issues early
         _mongo_client.admin.command('ping')
-        
+
+        # Run database migrations before index creation (Issue 28)
+        if settings.ENABLE_AUTO_MIGRATIONS:
+            try:
+                from scripts.migrations import run_migrations
+                run_migrations(_db)
+            except Exception as e:
+                logger.warning(f"⚠️ Auto-migrations failed (non-fatal): {e}")
+
         # Create indexes with error handling
         try:
             _db.users.create_index("email", unique=True)
+            _db.users.create_index("id", unique=True)
             _db.tokens.create_index("token", unique=True)
             _db.tokens.create_index("expires_at", expireAfterSeconds=0)
+            _db.tokens.create_index("user_id")
             _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
+            _db.conversations.create_index([("user_id", 1), ("session_id", 1)])
             try:
                 _db.feedback.drop_index("session_id_1_message_index_1_user_id_1")
-            except Exception:
+            except OperationFailure:
                 pass
             _db.feedback.create_index([("session_id", 1), ("message_index", 1), ("response_hash", 1), ("user_id", 1)], unique=True)
+            # Product indexes for search performance
+            _db.products.create_index("is_active")
+            _db.products.create_index(
+                [("name", "text"), ("category", "text"), ("description", "text")],
+                name="products_text_search"
+            )
             logger.info("✅ MongoDB connection established and indexes verified")
         except Exception as e:
             logger.warning(f"⚠️ Index creation partially failed: {e}")
@@ -98,9 +135,9 @@ def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
 
 
 def _verify_password(password: str, hashed: str, salt: str) -> bool:
-    """Verify password against hash"""
+    """Verify password against hash (constant-time comparison to prevent timing attacks)"""
     check_hash, _ = _hash_password(password, salt)
-    return check_hash == hashed
+    return hmac.compare_digest(check_hash, hashed)
 
 
 def _generate_token() -> str:
@@ -164,9 +201,6 @@ class AuthService:
         
         email_lower = email.lower()
 
-        if self.db.users.find_one({"email": email_lower}):
-            return None
-
         hashed, salt = _hash_password(password)
         name_parts = name.strip().split()
         first_name = name_parts[0] if name_parts else ""
@@ -190,12 +224,12 @@ class AuthService:
             "deities": [preferred_deity] if preferred_deity else [],
             "spiritual_profile": {
                 "rashi": rashi,
-                "gothra": gotra,
+                "gotra": gotra,
                 "nakshatra": nakshatra,
                 "kundli": None
             },
-            "temples": [],
-            "purchases": []
+            "is_active": True,
+            "deleted_at": None
         }
 
         try:
@@ -210,9 +244,14 @@ class AuthService:
 
     def login_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
         """Login an existing user"""
-        if self.db is None: return None
+        if self.db is None:
+            return None
         email_lower = email.lower()
-        user = self.db.users.find_one({"email": email_lower})
+        try:
+            user = self.db.users.find_one({"email": email_lower})
+        except Exception as e:
+            logger.error(f"login_user DB error: {e}")
+            return None
         if not user or not _verify_password(password, user["password_hash"], user["password_salt"]):
             return None
 
@@ -224,7 +263,8 @@ class AuthService:
 
     def _create_token(self, user_id: str) -> str:
         """Create and store a new token for user"""
-        if self.db is None: return ""
+        if self.db is None:
+            return ""
         token = _generate_token()
         token_doc = {
             "token": token,
@@ -237,12 +277,30 @@ class AuthService:
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify token and return flattened user info"""
-        if self.db is None: return None
-        token_doc = self.db.tokens.find_one({"token": token})
-        if not token_doc or datetime.utcnow() > token_doc["expires_at"]:
+        if self.db is None:
+            return None
+        try:
+            token_doc = self.db.tokens.find_one({"token": token})
+        except Exception as e:
+            logger.error(f"verify_token token lookup error: {e}")
+            return None
+        # Belt-and-suspenders expiry check: the TTL index on expires_at handles
+        # cleanup asynchronously (MongoDB runs the TTL monitor every ~60s), so a
+        # token can linger briefly after expiration. This app-side check covers
+        # the gap, ensuring an expired token is never accepted even if the TTL
+        # monitor hasn't swept it yet.
+        expires_at = token_doc.get("expires_at") if token_doc else None
+        if not token_doc or not expires_at or datetime.utcnow() > expires_at:
             return None
 
-        user = self.db.users.find_one({"id": token_doc["user_id"]})
+        user_id = token_doc.get("user_id")
+        if not user_id:
+            return None
+        try:
+            user = self.db.users.find_one({"id": user_id}, {"password_hash": 0, "password_salt": 0})
+        except Exception as e:
+            logger.error(f"verify_token user lookup error: {e}")
+            return None
         return self._flatten_user_msg(user) if user else None
 
     def _flatten_user_msg(self, user: Dict[str, Any]) -> Dict[str, Any]:
@@ -270,9 +328,9 @@ class AuthService:
             "age_group": age_group,
             "profession": user.get("occupation") or user.get("profession") or "",
             "rashi": spirit.get("rashi") or user.get("rashi") or "",
-            "gotra": spirit.get("gothra") or user.get("gothra") or "",
+            "gotra": spirit.get("gotra") or spirit.get("gothra") or user.get("gotra") or user.get("gothra") or "",
             "nakshatra": spirit.get("nakshatra") or user.get("nakshatra") or "",
-            "preferred_deity": user.get("deities", [user.get("preferred_deity", "")])[0] if user.get("deities") else "",
+            "preferred_deity": user.get("deities", [""])[0] if user.get("deities") else user.get("preferred_deity", ""),
             "temple_visits": [t.get("temple_id") for t in user.get("temples", [])] if isinstance(user.get("temples"), list) else [],
             "purchase_history": [p.get("name") for p in user.get("purchases", [])] if isinstance(user.get("purchases"), list) else [],
             "created_at": user["created_at"].isoformat() if isinstance(user["created_at"], datetime) else str(user["created_at"]),
@@ -280,31 +338,56 @@ class AuthService:
 
     def logout_user(self, token: str) -> bool:
         """Logout user by invalidating token"""
-        if self.db is None: return False
-        result = self.db.tokens.delete_one({"token": token})
+        if self.db is None:
+            return False
+        try:
+            result = self.db.tokens.delete_one({"token": token})
+        except Exception as e:
+            logger.error(f"logout_user DB error: {e}")
+            return False
         return result.deleted_count > 0
+
+    def invalidate_user_tokens(self, user_id: str) -> int:
+        """Invalidate all tokens for a user (e.g. after password change).
+        Returns the number of tokens deleted."""
+        if self.db is None:
+            return 0
+        try:
+            result = self.db.tokens.delete_many({"user_id": user_id})
+        except Exception as e:
+            logger.error(f"invalidate_user_tokens DB error: {e}")
+            return 0
+        logger.info(f"Invalidated {result.deleted_count} tokens for user {user_id}")
+        return result.deleted_count
 
     def update_user_profile(self, user_id: str, updates: Dict[str, Any]) -> bool:
         """Update user's permanent profile fields (e.g. profession, rashi, nakshatra)"""
-        if self.db is None: return False
-        
+        if self.db is None:
+            return False
+
         # Prepare MongoDB update object
         set_data = {}
         spirit_updates = {}
         
         # Map flat updates to nested schema
-        if "profession" in updates: set_data["occupation"] = updates["profession"]
-        if "gender" in updates: set_data["gender"] = updates["gender"]
-        if "dob" in updates: set_data["date_of_birth"] = updates["dob"]
+        if "profession" in updates:
+            set_data["occupation"] = updates["profession"]
+        if "gender" in updates:
+            set_data["gender"] = updates["gender"]
+        if "dob" in updates:
+            set_data["date_of_birth"] = updates["dob"]
         
         # Deities is a list
         if "preferred_deity" in updates: 
             set_data["deities"] = [updates["preferred_deity"]]
             
         # Spiritual profile nesting
-        if "rashi" in updates: spirit_updates["rashi"] = updates["rashi"]
-        if "gotra" in updates: spirit_updates["gothra"] = updates["gotra"]
-        if "nakshatra" in updates: spirit_updates["nakshatra"] = updates["nakshatra"]
+        if "rashi" in updates:
+            spirit_updates["rashi"] = updates["rashi"]
+        if "gotra" in updates:
+            spirit_updates["gotra"] = updates["gotra"]
+        if "nakshatra" in updates:
+            spirit_updates["nakshatra"] = updates["nakshatra"]
         
         if spirit_updates:
             # $set nested fields
@@ -313,17 +396,24 @@ class AuthService:
                 
         if not set_data:
             return True
-            
-        result = self.db.users.update_one({"id": user_id}, {"$set": set_data})
+
+        set_data["updated_at"] = datetime.utcnow()
+        try:
+            result = self.db.users.update_one({"id": user_id}, {"$set": set_data})
+        except Exception as e:
+            logger.error(f"update_user_profile DB error: {e}")
+            return False
         return result.modified_count > 0
 
 class ConversationStorage:
-    """Store and retrieve user conversations in MongoDB"""
+    """Store and retrieve user conversations in MongoDB.
+    Uses async Redis to avoid blocking the FastAPI event loop.
+    """
 
     def __init__(self):
         self.db = get_mongo_client()
-        import redis
-        self._redis = redis.Redis(
+        import redis.asyncio as aioredis
+        self._redis = aioredis.Redis(
             host=settings.REDIS_HOST,
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
@@ -331,7 +421,7 @@ class ConversationStorage:
             decode_responses=True
         )
 
-    def save_conversation(
+    async def save_conversation(
         self,
         user_id: str,
         conversation_id: Optional[str],
@@ -340,131 +430,174 @@ class ConversationStorage:
         memory: Optional[Dict] = None
     ) -> str:
         """Save a specific session to persistent history"""
-        if self.db is None: return ""
-        
+        if self.db is None:
+            return ""
+
         # Use session_id/conversation_id to identify the specific session
-        if not conversation_id: return "" # Must have a session ID
-        
+        if not conversation_id:
+            return ""  # Must have a session ID
+
         query = {"user_id": user_id, "session_id": conversation_id}
-        
+
         update_data = {
             "messages": messages,
             "message_count": len(messages),
             "updated_at": datetime.utcnow(),
             "last_title": title
         }
-        
+
         if memory:
             update_data["memory"] = memory
 
-        self.db.conversations.update_one(
+        await asyncio.to_thread(
+            self.db.conversations.update_one,
             query,
             {"$set": update_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
-            upsert=True
+            upsert=True,
         )
-        
-        # Invalidate cache
+
+        # Prune oldest conversations if user exceeds limit (Issue 22)
         try:
-            self._redis.delete(f"history_list:{user_id}")
+            max_convos = settings.MAX_CONVERSATIONS_PER_USER
+
+            def _prune():
+                count = self.db.conversations.count_documents({"user_id": user_id})
+                if count > max_convos:
+                    excess = count - max_convos
+                    oldest = (
+                        self.db.conversations.find({"user_id": user_id}, {"_id": 1})
+                        .sort("updated_at", 1)
+                        .limit(excess)
+                    )
+                    ids_to_delete = [doc["_id"] for doc in oldest]
+                    if ids_to_delete:
+                        self.db.conversations.delete_many({"_id": {"$in": ids_to_delete}})
+                        logger.info(f"Pruned {len(ids_to_delete)} old conversations for user {user_id}")
+
+            await asyncio.to_thread(_prune)
+        except Exception as e:
+            logger.warning(f"Conversation pruning failed (non-fatal): {e}")
+
+        # Invalidate cache (async)
+        try:
+            await self._redis.delete(f"history_list:{user_id}")
         except Exception as e:
             logger.error(f"Redis cache invalidation error: {e}")
-        
+
         logger.info(f"Saved persistent history for session {conversation_id}")
         return str(conversation_id)
 
-    def get_conversations_list(self, user_id: str, limit: int = 50) -> list:
-        """Get list of individual sessions with Redis caching"""
+    async def get_conversations_list(self, user_id: str, limit: int = 50) -> list:
+        """Get list of individual sessions with async Redis caching"""
         import json
-        
-        # Try cache first
+
+        # Try cache first (async)
         cache_key = f"history_list:{user_id}"
         try:
-            cached_data = self._redis.get(cache_key)
+            cached_data = await self._redis.get(cache_key)
             if cached_data:
-                logger.info(f"🚀 Serving history list from Redis for user {user_id}")
+                logger.info(f"Serving history list from Redis cache for user {user_id}")
                 return json.loads(cached_data)
         except Exception as e:
             logger.error(f"Redis history fetch error: {e}")
 
-        if self.db is None: return []
-        
-        # Find all session documents for user, sorted by most recent
-        cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(limit)
-        
-        history_list = []
-        for conv in cursor:
-            # Safe date extraction
-            created_at = conv.get("created_at")
-            updated_at = conv.get("updated_at") or created_at or datetime.utcnow()
-            if not created_at: created_at = updated_at
+        if self.db is None:
+            return []
 
-            history_list.append({
-                "id": str(conv["_id"]),
-                "session_id": conv.get("session_id"),
-                "title": conv.get("last_title", "New Conversation"),
-                "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
-                "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
-                "message_count": conv.get("message_count", 0),
-            })
-        
-        # Cache for 10 minutes
+        # Aggregation pipeline computes message_count server-side from the
+        # actual messages array length, eliminating drift (Issue 23).
+        agg_pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$sort": {"updated_at": -1}},
+            {"$limit": limit},
+            {"$project": {
+                "session_id": 1,
+                "last_title": 1,
+                "created_at": 1,
+                "updated_at": 1,
+                "message_count": {"$size": {"$ifNull": ["$messages", []]}},
+            }},
+        ]
+
+        def _run_aggregate():
+            result = []
+            for conv in self.db.conversations.aggregate(agg_pipeline):
+                created_at = conv.get("created_at")
+                updated_at = conv.get("updated_at") or created_at or datetime.utcnow()
+                if not created_at:
+                    created_at = updated_at
+                result.append({
+                    "id": str(conv["_id"]),
+                    "session_id": conv.get("session_id"),
+                    "title": conv.get("last_title", "New Conversation"),
+                    "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
+                    "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
+                    "message_count": conv.get("message_count", 0),
+                })
+            return result
+
+        history_list = await asyncio.to_thread(_run_aggregate)
+
+        # Cache for 10 minutes (async)
         try:
-            self._redis.setex(cache_key, 600, json.dumps(history_list))
+            await self._redis.setex(cache_key, 600, json.dumps(history_list))
         except Exception as e:
             logger.warning(f"Failed to cache history list: {e}")
 
         return history_list
 
-    def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
+    async def get_conversation(self, user_id: str, conversation_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific session's history"""
-        if self.db is None: return None
-        
-        from bson import ObjectId
-        query = {"user_id": user_id}
-        
-        # If conversation_id is provided, try finding by mongo _id or session_id
-        if conversation_id:
-            try:
-                if len(conversation_id) == 24: # MongoDB ObjectId
-                    query = {"_id": ObjectId(conversation_id), "user_id": user_id}
-                else: # session_id (UUID string)
-                    query = {"session_id": conversation_id, "user_id": user_id}
-            except:
-                query = {"session_id": conversation_id, "user_id": user_id}
-        else:
-            # Default to latest session if none specified
-            cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(1)
-            conversation = next(cursor, None)
-            if not conversation: return None
-            query = {"_id": conversation["_id"]}
+        if self.db is None:
+            return None
 
-        conversation = self.db.conversations.find_one(query)
+        from bson import ObjectId
+
+        def _fetch():
+            if conversation_id:
+                try:
+                    if len(conversation_id) == 24:  # MongoDB ObjectId
+                        q = {"_id": ObjectId(conversation_id), "user_id": user_id}
+                    else:  # session_id (UUID string)
+                        q = {"session_id": conversation_id, "user_id": user_id}
+                except Exception:
+                    q = {"session_id": conversation_id, "user_id": user_id}
+                return self.db.conversations.find_one(q)
+            else:
+                cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(1)
+                return next(cursor, None)
+
+        conversation = await asyncio.to_thread(_fetch)
 
         if conversation:
-            # Safe date extraction
             created_at = conversation.get("created_at")
             updated_at = conversation.get("updated_at") or created_at or datetime.utcnow()
-            if not created_at: created_at = updated_at
-            
+            if not created_at:
+                created_at = updated_at
+
             conversation["created_at"] = created_at.isoformat() if isinstance(created_at, datetime) else str(created_at)
             conversation["updated_at"] = updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at)
             conversation["id"] = str(conversation.pop("_id"))
 
         return conversation
 
-    def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
-        """Delete user's entire conversation history"""
-        if self.db is None: return False
-        result = self.db.conversations.delete_one({"user_id": user_id, "session_id": conversation_id})
+    async def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
+        """Delete a specific conversation"""
+        if self.db is None:
+            return False
+        result = await asyncio.to_thread(
+            self.db.conversations.delete_one,
+            {"user_id": user_id, "session_id": conversation_id},
+        )
 
-        # Invalidate cache
+        # Invalidate cache (async)
         try:
-            self._redis.delete(f"history_list:{user_id}")
+            await self._redis.delete(f"history_list:{user_id}")
         except Exception as e:
             logger.error(f"Redis cache invalidation error: {e}")
 
         if result.deleted_count > 0:
-            logger.info(f"Deleted all conversations for user {user_id}")
+            logger.info(f"Deleted conversation {conversation_id} for user {user_id}")
             return True
 
         return False

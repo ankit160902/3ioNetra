@@ -2,7 +2,6 @@
 import json
 import urllib.request
 import re
-from datetime import datetime, timezone
 import os
 
 def clean_text(text):

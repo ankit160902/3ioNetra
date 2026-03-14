@@ -1,7 +1,5 @@
 
 import json
-import csv
-import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -41,7 +39,8 @@ def analyze_raw_temples():
                 if name:
                     ref = f"Temple: {name} ({state})"
                     seen_refs[ref].append(file_path.name)
-        except: pass
+        except Exception:
+            pass
 
     duplicates = {ref: files for ref, files in seen_refs.items() if len(files) > 1}
     

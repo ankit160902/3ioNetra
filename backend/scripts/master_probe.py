@@ -2,7 +2,9 @@
 master_probe.py — 3ioNetra Master Logic Validation Suite (100+ Scenarios)
 Tests: intent, life_domain, needs_direct_answer, recommend_products
 """
-import asyncio, os, sys, json, time
+import asyncio
+import os
+import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from services.intent_agent import get_intent_agent
 
@@ -203,10 +205,14 @@ async def run():
 
             print(f"{s['id']:<5} | {s['name']:<25} | {got_domain:<14} | {got_intent:<18} | {str(got_direct):<7} | {str(got_rec):<6} | {status}")
             if not ok:
-                if not domain_ok:  print(f"       ↳ Domain : got '{got_domain}', expected one of {s['domain']}")
-                if not intent_ok:  print(f"       ↳ Intent : got '{got_intent}', expected one of {s['intents']}")
-                if not direct_ok:  print(f"       ↳ Direct : got {got_direct}, expected {s['direct']}")
-                if not rec_ok:     print(f"       ↳ Rec    : got {got_rec}, expected {s['rec']}")
+                if not domain_ok:
+                    print(f"       ↳ Domain : got '{got_domain}', expected one of {s['domain']}")
+                if not intent_ok:
+                    print(f"       ↳ Intent : got '{got_intent}', expected one of {s['intents']}")
+                if not direct_ok:
+                    print(f"       ↳ Direct : got {got_direct}, expected {s['direct']}")
+                if not rec_ok:
+                    print(f"       ↳ Rec    : got {got_rec}, expected {s['rec']}")
 
         except Exception as e:
             print(f"{s['id']:<5} | {s['name']:<25} | ERROR: {str(e)[:55]}")
@@ -218,7 +224,7 @@ async def run():
     pct   = int(100 * passed / total) if total else 0
 
     print(f"\n{'═'*110}")
-    print(f"  CATEGORY BREAKDOWN:")
+    print("  CATEGORY BREAKDOWN:")
     cats = {"A":"Career","B":"Family","C":"Relationships","D":"Spiritual","E":"Emotional",
             "F":"Health/Diet","G":"Puja","H":"Astrology","I":"Crisis","J":"Products","K":"Edge Cases"}
     for k, v in sorted(categories.items()):

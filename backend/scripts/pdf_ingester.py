@@ -1,10 +1,8 @@
-import os
 import io
 import logging
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 import pdfplumber
-from PIL import Image
 
 # Add parent directory to path
 import sys
@@ -110,7 +108,10 @@ class PDFIngester:
         """Infer scripture name from source name (same logic as ingest_all_data)"""
         # (Simplified version of the logic in ingest_all_data.py)
         source_lower = source.lower()
-        if 'gita' in source_lower: return 'Bhagavad Gita'
-        if 'ramayana' in source_lower: return 'Ramayana'
-        if 'mahabharata' in source_lower: return 'Mahabharata'
+        if 'gita' in source_lower:
+            return 'Bhagavad Gita'
+        if 'ramayana' in source_lower:
+            return 'Ramayana'
+        if 'mahabharata' in source_lower:
+            return 'Mahabharata'
         return 'Sanatan Scriptures'

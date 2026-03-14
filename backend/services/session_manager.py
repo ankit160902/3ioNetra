@@ -1,3 +1,4 @@
+import asyncio
 from typing import Optional, Dict
 from datetime import datetime, timedelta
 import logging
@@ -105,6 +106,19 @@ class MongoSessionManager(SessionManager):
                 "last_activity",
                 expireAfterSeconds=self._ttl_seconds
             )
+        else:
+            # Update TTL if the configured value differs from the existing index
+            existing_ttl = indexes["last_activity_1"].get("expireAfterSeconds")
+            if existing_ttl is not None and existing_ttl != self._ttl_seconds:
+                try:
+                    self.db.command(
+                        "collMod", "sessions",
+                        index={"keyPattern": {"last_activity": 1},
+                               "expireAfterSeconds": self._ttl_seconds}
+                    )
+                    logger.info(f"Updated sessions TTL index: {existing_ttl}s → {self._ttl_seconds}s")
+                except Exception as e:
+                    logger.warning(f"Failed to update TTL index: {e}")
 
     async def create_session(self, min_signals=4, min_turns=3, max_turns=6) -> SessionState:
         session = SessionState(
@@ -117,33 +131,41 @@ class MongoSessionManager(SessionManager):
         return session
 
     async def get_session(self, session_id: str) -> Optional[SessionState]:
-        if self.collection is None: return None
-        doc = self.collection.find_one({"session_id": session_id})
+        if self.collection is None:
+            return None
+        doc = await asyncio.to_thread(self.collection.find_one, {"session_id": session_id})
         if not doc:
             return None
 
         session = SessionState.from_dict(doc)
 
-        # 🔥 CRITICAL: refresh activity on read
+        # Refresh last_activity with a lightweight $set instead of full document replace
         session.last_activity = datetime.utcnow()
-        await self.update_session(session)
+        await asyncio.to_thread(
+            self.collection.update_one,
+            {"session_id": session_id},
+            {"$set": {"last_activity": session.last_activity}},
+        )
 
         return session
 
     async def update_session(self, session: SessionState) -> None:
-        if self.collection is None: return
+        if self.collection is None:
+            return
         session.last_activity = datetime.utcnow()
         data = session.to_dict()
 
-        self.collection.update_one(
+        await asyncio.to_thread(
+            self.collection.update_one,
             {"session_id": session.session_id},
             {"$set": data},
-            upsert=True
+            upsert=True,
         )
 
     async def delete_session(self, session_id: str) -> None:
-        if self.collection is None: return
-        self.collection.delete_one({"session_id": session_id})
+        if self.collection is None:
+            return
+        await asyncio.to_thread(self.collection.delete_one, {"session_id": session_id})
 
 
 # ============================================================================
@@ -153,7 +175,6 @@ class MongoSessionManager(SessionManager):
 class RedisSessionManager(SessionManager):
     def __init__(self, ttl_minutes: int):
         import redis.asyncio as redis
-        import json
         
         self._ttl_seconds = ttl_minutes * 60
         self._redis = redis.Redis(
@@ -165,13 +186,18 @@ class RedisSessionManager(SessionManager):
         )
         logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m)")
         
-        # Test connection
+        # Test connection (sync ping to validate at init time)
         try:
-            # Ping is not async in redis-py, but redis.asyncio wraps it.
-            # However, the connection itself is established on first use.
-            # A simple `await self._redis.ping()` would be better if we want to test immediately.
-            # For now, we'll rely on operations to fail if connection isn't there.
-            pass 
+            import redis as sync_redis
+            test_client = sync_redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB,
+                password=settings.REDIS_PASSWORD,
+                socket_connect_timeout=3,
+            )
+            test_client.ping()
+            test_client.close()
         except Exception as e:
             logger.error(f"❌ Redis connection failed: {e}")
             raise e

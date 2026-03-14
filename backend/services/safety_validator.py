@@ -52,36 +52,21 @@ BANNED_RESPONSE_PATTERNS = [
 
 # Mental health resources (India-focused)
 MENTAL_HEALTH_RESOURCES = """
-Please know that speaking with a mental health professional can be incredibly helpful.
-
-In India, you can reach:
-- iCall: 9152987821 (Mon-Sat, 8am-10pm)
-- Vandrevala Foundation: 1860-2662-345 (24/7)
-- NIMHANS: 080-46110007
-
-You are not alone in this.
+Please know that speaking with a mental health professional can be incredibly helpful. In India, you can reach iCall at 9152987821 (Mon-Sat, 8am-10pm), Vandrevala Foundation at 1860-2662-345 (available 24/7), or NIMHANS at 080-46110007. You are not alone in this.
 """
 
 # Addiction-specific resources
 ADDICTION_RESOURCES = """
-Recovery is a journey, and you don't have to walk it alone. Professional support can make a real difference.
-
-In India, you can reach:
-- TTK Kolkata De-addiction Centre: 033-22802080
-- NIMHANS Addiction Medicine: 080-26995000
-- Alcoholics Anonymous India: 9000099100
-- Narcotics Anonymous India: 9323010011
-
-Spiritual practices can complement professional treatment beautifully.
+Recovery is a journey, and you do not have to walk it alone. Professional support can make a real difference. In India, you can reach TTK Kolkata De-addiction Centre at 033-22802080, NIMHANS Addiction Medicine at 080-26995000, Alcoholics Anonymous India at 9000099100, or Narcotics Anonymous India at 9323010011. Spiritual practices can complement professional treatment beautifully.
 """
 
-CRISIS_RESPONSE_TEMPLATE = """I hear you, and I want you to know that what you're feeling matters deeply.
+CRISIS_RESPONSE_TEMPLATE = """What you are feeling right now matters deeply, and you do not have to carry this alone.
 
 {resources}
 
-Right now, let's take one slow breath together. Just breathe in gently... and breathe out. You don't have to carry this alone.
+Right now, let us take one slow breath together. Just breathe in gently... and breathe out.
 
-Would you like to share more about what's happening? I'm here to listen without judgment."""
+If you feel ready, you can share more about what is happening. There is no rush."""
 
 # Professional help suffix to append to responses
 PROFESSIONAL_HELP_SUFFIX = """

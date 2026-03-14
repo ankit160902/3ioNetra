@@ -3,7 +3,7 @@ Main FastAPI application for 3ioNetra Spiritual Companion
 Lean bootstrap script that orchestrates modular routers and heavy component initialization.
 """
 import logging
-from typing import Optional
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -13,6 +13,7 @@ from rag.pipeline import RAGPipeline
 
 # Import routers after they are created
 from routers import auth, chat, admin
+from routers.dependencies import set_rag_pipeline
 
 # Setup logging
 logging.basicConfig(
@@ -31,9 +32,8 @@ async def lifespan(app: FastAPI):
     rag_pipe = RAGPipeline()
     await rag_pipe.initialize()
     
-    # 2. Inject RAG pipeline into routers
-    chat.set_rag_pipeline(rag_pipe)
-    admin.set_rag_pipeline(rag_pipe)
+    # 2. Inject RAG pipeline into routers (single shared reference)
+    set_rag_pipeline(rag_pipe)
     
     # 3. Initialize other services
     from services.companion_engine import get_companion_engine
@@ -67,8 +67,6 @@ app = FastAPI(
 )
 
 # CORS middleware
-import os
-
 _default_origins = [
     "https://3iomitra.3iosetu.com",
     "https://3io-netra.vercel.app",

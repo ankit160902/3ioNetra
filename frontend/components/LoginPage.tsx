@@ -169,8 +169,8 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         </div>
 
         {/* Login/Register Form */}
-        <div className="bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 p-7 md:p-8 border border-orange-100/50">
-          <h2 className="text-base font-black text-gray-900 mb-6 text-center uppercase tracking-widest opacity-80">
+        <div data-testid="auth-form" className="bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 p-7 md:p-8 border border-orange-100/50">
+          <h2 data-testid="auth-heading" className="text-base font-black text-gray-900 mb-6 text-center uppercase tracking-widest opacity-80">
             {isRegisterMode
               ? (registrationStep === 1 ? 'Create Account' : 'Complete Profile')
               : 'Welcome Back'}
@@ -178,7 +178,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
           {/* Progress indicator for registration */}
           {isRegisterMode && (
-            <div className="flex items-center justify-center gap-2 mb-6">
+            <div data-testid="step-indicators" className="flex items-center justify-center gap-2 mb-6">
               <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 1 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
               <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 2 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
             </div>

@@ -1,20 +1,17 @@
 import asyncio
-import os
 import logging
 from pathlib import Path
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock
 
 # Add parent directory to path
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
 
 from scripts.ingest_all_data import UniversalScriptureIngester
-from llm.service import get_llm_service
 
 async def verify():
     # Setup logging
     logging.basicConfig(level=logging.INFO)
-    logger = logging.getLogger(__name__)
 
     # Create a dummy video file for testing
     test_video = Path("/tmp/test_spiritual_video.mp4")

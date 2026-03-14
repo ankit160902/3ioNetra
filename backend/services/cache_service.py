@@ -8,18 +8,29 @@ logger = logging.getLogger(__name__)
 
 class CacheService:
     """Redis-based caching service for RAG and LLM responses."""
-    
+
     def __init__(self):
         self._enabled = False
         try:
-            import redis.asyncio as redis
-            self._redis = redis.Redis(
+            import redis.asyncio as aioredis
+            import redis as sync_redis
+            self._redis = aioredis.Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
-                db=1, # Use DB 1 for cache to separate from sessions
+                db=1,  # Use DB 1 for cache to separate from sessions
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True
             )
+            # Verify connection with a sync ping (same pattern as RedisSessionManager)
+            test_client = sync_redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=1,
+                password=settings.REDIS_PASSWORD,
+                socket_connect_timeout=3,
+            )
+            test_client.ping()
+            test_client.close()
             self._enabled = True
             logger.info("CacheService initialized (Redis DB 1)")
         except Exception as e:

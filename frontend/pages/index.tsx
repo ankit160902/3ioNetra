@@ -7,6 +7,7 @@ import { useAuth } from '../hooks/useAuth';
 import LoginPage from '../components/LoginPage';
 import TTSButton from '../components/TTSButton';
 import { ShoppingBag, ExternalLink } from 'lucide-react';
+import { parseResponseForVerses, ParsedSegment } from '../utils/parseResponseForVerses';
 
 /* ============================================================================
    Components
@@ -116,91 +117,6 @@ interface ConversationSummary {
 }
 
 
-/**
- * Detect verse lines in a response.
- * Returns an array of segments: { type: 'text' | 'verse', content: string }
- * A "verse" segment is any line that contains a scripture citation pattern.
- */
-function parseResponseForVerses(text: string): { type: 'text' | 'verse' | 'mantra'; content: string }[] {
-  if (!text) return [{ type: 'text', content: '' }];
-
-  if (text.includes('[VERSE]') || text.includes('[MANTRA]')) {
-    const segments: { type: 'text' | 'verse' | 'mantra'; content: string }[] = [];
-    const regex = /\[(VERSE|MANTRA)\]([\s\S]*?)\[\/\1\]/g;
-    let lastIndex = 0;
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      const beforeText = text.substring(lastIndex, match.index);
-      if (beforeText.trim()) {
-        // Clean punctuation artifacts at tag boundaries
-        let cleaned = beforeText;
-        if (lastIndex > 0) {
-          // This text follows a previous tag — strip leading punctuation
-          cleaned = cleaned.replace(/^\s*[""''\u2018\u2019\u201c\u201d]*[.,;:]+\s*/, '');
-        }
-        // Strip trailing punctuation before upcoming tag
-        cleaned = cleaned.replace(/[,;:]\s*$/, '');
-        if (cleaned.trim()) {
-          segments.push({ type: 'text', content: cleaned });
-        }
-      }
-      const tagType = match[1].toLowerCase() as 'verse' | 'mantra';
-      let tagContent = match[2].trim();
-      if (tagContent) {
-        // Robust cleaning of markdown artifacts from the beginning/end
-        tagContent = tagContent.replace(/^[*_>`”„”' ]+/, '').replace(/[*_>`”„”' ]+$/, '');
-        segments.push({ type: tagType, content: tagContent });
-      }
-      lastIndex = regex.lastIndex;
-    }
-
-    const remainingText = text.substring(lastIndex);
-    if (remainingText.trim()) {
-      // Clean leading punctuation orphaned by preceding tag card
-      const cleaned = remainingText.replace(/^\s*[""''\u2018\u2019\u201c\u201d]*[.,;:]+\s*/, '');
-      if (cleaned.trim()) {
-        segments.push({ type: 'text', content: cleaned });
-      }
-    }
-
-    return segments.length > 0 ? segments : [{ type: 'text', content: text }];
-  }
-
-  const lines = text.split('\n');
-  const segments: { type: 'text' | 'verse' | 'mantra'; content: string }[] = [];
-
-  const versePatterns = [
-    /[\u0900-\u097F]{3,}/,
-    /^\s*["'""].*["'""]\s*[-–—]\s*/,
-    /^\s*["'""].*["'""]\s*$/,
-    /^\s*\(\b(Bhagavad\s*Gita|Gita|Yoga\s*Sutra|Upanishad|Vedas?|Mahabharata|Ramayana)\b.*\d+.*\)\s*$/i,
-    /^\s*(Chapter|Verse|Shloka|Sutra|Mantra)\s*\d/i,
-  ];
-
-  let currentText: string[] = [];
-
-  for (const line of lines) {
-    const isVerse = versePatterns.some(p => p.test(line));
-
-    if (isVerse) {
-      if (currentText.length > 0) {
-        segments.push({ type: 'text', content: currentText.join('\n') });
-        currentText = [];
-      }
-      segments.push({ type: 'verse', content: line });
-    } else {
-      currentText.push(line);
-    }
-  }
-
-  if (currentText.length > 0) {
-    segments.push({ type: 'text', content: currentText.join('\n') });
-  }
-
-  return segments;
-}
-
 export default function Home() {
   const { user, isAuthenticated, login, register, logout, isLoading: authLoading, error: authError, getAuthHeader } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -256,6 +172,11 @@ export default function Home() {
     error: sessionError,
   } = useSession(userProfile, getAuthHeader());
 
+  const parsedMessages = useMemo(
+    () => messages.map(m => m.role === 'assistant' && m.content ? parseResponseForVerses(m.content) : null),
+    [messages]
+  );
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
@@ -287,19 +208,11 @@ export default function Home() {
     const convId = currentConversationId || session.sessionId;
     if (!convId) return;
 
-    const timer = setTimeout(() => {
-      const title = messages.find(m => m.role === 'user')?.content.slice(0, 50) || 'Conversation';
-      fetch(`${API_URL}/api/user/conversations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({
-          conversation_id: convId,
-          title,
-          messages: messages.map(m => ({
-            role: m.role, content: m.content, citations: m.citations, timestamp: m.timestamp.toISOString(),
-          })),
-        }),
-      }).then(() => fetchHistory()).catch(err => console.error('Auto-save failed:', err));
+    const timer = setTimeout(async () => {
+      try {
+        await saveConversation(convId);
+        await fetchHistory();
+      } catch (err) { console.error('Auto-save failed:', err); }
     }, 1500);
 
     return () => clearTimeout(timer);
@@ -586,7 +499,7 @@ export default function Home() {
       </Head>
 
       <main className="h-[100dvh] bg-[#fcfcfc] flex overflow-hidden font-['Inter']">
-        <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white/90 backdrop-blur-xl border-r border-orange-100 shadow-2xl transform transition-all duration-500 ease-in-out lg:relative ${isHistoryOpen ? 'translate-x-0' : '-translate-x-full lg:-ml-72'}`}>
+        <aside data-testid="sidebar" className={`fixed inset-y-0 left-0 z-50 w-72 bg-white/90 backdrop-blur-xl border-r border-orange-100 shadow-2xl transform transition-all duration-500 ease-in-out lg:relative ${isHistoryOpen ? 'translate-x-0' : '-translate-x-full lg:-ml-72'}`}>
           <div className="h-full flex flex-col">
             <div className="p-5 border-b border-orange-100/50 flex items-center justify-between">
               <h2 className="font-black text-gray-900 flex items-center gap-2 text-lg tracking-tight">
@@ -639,7 +552,7 @@ export default function Home() {
           <header className="sticky top-0 z-30 bg-white/70 backdrop-blur-md border-b border-orange-50 shrink-0 px-4 py-2.5">
             <div className="max-w-4xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <button onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all shadow-sm border border-orange-50 bg-white">
+                <button data-testid="sidebar-toggle" onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="p-2 text-gray-600 hover:text-orange-600 hover:bg-orange-50 rounded-xl transition-all shadow-sm border border-orange-50 bg-white">
                   <History className={`w-4 h-4 transition-transform duration-500 ${isHistoryOpen ? 'rotate-180' : ''}`} />
                 </button>
                 <div className="flex flex-col">
@@ -705,7 +618,7 @@ export default function Home() {
                           : 'bg-white border border-orange-50/50 text-gray-800 rounded-tl-sm shadow-sm'
                           }`}>
                           {message.role === 'assistant' && message.content ? (() => {
-                            const segments = parseResponseForVerses(message.content);
+                            const segments = parsedMessages[index] || parseResponseForVerses(message.content);
                             return (
                               <div className="message-content space-y-2.5 md:space-y-3 text-sm md:text-[15px]">
                                 {segments.map((seg, si) => (
@@ -792,6 +705,7 @@ export default function Home() {
                   <form onSubmit={handleTextSubmit} className="flex-1 flex items-center">
                     <input
                       id="chat-input"
+                      data-testid="chat-input"
                       name="message"
                       type="text"
                       value={input}
@@ -803,6 +717,7 @@ export default function Home() {
                     />
                     <button
                       type="submit"
+                      data-testid="send-button"
                       disabled={isProcessing || !input.trim()}
                       className="p-3 md:p-3.5 bg-gradient-to-br from-orange-500 to-amber-700 hover:from-orange-600 hover:to-amber-800 text-white rounded-xl shadow-lg disabled:grayscale disabled:opacity-20 transition-all duration-500 active:scale-95"
                     >

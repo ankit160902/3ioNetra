@@ -4,7 +4,7 @@ Session models for conversation state management
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import uuid
 
 
@@ -27,6 +27,18 @@ class SignalType(str, Enum):
     USER_GOAL = "user_goal"
     INTENT = "intent"
     SEVERITY = "severity"
+
+
+class IntentType(str, Enum):
+    """Intent categories from the IntentAgent classifier"""
+    GREETING = "GREETING"
+    SEEKING_GUIDANCE = "SEEKING_GUIDANCE"
+    EXPRESSING_EMOTION = "EXPRESSING_EMOTION"
+    ASKING_INFO = "ASKING_INFO"
+    ASKING_PANCHANG = "ASKING_PANCHANG"
+    PRODUCT_SEARCH = "PRODUCT_SEARCH"
+    CLOSURE = "CLOSURE"
+    OTHER = "OTHER"
 
 
 @dataclass
@@ -81,6 +93,14 @@ class SessionState:
     # Proactive product suggestion anti-spam guard
     last_proactive_product_turn: int = -1
 
+    # Session-level dedup: tracks which product IDs have been shown
+    shown_product_ids: Set[str] = field(default_factory=set)
+
+    # Track what practices Mitra suggested (for acceptance-based product inference)
+    # Each entry: {"turn": int, "practice": str, "product_keywords": ["rudraksha mala", "japa mala"]}
+    # FIFO capped at 3 entries
+    last_suggestions: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict:
         return {
             "session_id": self.session_id,
@@ -97,6 +117,8 @@ class SessionState:
             "last_guidance_turn": self.last_guidance_turn,
             "is_returning_user": self.is_returning_user,
             "last_proactive_product_turn": self.last_proactive_product_turn,
+            "shown_product_ids": list(self.shown_product_ids),
+            "last_suggestions": self.last_suggestions,
             "memory": self.memory.to_dict() if self.memory else None
         }
 
@@ -126,6 +148,8 @@ class SessionState:
             last_guidance_turn=data.get("last_guidance_turn", -1),
             is_returning_user=data.get("is_returning_user", False),
             last_proactive_product_turn=data.get("last_proactive_product_turn", -1),
+            shown_product_ids=set(data.get("shown_product_ids", [])),
+            last_suggestions=data.get("last_suggestions", []),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )
         return session
