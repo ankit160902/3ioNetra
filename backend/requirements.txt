@@ -33,6 +33,7 @@ pydub
 # Data Processing
 numpy
 rank-bm25
+scipy>=1.13.0
 
 # Utilities
 python-multipart
@@ -43,6 +44,12 @@ python-dotenv
 loguru
 email-validator
 redis
+
+# Query logging (async SQLite)
+aiosqlite
+
+# Concept ontology graph
+networkx
 
 # Multi-model evaluation (optional)
 anthropic>=0.39.0

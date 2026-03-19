@@ -1,14 +1,14 @@
 """
 Response Composer - Single authority for response generation
 """
-from datetime import datetime
 from typing import List, Dict, Optional
 import logging
 
 from models.dharmic_query import DharmicQueryObject
 from models.memory_context import ConversationMemory
 from models.session import ConversationPhase
-from services.panchang_service import get_panchang_service
+from config import settings
+from services.profile_builder import build_user_profile
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,6 @@ class ResponseComposer:
     def __init__(self):
         from llm.service import get_llm_service
         self.llm = get_llm_service()
-        self.panchang = get_panchang_service()
         self.available = self.llm.available
         logger.info(f"ResponseComposer initialized (LLM available={self.available})")
 
@@ -59,11 +58,12 @@ class ResponseComposer:
         # Optionally thin out the scripture context when a user is very
         # distressed – we still keep a couple of strong anchors.
         context_docs = retrieved_verses
-        if reduce_scripture and len(retrieved_verses) > 2:
-            context_docs = retrieved_verses[:2]
+        _distress_cap = max(1, settings.RERANK_TOP_K - 1)
+        if reduce_scripture and len(retrieved_verses) > _distress_cap:
+            context_docs = retrieved_verses[:_distress_cap]
 
         # Build user profile from memory
-        user_profile = self._build_user_profile(memory)
+        user_profile = build_user_profile(memory)
 
         # Inject past memories into profile
         if past_memories:
@@ -108,10 +108,11 @@ class ResponseComposer:
             return
 
         context_docs = retrieved_verses
-        if reduce_scripture and len(retrieved_verses) > 2:
-            context_docs = retrieved_verses[:2]
+        _distress_cap = max(1, settings.RERANK_TOP_K - 1)
+        if reduce_scripture and len(retrieved_verses) > _distress_cap:
+            context_docs = retrieved_verses[:_distress_cap]
 
-        user_profile = self._build_user_profile(memory)
+        user_profile = build_user_profile(memory)
         if past_memories:
             user_profile["past_memories"] = past_memories
 
@@ -129,77 +130,6 @@ class ResponseComposer:
                 yield chunk
         else:
             yield self._compose_fallback(dharmic_query)
-
-    def _build_user_profile(self, memory: ConversationMemory) -> Dict:
-        """
-        Build a user profile dictionary from conversation memory.
-        This includes all personalization data for the LLM.
-        """
-        profile = {}
-        
-        # User identity and contact info (from authentication)
-        if memory.user_name:
-            profile['name'] = memory.user_name
-        if memory.user_email:
-            profile['email'] = memory.user_email
-        if memory.user_phone:
-            profile['phone'] = memory.user_phone
-        if memory.user_dob:
-            profile['dob'] = memory.user_dob
-        if memory.user_id:
-            profile['user_id'] = memory.user_id
-        if memory.user_created_at:
-            profile['created_at'] = memory.user_created_at
-        
-        # 🔄 Returning user flag
-        profile['is_returning_user'] = memory.is_returning_user
-        
-        # Demographics and current state from story
-        story = memory.story
-        if story.age_group:
-            profile['age_group'] = story.age_group
-        if story.gender:
-            profile['gender'] = story.gender
-        if story.profession:
-            profile['profession'] = story.profession
-        
-        # Add situational context for the "Problem" and "Action" pillars
-        if story.primary_concern:
-            profile['primary_concern'] = story.primary_concern
-        if story.emotional_state:
-            profile['emotional_state'] = story.emotional_state
-        if story.life_area:
-            profile['life_area'] = story.life_area
-        if story.preferred_deity:
-            profile['preferred_deity'] = story.preferred_deity
-        if story.location:
-            profile['location'] = story.location
-        if story.spiritual_interests:
-            profile['spiritual_interests'] = story.spiritual_interests
-
-        # Add current Panchang context for relevant guidance
-        if self.panchang.available:
-            p_data = self.panchang.get_panchang(datetime.now())
-            if "error" not in p_data:
-                profile["current_panchang"] = {
-                    "tithi": p_data["tithi"],
-                    "nakshatra": p_data["nakshatra"],
-                    "special_day": self.panchang.get_special_day_info(p_data)
-                }
-
-        # 🔥 Added nested spiritual profile fields
-        if story.rashi:
-            profile['rashi'] = story.rashi
-        if story.gotra:
-            profile['gotra'] = story.gotra
-        if story.nakshatra:
-            profile['nakshatra'] = story.nakshatra
-        if story.temple_visits:
-            profile['temple_visits'] = story.temple_visits
-        if story.purchase_history:
-            profile['purchase_history'] = story.purchase_history
-            
-        return profile
 
     def _compose_fallback(self, dq: DharmicQueryObject) -> str:
         response = (

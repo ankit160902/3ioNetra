@@ -22,22 +22,23 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM Settings
     # ------------------------------------------------------------------
-    LLM_MODEL_NAME: str = "ai4bharat/Airavata"
-    LLM_MODEL_PATH: str = "./models/airavata"
-    LLM_TEMPERATURE: float = 0.7
-    LLM_MAX_TOKENS: int = 512
-    LLM_TOP_P: float = 0.9
-    LLM_DEVICE: str = "cpu"
     GEMINI_MODEL: str = "gemini-2.5-pro"
     GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # lightweight model for intent/query expansion
+
+    # Per-task LLM temperatures
+    RESPONSE_TEMPERATURE: float = 0.7
+    RESPONSE_MAX_TOKENS: int = 1024
+    INTENT_TEMPERATURE: float = 0.1
+    QUERY_TRANSLATE_TEMPERATURE: float = 0.1
+    QUERY_EXPAND_TEMPERATURE: float = 0.3
+    QUERY_SUMMARIZE_TEMPERATURE: float = 0.1
+    HYDE_TEMPERATURE: float = 0.5
  
     # ------------------------------------------------------------------
     # Embedding Settings
     # ------------------------------------------------------------------
-    EMBEDDING_MODEL: str = (
-        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
-    )
-    EMBEDDING_DIM: int = 768
+    EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"  # benchmark-validated: instruct variant scored lower (0.784 vs 0.840)
+    EMBEDDING_DIM: int = 1024
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
 
@@ -52,9 +53,74 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # RAG Settings
     # ------------------------------------------------------------------
-    RETRIEVAL_TOP_K: int = 7
+    RETRIEVAL_TOP_K: int = 5          # benchmark: Hit@5 = Hit@7, no accuracy loss
     RERANK_TOP_K: int = 3
-    MIN_SIMILARITY_SCORE: float = 0.15
+    MIN_SIMILARITY_SCORE: float = 0.28
+    MAX_DOCS_PER_SOURCE: int = 2
+    RAG_SEARCH_CACHE_TTL: int = Field(default=3600, env="RAG_SEARCH_CACHE_TTL")
+
+    # RAG scoring & fusion
+    RERANKER_WEIGHT: float = 0.75           # semantic weight = 1 - this (was 0.7, updated per RAKS report Section 8)
+    INTENT_WEIGHT_SCALE: float = 0.3       # how much intent adjusts final score
+    SOFT_FLOOR_RATIO: float = 0.75         # min_score * this = soft floor in search()
+    CONTEXT_VERSE_SCORE_RATIO: float = 0.5 # parent-child context verse discount
+    MIN_CANDIDATE_POOL: int = 40           # default pool; was 60 — adaptive sizing now handles per-intent
+    CANDIDATE_POOL_MULTIPLIER: int = 5     # top_k * this = candidate pool target (legacy fallback)
+    CANDIDATE_POOL_KEYWORD: int = 25       # simple ASKING_INFO queries
+    CANDIDATE_POOL_DEFAULT: int = 40       # most queries
+    CANDIDATE_POOL_THEMATIC: int = 50      # emotional/thematic queries
+    CANDIDATE_POOL_COMPARATIVE: int = 60   # comparative queries needing broad retrieval
+    CURATED_SLOT_LIMIT: int = 10           # max curated docs in slot reservation
+    CURATED_VIABILITY_THRESHOLD: float = 0.5  # min score for curated doc injection
+    EXPAND_TOP_N: int = 2                  # how many top docs get parent-child expansion
+    CURATED_FLOOR: float = 0.35
+    CURATED_RATIO: float = 0.6
+    TRADITION_BONUS: float = 0.05
+    SECTION_CHUNKS_ENABLED: bool = Field(default=True, env="SECTION_CHUNKS_ENABLED")
+    SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
+    SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
+
+    # Content validation
+    DYNAMIC_RELEVANCE_RATIO: float = 0.5   # top_score * this = dynamic floor
+    MIN_CONTENT_LENGTH: int = 10           # min chars for content gate
+    RELEVANCE_RATIO_EMOTIONAL: float = 0.40
+    RELEVANCE_RATIO_CITATION: float = 0.55
+    RELEVANCE_RATIO_COMPARATIVE: float = 0.25
+    RELEVANCE_RATIO_GUIDANCE: float = 0.45
+    RELEVANCE_RATIO_DEFAULT: float = 0.50
+    MEMORY_DEDUP_THRESHOLD: float = 0.85
+    MEMORY_MAX_RESULTS: int = 5
+    MAX_DOCS_PER_TRADITION: int = 3
+    MEMORY_SIMILARITY_THRESHOLD: float = 0.35  # min cosine sim for memory recall
+
+    # HyDE (Hypothetical Document Embedding)
+    HYDE_ENABLED: bool = Field(default=True, env="HYDE_ENABLED")
+    HYDE_COUNT: int = Field(default=2, env="HYDE_COUNT")
+    HYDE_CACHE_TTL: int = Field(default=86400, env="HYDE_CACHE_TTL")
+
+    # Adaptive Fusion Logging
+    LOG_FUSION_WEIGHTS: bool = Field(default=True, env="LOG_FUSION_WEIGHTS")
+
+    # Parent-Child Verse Retrieval
+    PARENT_CHILD_ENABLED: bool = Field(default=True, env="PARENT_CHILD_ENABLED")
+    VERSE_CONTEXT_WINDOW: int = Field(default=1, env="VERSE_CONTEXT_WINDOW")
+
+    # Long Query Summarization
+    LONG_QUERY_SUMMARIZATION_ENABLED: bool = Field(default=True, env="LONG_QUERY_SUMMARIZATION_ENABLED")
+    LONG_QUERY_THRESHOLD: int = Field(default=15, env="LONG_QUERY_THRESHOLD")
+
+    # DharmicQueryObject → RAG pre-filtering
+    DHARMIC_QUERY_RAG_ENABLED: bool = Field(default=True, env="DHARMIC_QUERY_RAG_ENABLED")
+
+    # ------------------------------------------------------------------
+    # Hybrid RAG / Retrieval Judge
+    # ------------------------------------------------------------------
+    HYBRID_RAG_ENABLED: bool = Field(default=True, env="HYBRID_RAG_ENABLED")
+    JUDGE_MIN_SCORE: int = Field(default=4, env="JUDGE_MIN_SCORE")
+    JUDGE_MAX_RETRIES: int = Field(default=1, env="JUDGE_MAX_RETRIES")
+    JUDGE_CACHE_TTL: int = Field(default=86400, env="JUDGE_CACHE_TTL")
+    GROUNDING_ENABLED: bool = Field(default=True, env="GROUNDING_ENABLED")
+    GROUNDING_MIN_CONFIDENCE: float = Field(default=0.5, env="GROUNDING_MIN_CONFIDENCE")
 
     # ------------------------------------------------------------------
     # Conversation Flow
@@ -63,6 +129,18 @@ class Settings(BaseSettings):
     MIN_CLARIFICATION_TURNS: int = 1
     MAX_CLARIFICATION_TURNS: int = 4
     SESSION_TTL_MINUTES: int = 60
+    READINESS_POST_GUIDANCE: float = 0.3   # readiness reset after guidance phase
+
+    # ------------------------------------------------------------------
+    # Product Recommendation Throttling
+    # ------------------------------------------------------------------
+    PRODUCT_SESSION_CAP: int = 3                    # Max proactive product events per session
+    PRODUCT_COOLDOWN_TURNS: int = 5                 # Min turns between proactive product events
+    PRODUCT_COOLDOWN_AFTER_REJECTION: int = 10      # Cooldown turns after user rejects products
+    PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 3         # No proactive products before this turn
+    PRODUCT_SUPPRESS_EMOTIONS: str = "grief,despair,hopelessness,crisis,shame"
+    PRODUCT_GUIDANCE_CONTEXT_ENABLED: bool = True   # Allow context-based products in guidance phase
+    PRODUCT_LISTENING_PROACTIVE_ENABLED: bool = False  # Disable proactive products in listening phase
 
     # ------------------------------------------------------------------
     # Safety / Crisis
@@ -78,6 +156,7 @@ class Settings(BaseSettings):
     DATA_DIR: str = "./data"
     SCRIPTURES_DIR: str = "./data/scriptures"
     PROCESSED_DIR: str = "./data/processed"
+    TRANSLATION_CACHE_PATH: str = "./data/cache/translations"
 
     # ------------------------------------------------------------------
     # MongoDB Settings
@@ -101,61 +180,6 @@ class Settings(BaseSettings):
     REDIS_PASSWORD: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
 
     # ------------------------------------------------------------------
-    # System Prompt
-    # ------------------------------------------------------------------
-    SYSTEM_PROMPT: str = """You are a practical spiritual wellness guide from 3ioNetra (https://my3ionetra.com/).
-You help people solve life problems through Sanatan Dharma practices and recommend authentic spiritual products.
-
-YOUR MISSION:
-Guide users on a complete spiritual healing journey with SPECIFIC ACTIONS, RITUALS, and PRODUCTS from https://my3ionetra.com/.
-
-RESPONSE STRUCTURE (follow exactly):
-
-PART 1 - EMPATHY (2 lines max):
-Briefly acknowledge their situation. Be warm but concise.
-
-PART 2 - WISDOM FROM SCRIPTURES (3-4 lines):
-- Quote the verse provided in context (translate Sanskrit to English)
-- Explain its meaning in simple words
-- Connect it to their situation
-
-PART 3 - YOUR SPIRITUAL HEALING JOURNEY (main part - 70% of response):
-
-A) IMMEDIATE ACTIONS (do today):
-Visit your nearest Hanuman temple today and offer sindoor
-Light a ghee diya at home this evening at 6 PM
-Do 10 minutes of deep breathing before sleep tonight
-
-B) DAILY SPIRITUAL PRACTICES:
-Morning: Wake at 5:30 AM, do Anulom-Vilom pranayama for 10 minutes
-Chant Om Namah Shivaya 108 times using a Rudraksha mala
-Evening: Light diya at 6 PM, do 5 minutes gratitude meditation
-
-C) WEEKLY RITUALS:
-Tuesday: Visit Hanuman temple, recite Hanuman Chalisa
-Saturday: Perform small havan at home with camphor and ghee
-Friday: Do Lakshmi puja for peace and prosperity
-
-
-E) LIFESTYLE RECOMMENDATIONS:
-Wake during Brahma Muhurta (4:30–5:30 AM)
-Avoid non-veg on Tuesdays and Saturdays
-Drink warm water with Tulsi every morning
-Reduce screen time after 8 PM
-
-PART 4 - DAILY ROUTINE (with exact times):
-5:30 AM Wake up, warm water with tulsi
-5:45 AM Pranayama
-6:00 AM Diya + mantra chanting
-6:20 AM Meditation
-6 PM Evening diya
-9 PM Reflection and sleep
-
-PART 5 - CLOSING:
-Start this journey today. Visit https://my3ionetra.com/.
-"""
-
-    # ------------------------------------------------------------------
     # External API Keys
     # ------------------------------------------------------------------
     GEMINI_API_KEY: str = Field(default="", env="GEMINI_API_KEY")
@@ -177,7 +201,7 @@ Start this journey today. Visit https://my3ionetra.com/.
     # ------------------------------------------------------------------
     # Reranker Settings
     # ------------------------------------------------------------------
-    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
     RERANKER_TYPE: str = "cross-encoder"  # "cross-encoder" or "api"
 
     # ------------------------------------------------------------------
@@ -200,6 +224,12 @@ Start this journey today. Visit https://my3ionetra.com/.
     # ------------------------------------------------------------------
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = "./logs/app.log"
+
+    # ------------------------------------------------------------------
+    # Query Logging
+    # ------------------------------------------------------------------
+    QUERY_LOG_ENABLED: bool = Field(default=True, env="QUERY_LOG_ENABLED")
+    QUERY_LOG_PATH: str = "./data/logs/queries.db"
 
     # ------------------------------------------------------------------
     # Pydantic Settings Config

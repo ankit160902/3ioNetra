@@ -57,12 +57,12 @@ async def search_scripture(
 
     results = await pipeline.search(
         query=query,
-        scripture_filter=scripture,
+        scripture_filter=[scripture] if scripture else None,
         language=language,
-        top_k=limit
+        top_k=min(limit, 50)
     )
     validator = get_context_validator()
-    results = validator.validate(docs=results, min_score=0.12, max_docs=limit)
+    results = validator.validate(docs=results, query=query, min_score=settings.MIN_SIMILARITY_SCORE, max_docs=min(limit, 50))
     return {"query": query, "results": results, "count": len(results)}
 
 @router.post("/embeddings/generate")
@@ -76,14 +76,15 @@ async def generate_embeddings(text: str):
 
 @router.get("/panchang/today")
 async def get_today_panchang(lat: float = 28.6139, lon: float = 77.2090, tz: float = 5.5):
-    """Get current Panchang for the given location."""
+    """Get current Panchang for the given location with enriched spiritual context."""
     panchang_service = get_panchang_service()
     if not panchang_service.available:
         raise HTTPException(status_code=503, detail="Panchang service unavailable")
-    result = panchang_service.get_panchang(datetime.now(), latitude=lat, longitude=lon, timezone_offset=tz)
+    result = panchang_service.get_enriched_panchang(
+        datetime.now(), latitude=lat, longitude=lon, timezone_offset=tz
+    )
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
-    result["special_info"] = panchang_service.get_special_day_info(result)
     return result
 
 @router.post("/tts")

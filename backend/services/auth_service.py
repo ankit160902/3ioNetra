@@ -240,6 +240,7 @@ class AuthService:
                 "token": token,
             }
         except DuplicateKeyError:
+            logger.info(f"Registration failed: duplicate email '{email_lower}'")
             return None
 
     def login_user(self, email: str, password: str) -> Optional[Dict[str, Any]]:
@@ -560,7 +561,8 @@ class ConversationStorage:
                         q = {"_id": ObjectId(conversation_id), "user_id": user_id}
                     else:  # session_id (UUID string)
                         q = {"session_id": conversation_id, "user_id": user_id}
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"ObjectId parse failed for '{conversation_id}', using UUID query: {e}")
                     q = {"session_id": conversation_id, "user_id": user_id}
                 return self.db.conversations.find_one(q)
             else:
@@ -580,6 +582,32 @@ class ConversationStorage:
             conversation["id"] = str(conversation.pop("_id"))
 
         return conversation
+
+    async def get_recent_conversation_summaries(self, user_id: str, limit: int = 5) -> list:
+        """Fetch memory snapshots from last N conversations (lightweight projection)."""
+        if not self.db:
+            return []
+        try:
+            def _fetch():
+                cursor = self.db.conversations.find(
+                    {"user_id": user_id},
+                    {"memory": 1, "updated_at": 1, "last_title": 1, "conversation_summary": 1}
+                ).sort("updated_at", -1).limit(limit)
+                return list(cursor)
+            return await asyncio.to_thread(_fetch)
+        except Exception as e:
+            logger.error(f"Failed to fetch recent conversations: {e}")
+            return []
+
+    async def update_conversation_field(self, user_id: str, conversation_id: str, field: str, value):
+        """Update a single field on a saved conversation."""
+        if not self.db:
+            return
+        await asyncio.to_thread(
+            self.db.conversations.update_one,
+            {"user_id": user_id, "session_id": conversation_id},
+            {"$set": {field: value}}
+        )
 
     async def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete a specific conversation"""

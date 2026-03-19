@@ -4,8 +4,10 @@ Lean bootstrap script that orchestrates modular routers and heavy component init
 """
 import logging
 import os
-from fastapi import FastAPI
+import time
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 
 from config import settings
@@ -39,7 +41,12 @@ async def lifespan(app: FastAPI):
     from services.companion_engine import get_companion_engine
     companion_engine = get_companion_engine()
     companion_engine.set_rag_pipeline(rag_pipe)
-    
+
+    # 4. Initialize query logger (async SQLite for RAG analytics)
+    if settings.QUERY_LOG_ENABLED:
+        from services.query_logger import get_query_logger
+        await get_query_logger().initialize()
+
     logger.info("🎉 3ioNetra Backend Successfully Initialized!")
     
     yield
@@ -55,7 +62,12 @@ async def lifespan(app: FastAPI):
     # 2. Close MongoDB Connections
     from services.auth_service import close_mongo_client
     close_mongo_client()
-    
+
+    # 3. Close query logger
+    if settings.QUERY_LOG_ENABLED:
+        from services.query_logger import get_query_logger
+        await get_query_logger().close()
+
     logger.info("👋 3ioNetra Backend Shutdown Complete.")
 
 # Initialize FastAPI app
@@ -65,6 +77,21 @@ app = FastAPI(
     description="3ioNetra - A modularized, high-performance spiritual bot backend.",
     lifespan=lifespan
 )
+
+# Request latency middleware
+class LatencyMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = round((time.perf_counter() - start) * 1000)
+        path = request.url.path
+        # Only log API endpoints, skip static/health
+        if path.startswith("/api") and path not in ("/api/health", "/api/ready"):
+            logger.info(f"REQ_LATENCY {request.method} {path} {response.status_code} {elapsed_ms}ms")
+        response.headers["X-Response-Time-Ms"] = str(elapsed_ms)
+        return response
+
+app.add_middleware(LatencyMiddleware)
 
 # CORS middleware
 _default_origins = [

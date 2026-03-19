@@ -1,7 +1,9 @@
+import asyncio
 import logging
 import numpy as np
 from typing import List
 from datetime import datetime
+from config import settings
 from services.auth_service import get_mongo_client
 
 logger = logging.getLogger(__name__)
@@ -48,15 +50,17 @@ class LongTermMemoryService:
 
         try:
             # Check for existing memory with same text to avoid redundancy
-            existing = self.db.user_memories.find_one(
-                {"user_id": user_id, "text": text}
+            existing = await asyncio.to_thread(
+                self.db.user_memories.find_one,
+                {"user_id": user_id, "text": text},
             )
 
             if existing:
                 # Update timestamp for existing memory
-                self.db.user_memories.update_one(
+                await asyncio.to_thread(
+                    self.db.user_memories.update_one,
                     {"_id": existing["_id"]},
-                    {"$set": {"created_at": datetime.utcnow().isoformat()}}
+                    {"$set": {"created_at": datetime.utcnow().isoformat()}},
                 )
                 logger.info("Refreshed timestamp for existing memory anchor")
                 return
@@ -71,59 +75,87 @@ class LongTermMemoryService:
                 "created_at": datetime.utcnow().isoformat()
             }
 
-            self.db.user_memories.insert_one(memory_doc)
+            await asyncio.to_thread(self.db.user_memories.insert_one, memory_doc)
 
             # Enforce cap: remove oldest memories if over limit
-            count = self.db.user_memories.count_documents({"user_id": user_id})
-            if count > MAX_MEMORIES_PER_USER:
-                excess = count - MAX_MEMORIES_PER_USER
-                oldest = self.db.user_memories.find(
-                    {"user_id": user_id}
-                ).sort("created_at", 1).limit(excess)
-                old_ids = [doc["_id"] for doc in oldest]
-                self.db.user_memories.delete_many({"_id": {"$in": old_ids}})
+            def _prune_old():
+                count = self.db.user_memories.count_documents({"user_id": user_id})
+                if count > MAX_MEMORIES_PER_USER:
+                    excess = count - MAX_MEMORIES_PER_USER
+                    oldest = self.db.user_memories.find(
+                        {"user_id": user_id}
+                    ).sort("created_at", 1).limit(excess)
+                    old_ids = [doc["_id"] for doc in oldest]
+                    if old_ids:
+                        self.db.user_memories.delete_many({"_id": {"$in": old_ids}})
+                    return excess
+                return 0
+
+            excess = await asyncio.to_thread(_prune_old)
+            if excess:
                 logger.info(f"Pruned {excess} oldest memories for user {user_id}")
 
             logger.info(f"Stored new long-term semantic memory for user {user_id}")
         except Exception as e:
             logger.error(f"Failed to store long-term memory: {e}")
 
-    async def retrieve_relevant_memories(self, user_id: str, query: str, top_k: int = 3) -> List[str]:
+    async def retrieve_relevant_memories(self, user_id: str, query: str, top_k: int = 5) -> List[str]:
         """Retrieve semantically similar past memories from the dedicated user_memories collection."""
         if self.db is None:
+            logger.debug("Memory retrieval skipped: database not connected")
             return []
 
         if not self.rag_pipeline:
+            logger.debug("Memory retrieval skipped: RAG pipeline not available")
             return []
 
         try:
             # Get all memories for this user
-            cursor = self.db.user_memories.find(
-                {"user_id": user_id},
-                {"text": 1, "embedding": 1, "created_at": 1}
+            memories = await asyncio.to_thread(
+                lambda: list(self.db.user_memories.find(
+                    {"user_id": user_id},
+                    {"text": 1, "embedding": 1, "created_at": 1},
+                ))
             )
-            memories = list(cursor)
             if not memories:
                 return []
 
             # Generate embedding for the current query
             query_vec = await self.rag_pipeline.generate_embeddings(query)
 
-            # Calculate cosine similarities
+            # Calculate cosine similarities and keep vectors for dedup
             results = []
             for mem in memories:
                 mem_vec = np.array(mem["embedding"])
-                similarity = np.dot(query_vec, mem_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(mem_vec))
+                similarity = float(np.dot(query_vec, mem_vec) / (np.linalg.norm(query_vec) * np.linalg.norm(mem_vec) + 1e-9))
 
                 # Format memory with date
                 date_str = mem.get("created_at", "").split("T")[0]
-                results.append((f"[{date_str}]: {mem['text']}", similarity))
+                results.append((f"[{date_str}]: {mem['text']}", similarity, mem_vec))
 
-            # Sort by similarity
+            # Sort by similarity (descending)
             results.sort(key=lambda x: x[1], reverse=True)
 
-            # Return top_k
-            return [text for text, score in results[:top_k] if score > 0.55]
+            # Deduplicate: skip memories that are too similar to already-kept ones
+            deduped = []
+            deduped_vecs = []
+            for text, score, vec in results:
+                if score < settings.MEMORY_SIMILARITY_THRESHOLD:
+                    continue
+                is_dup = any(
+                    float(np.dot(vec, kv) / (np.linalg.norm(vec) * np.linalg.norm(kv) + 1e-9)) > settings.MEMORY_DEDUP_THRESHOLD
+                    for kv in deduped_vecs
+                )
+                if not is_dup:
+                    deduped.append(text)
+                    deduped_vecs.append(vec)
+                if len(deduped) >= settings.MEMORY_MAX_RESULTS:
+                    break
+
+            if len(results) > len(deduped):
+                logger.info(f"Memory dedup: {len(results)} candidates → {len(deduped)} unique memories")
+
+            return deduped
 
         except Exception as e:
             logger.error(f"Failed to retrieve relevant memories: {e}")

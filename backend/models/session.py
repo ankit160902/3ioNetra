@@ -96,6 +96,12 @@ class SessionState:
     # Session-level dedup: tracks which product IDs have been shown
     shown_product_ids: Set[str] = field(default_factory=set)
 
+    # Product recommendation throttling
+    product_event_count: int = 0            # Proactive product events this session
+    product_rejection_turn: int = -1        # Turn when user last rejected products
+    product_rejection_count: int = 0        # Total rejections
+    user_dismissed_products: bool = False   # Hard kill: user said "stop products"
+
     # Track what practices Mitra suggested (for acceptance-based product inference)
     # Each entry: {"turn": int, "practice": str, "product_keywords": ["rudraksha mala", "japa mala"]}
     # FIFO capped at 3 entries
@@ -118,6 +124,10 @@ class SessionState:
             "is_returning_user": self.is_returning_user,
             "last_proactive_product_turn": self.last_proactive_product_turn,
             "shown_product_ids": list(self.shown_product_ids),
+            "product_event_count": self.product_event_count,
+            "product_rejection_turn": self.product_rejection_turn,
+            "product_rejection_count": self.product_rejection_count,
+            "user_dismissed_products": self.user_dismissed_products,
             "last_suggestions": self.last_suggestions,
             "memory": self.memory.to_dict() if self.memory else None
         }
@@ -149,6 +159,10 @@ class SessionState:
             is_returning_user=data.get("is_returning_user", False),
             last_proactive_product_turn=data.get("last_proactive_product_turn", -1),
             shown_product_ids=set(data.get("shown_product_ids", [])),
+            product_event_count=data.get("product_event_count", 0),
+            product_rejection_turn=data.get("product_rejection_turn", -1),
+            product_rejection_count=data.get("product_rejection_count", 0),
+            user_dismissed_products=data.get("user_dismissed_products", False),
             last_suggestions=data.get("last_suggestions", []),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )

@@ -28,6 +28,7 @@ from models.dharmic_query import QueryType
 from routers.auth import get_current_user
 from routers.dependencies import get_rag_pipeline
 from llm.service import clean_response
+from services.retrieval_judge import get_retrieval_judge
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -38,27 +39,41 @@ router = APIRouter(prefix="/api", tags=["chat"])
 async def _populate_session_with_user_context(session: SessionState, user: Optional[dict], user_profile: Optional[any]):
     if user:
         session.memory.user_id = user.get('id')
+        session.user_id = user.get('id')  # B0: Also set session-level user_id for semantic memory
         session.memory.user_name = user.get('name')
-        
-        # 🧠 CORE MEMORY INHERITANCE: If this is a fresh session (no memory story yet), 
-        # try to inherit the synthesized "story" from the user's latest past session.
+
+        # 🧠 CORE MEMORY INHERITANCE: If this is a fresh session (no memory story yet),
+        # try to inherit context from the user's recent past sessions.
         if not session.memory.story.primary_concern and not session.is_returning_user:
             try:
                 storage = get_conversation_storage()
-                # Get latest session (passing None for conversation_id fetches the latest)
-                latest_conv = await storage.get_conversation(user["id"], None)
-                if latest_conv and latest_conv.get("memory"):
+                recent = await storage.get_recent_conversation_summaries(user["id"], limit=5)
+                if recent:
                     from models.memory_context import ConversationMemory
-                    snapshot = latest_conv.get("memory")
-                    session.memory = ConversationMemory.from_dict(snapshot)
+                    # Use latest conversation as base memory
+                    latest = recent[0]
+                    if latest.get("memory"):
+                        session.memory = ConversationMemory.from_dict(latest["memory"])
                     session.is_returning_user = True
                     session.memory.is_returning_user = True
-                    
-                    # 📝 Add a structural reminder to the LLM about where we left off
-                    summary = session.memory.get_memory_summary()
-                    session.add_message("system", f"RESUMING CONTEXT from previous session: {summary}. This is a new session, but the user is returning. Acknowledge this naturally.")
-                    
-                    logger.info(f"Inherited persistent memory context from latest session {latest_conv.get('id')} for user {user['id']}")
+                    # Re-set user fields after memory override
+                    session.memory.user_id = user.get('id')
+                    session.memory.user_name = user.get('name')
+
+                    # Build journey summary from all recent conversations
+                    journey_parts = []
+                    for conv in recent:
+                        conv_summary = conv.get("conversation_summary", "")
+                        if not conv_summary and conv.get("memory"):
+                            mem = ConversationMemory.from_dict(conv["memory"])
+                            conv_summary = mem.get_memory_summary()
+                        if conv_summary:
+                            date = str(conv.get("updated_at", ""))[:10]
+                            journey_parts.append(f"[{date}]: {conv_summary}")
+
+                    # Store on memory object so it persists in prompt regardless of history window
+                    session.memory.previous_session_summary = " | ".join(journey_parts[:5])
+                    logger.info(f"Inherited journey context from {len(recent)} conversations for user {user['id']}")
             except Exception as e:
                 logger.error(f"Failed to inherit memory context: {e}")
 
@@ -271,7 +286,7 @@ async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, s
         engine_result = await engine_fn
         return engine_result, []
 
-    rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=5)
+    rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=settings.RETRIEVAL_TOP_K)
     engine_result, speculative_docs = await asyncio.gather(engine_fn, rag_task)
     return engine_result, speculative_docs
 
@@ -291,7 +306,8 @@ async def _build_guidance_context(session, query, speculative_docs, context_synt
             query=dharmic_query.build_search_query(),
             scripture_filter=dharmic_query.allowed_scriptures,
             language=query.language,
-            top_k=5
+            top_k=settings.RETRIEVAL_TOP_K,
+            min_score=settings.MIN_SIMILARITY_SCORE,
         )
     return dharmic_query, retrieved_docs
 
@@ -319,7 +335,7 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     # Record practice suggestions for future product inference
     companion_engine.record_suggestion(session, final_text)
     if is_guidance:
-        session.memory.readiness_for_wisdom = 0.3
+        session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
     await session_manager.update_session(session)
     return final_text
 
@@ -353,7 +369,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     engine_result, speculative_docs = await _run_speculative_rag(
         session, query, rag_pipeline, companion_engine, streaming=False
     )
-    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config = engine_result
+    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config, past_memories = engine_result
 
     if is_ready_for_wisdom:
         dharmic_query, retrieved_docs = await _build_guidance_context(
@@ -370,9 +386,35 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             phase=ConversationPhase.GUIDANCE,
             original_query=query.message,
             user_id=session.memory.user_id,
+            past_memories=past_memories,
             model_override=route_model,
             config_override=route_config,
         )
+
+        # Grounding verification — regenerate if response cites non-existent sources.
+        # Design intent: re-generation intentionally reuses the same retrieved_docs
+        # so the LLM is forced to constrain its citations to actually-available sources
+        # rather than hallucinating references not present in the corpus.
+        judge = get_retrieval_judge()
+        if judge.available and settings.GROUNDING_ENABLED and retrieved_docs:
+            grounding = await judge.verify_grounding(response_text, retrieved_docs)
+            if not grounding.grounded and grounding.confidence < settings.GROUNDING_MIN_CONFIDENCE:
+                logger.warning(f"Response not grounded: {grounding.issues}")
+                grounding_config = {**(route_config or {}), "grounding_instruction": True}
+                response_text = await response_composer.compose_with_memory(
+                    dharmic_query=dharmic_query,
+                    memory=session.memory,
+                    retrieved_verses=retrieved_docs,
+                    conversation_history=session.conversation_history,
+                    reduce_scripture=reduce_scripture,
+                    phase=ConversationPhase.GUIDANCE,
+                    original_query=query.message,
+                    user_id=session.memory.user_id,
+                    past_memories=past_memories,
+                    model_override=route_model,
+                    config_override=grounding_config,
+                )
+
         response_text = await _postprocess_and_save(
             response_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=True
         )
@@ -453,6 +495,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     phase=ConversationPhase.GUIDANCE,
                     original_query=query.message,
                     user_id=session.memory.user_id,
+                    past_memories=meta.get("past_memories", []),
                     model_override=meta.get("model_override"),
                     config_override=meta.get("config_override"),
                 ):
@@ -612,7 +655,30 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
         messages=request.messages,
         memory=memory_snapshot
     )
-    
+
+    # 4. Generate and store a concise conversation summary (async, non-blocking)
+    async def _generate_and_store_summary(conversation_id, messages, memory_snap, uid):
+        try:
+            from llm.service import get_llm_service
+            llm = get_llm_service()
+            if not llm or not llm.available:
+                return
+            from models.memory_context import ConversationMemory
+            mem = ConversationMemory.from_dict(memory_snap) if memory_snap else None
+            base_summary = mem.get_memory_summary() if mem else ""
+            summary_prompt = f"""Summarize this conversation in 1-2 sentences (under 50 words). Include: main concern, emotional state, key guidance given.
+Context: {base_summary}
+Last 6 messages: {json.dumps(messages[-6:], ensure_ascii=False)[:800]}
+Summary:"""
+            summary = await llm.generate_quick_response(summary_prompt)
+            if summary:
+                s = get_conversation_storage()
+                await s.update_conversation_field(uid, conversation_id, "conversation_summary", summary.strip()[:300])
+        except Exception as e:
+            logger.error(f"Summary generation failed: {e}")
+
+    asyncio.create_task(_generate_and_store_summary(request.conversation_id, request.messages, memory_snapshot, user["id"]))
+
     return {"message": "Saved", "conversation_id": conv_id}
 
 @router.delete("/user/conversations/{conversation_id}")

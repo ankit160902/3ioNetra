@@ -1,18 +1,23 @@
 """
-ContextValidator — Rock-solid 5-rule gate that sits between RAG retrieval and LLM prompt construction.
+ContextValidator — Rock-solid 6-rule gate that sits between RAG retrieval and LLM prompt construction.
 
 Rules applied in order:
-  1. Relevance Gate     – drop docs below min_score threshold
+  1. Relevance Gate     – adaptive threshold anchored to top result (ratio varies by intent)
   2. Content Gate       – drop docs with empty/placeholder/too-short text
   3. Type Gate          – exclude doc types that are semantically wrong for this query
   4. Scripture Gate     – hard-filter to allowed_scriptures if specified
   5. Diversity Gate     – max N docs from the same source (prevents LLM echo)
+  6. Tradition Gate     – max N docs from the same dharmic tradition
 """
 
 import logging
 from typing import List, Dict, Optional
 
+_CURATED_EXEMPT_SOURCES = frozenset({"curated_concept", "curated_narrative"})
+
+from config import settings
 from models.session import IntentType
+from rag.scoring_utils import get_doc_score
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +27,15 @@ _CONTENT_PLACEHOLDERS = {
     "n/a", "na", "unknown", "undefined", "",
 }
 
-EMOTIONAL_HEALING_INTENTS = {IntentType.EXPRESSING_EMOTION, IntentType.OTHER}
-
 _SPATIAL_MARKERS = frozenset({"maidan", "ground", "complex", "road", "street", "near ", "located", "address"})
+
+_MEDITATION_EXACT_KEYWORDS = frozenset({
+    "meditation", "meditate", "dhyan", "dhyana", "ध्यान",
+    "mindfulness", "mindful", "vipassana",
+})
+_MEDITATION_ADJACENT_KEYWORDS = frozenset({
+    "breathing exercise", "pranayama", "प्राणायाम",
+})
 
 
 class ContextValidator:
@@ -48,51 +59,89 @@ class ContextValidator:
         intent: Optional[IntentType] = None,
         allowed_scriptures: Optional[List[str]] = None,
         temple_interest: bool = False,
-        min_score: float = 0.12,
-        max_per_source: int = 2,
-        max_docs: int = 5,
+        query: str = "",
+        min_score: float = settings.MIN_SIMILARITY_SCORE,
+        max_per_source: int = settings.MAX_DOCS_PER_SOURCE,
+        max_docs: int = settings.RERANK_TOP_K,
     ) -> List[Dict]:
         """
         Apply all 5 gates sequentially.  Returns a clean, ranked list.
+        Context verses (from parent-child expansion) bypass the gates and are
+        re-attached only if their parent doc survives filtering.
         """
         if not docs:
             return []
 
         n_before = len(docs)
-        docs = self._gate_relevance(docs, min_score)
-        docs = self._gate_content(docs)
-        docs = self._gate_type(docs, intent, temple_interest)
-        docs = self._gate_scripture(docs, allowed_scriptures)
-        docs = self._gate_diversity(docs, max_per_source)
-        docs = docs[:max_docs]
 
-        n_after = len(docs)
+        # Separate context verses from primary docs
+        context_verses = [d for d in docs if d.get("is_context_verse")]
+        primary_docs = [d for d in docs if not d.get("is_context_verse")]
+
+        meditation_interest = bool(query) and any(kw in query.lower() for kw in _MEDITATION_EXACT_KEYWORDS)
+        primary_docs = self._gate_relevance(primary_docs, min_score, intent)
+        primary_docs = self._gate_content(primary_docs)
+        primary_docs = self._gate_type(primary_docs, intent, temple_interest, meditation_interest)
+        primary_docs = self._gate_scripture(primary_docs, allowed_scriptures)
+        primary_docs = self._gate_diversity(primary_docs, max_per_source)
+        primary_docs = self._gate_tradition_diversity(primary_docs, settings.MAX_DOCS_PER_TRADITION)
+        primary_docs = primary_docs[:max_docs]
+
+        if not primary_docs and n_before > 0:
+            logger.warning(
+                f"ContextValidator: ALL {n_before} docs filtered out | "
+                f"intent={intent} | allowed={allowed_scriptures} | "
+                f"min_score={min_score} | query='{query[:80]}'"
+            )
+
+        # Re-attach context verses only if their parent survived
+        if context_verses:
+            final_docs = []
+            for d in primary_docs:
+                final_docs.append(d)
+                for cv in context_verses:
+                    if cv.get("context_parent_ref") == d.get("reference"):
+                        final_docs.append(cv)
+        else:
+            final_docs = primary_docs
+
+        n_after = len(final_docs)
         logger.info(
-            f"ContextValidator: {n_before} → {n_after} docs | "
+            f"ContextValidator: {n_before} → {n_after} docs "
+            f"({len(context_verses)} context verse(s)) | "
             f"intent={intent} | allowed={allowed_scriptures} | min_score={min_score}"
         )
-        return docs
+        return final_docs
 
     # ---------------------------------------------------------------
     # Gate 1 – Relevance
     # ---------------------------------------------------------------
 
-    def _gate_relevance(self, docs: List[Dict], min_score: float) -> List[Dict]:
-        """Drop documents below the minimum cosine similarity threshold."""
-        kept = [d for d in docs if self._get_score(d) >= min_score]
+    def _gate_relevance(self, docs: List[Dict], min_score: float, intent: Optional[IntentType] = None) -> List[Dict]:
+        """Drop documents below a dynamic threshold anchored to the top result.
+        The ratio adapts per intent: emotional queries use a looser threshold (0.40)
+        so broader results surface; factual/citation queries use a tighter one (0.55).
+        """
+        if not docs:
+            return docs
+        top_score = max(get_doc_score(d) for d in docs)
+
+        # Adaptive ratio based on intent type
+        if intent == IntentType.EXPRESSING_EMOTION:
+            ratio = settings.RELEVANCE_RATIO_EMOTIONAL
+        elif intent == IntentType.ASKING_INFO:
+            ratio = settings.RELEVANCE_RATIO_CITATION
+        elif intent == IntentType.SEEKING_GUIDANCE:
+            ratio = settings.RELEVANCE_RATIO_GUIDANCE
+        else:
+            ratio = settings.RELEVANCE_RATIO_DEFAULT
+
+        effective_min = max(min_score, top_score * ratio)
+        kept = [d for d in docs if get_doc_score(d) >= effective_min]
         dropped = len(docs) - len(kept)
         if dropped:
-            logger.debug(f"Relevance gate: dropped {dropped} low-score doc(s) (threshold={min_score})")
+            logger.debug(f"Relevance gate: dropped {dropped} low-score doc(s) (effective_threshold={effective_min:.3f}, top={top_score:.3f}, ratio={ratio})")
         return kept
-
-    def _get_score(self, doc: Dict) -> float:
-        """Return the best available score from a doc (final_score > rerank_score > score)."""
-        return float(
-            doc.get("final_score")
-            or doc.get("rerank_score")
-            or doc.get("score")
-            or 0.0
-        )
 
     # ---------------------------------------------------------------
     # Gate 2 – Content quality
@@ -107,6 +156,7 @@ class ContextValidator:
                 doc.get("meaning") or
                 doc.get("translation") or
                 doc.get("hindi") or
+                doc.get("sanskrit") or
                 ""
             ).strip()
 
@@ -114,7 +164,7 @@ class ContextValidator:
                 logger.debug(f"Content gate: dropped placeholder doc from '{doc.get('scripture')}'")
                 continue
 
-            if len(text) < 20:
+            if len(text) < settings.MIN_CONTENT_LENGTH:
                 logger.debug(f"Content gate: dropped too-short doc ({len(text)} chars) from '{doc.get('scripture')}'")
                 continue
 
@@ -127,21 +177,22 @@ class ContextValidator:
     # ---------------------------------------------------------------
 
     def _gate_type(
-        self, docs: List[Dict], intent: Optional[IntentType], temple_interest: bool
+        self, docs: List[Dict], intent: Optional[IntentType], temple_interest: bool,
+        meditation_interest: bool = False,
     ) -> List[Dict]:
         """
         Remove docs whose type is semantically wrong for this intent.
 
         Rules:
-        - Emotional / generic intents: exclude bare temple/location docs
+        - All non-temple intents: hard-drop temple/location docs
           UNLESS temple_interest is True (user wants pilgrimage).
+        - Drop generic meditation templates UNLESS query is about meditation.
         - Procedural queries: deprioritize philosophical-only docs
           (they stay but get pushed to the back via sort).
         """
         if not intent:
             return docs
 
-        is_emotional = intent in EMOTIONAL_HEALING_INTENTS
         is_howto = intent in {IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO}
 
         kept = []
@@ -150,15 +201,23 @@ class ContextValidator:
         for doc in docs:
             doc_type = (doc.get("type") or "scripture").lower()
             doc_text = (doc.get("text", "") + " " + doc.get("reference", "")).lower()
+            doc_scripture = (doc.get("scripture") or "").lower()
+            doc_source = (doc.get("source") or "").lower()
 
             # Detect spatial/location-only documents
             is_spatial = doc_type == "temple" or any(m in doc_text for m in _SPATIAL_MARKERS)
 
-            if is_emotional and is_spatial and not temple_interest:
-                logger.debug(
-                    f"Type gate: deferred temple/spatial doc from intent={intent}: {doc.get('scripture')}"
-                )
-                deferred.append(doc)
+            # DROP temple docs for any non-temple intent (not just emotional)
+            if is_spatial and not temple_interest:
+                logger.debug(f"Type gate: DROPPED temple doc: {doc.get('reference', '')}")
+                continue  # Hard drop, not deferred
+
+            # DROP generic meditation templates UNLESS query is about meditation
+            is_meditation_template = (
+                "meditation" in doc_scripture and "mindfulness" in doc_scripture
+            ) or doc_source == "meditation_template"
+            if is_meditation_template and not meditation_interest:
+                logger.debug(f"Type gate: DROPPED meditation template: {doc.get('reference', '')}")
                 continue
 
             # For how-to queries: keep procedural docs first, defer pure philosophy last
@@ -169,6 +228,46 @@ class ContextValidator:
             kept.append(doc)
 
         return kept + deferred
+
+    # ---------------------------------------------------------------
+    # Gate 6 – Tradition diversity
+    # ---------------------------------------------------------------
+
+    def _gate_tradition_diversity(self, docs: List[Dict], max_per_tradition: int) -> List[Dict]:
+        """
+        Limit the number of documents from the same dharmic tradition to avoid
+        mono-tradition responses (e.g., all vedanta for a practical query).
+
+        Curated concept/narrative documents are exempt from the cap.
+        If a doc has no tradition label, it gets 'general' which is uncapped.
+        """
+        _EXEMPT_SOURCES = _CURATED_EXEMPT_SOURCES
+        tradition_counts: Dict[str, int] = {}
+        kept = []
+
+        for doc in docs:
+            doc_source = (doc.get("source") or "").lower()
+
+            # Curated docs bypass the tradition cap
+            if doc_source in _EXEMPT_SOURCES:
+                kept.append(doc)
+                continue
+
+            tradition = (doc.get("tradition") or "general").lower()
+
+            # 'general' tradition is uncapped (unlabeled docs)
+            if tradition == "general":
+                kept.append(doc)
+                continue
+
+            count = tradition_counts.get(tradition, 0)
+            if count < max_per_tradition:
+                kept.append(doc)
+                tradition_counts[tradition] = count + 1
+            else:
+                logger.debug(f"Tradition diversity gate: skipped extra doc from tradition '{tradition}' (limit={max_per_tradition})")
+
+        return kept
 
     # ---------------------------------------------------------------
     # Gate 4 – Scripture allowlist
@@ -212,11 +311,22 @@ class ContextValidator:
         """
         Limit the number of documents from the same source to avoid
         echo-chamber RAG (e.g., 5 Bhagavad Gita verses for a health query).
+
+        Curated concept/narrative documents are exempt from the cap since
+        they are unique by design and cover distinct topics.
         """
+        _EXEMPT_SOURCES = _CURATED_EXEMPT_SOURCES
         source_counts: Dict[str, int] = {}
         kept = []
 
         for doc in docs:
+            doc_source = (doc.get("source") or "").lower()
+
+            # Curated docs bypass the diversity cap
+            if doc_source in _EXEMPT_SOURCES:
+                kept.append(doc)
+                continue
+
             src = (doc.get("scripture") or "unknown").lower()
             count = source_counts.get(src, 0)
 

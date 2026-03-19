@@ -36,7 +36,7 @@ TIER_MODELS = {
 TIER_CONFIGS = {
     ModelTier.ECONOMY: {
         "max_output_tokens": 512,
-        "temperature": 0.7,
+        "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
@@ -48,7 +48,7 @@ TIER_CONFIGS = {
     ModelTier.STANDARD: {
         "max_output_tokens": 768,
         "thinking_config": {"thinking_budget": 128},
-        "temperature": 0.7,
+        "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
@@ -58,9 +58,9 @@ TIER_CONFIGS = {
         ],
     },
     ModelTier.PREMIUM: {
-        "max_output_tokens": 1024,
+        "max_output_tokens": settings.RESPONSE_MAX_TOKENS,
         "thinking_config": {"thinking_budget": 256},
-        "temperature": 0.7,
+        "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},

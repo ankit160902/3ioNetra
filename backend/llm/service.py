@@ -233,7 +233,7 @@ class LLMService:
         
         # Load system instruction from external YAML
         self.system_instruction = self.prompt_manager.get_prompt(
-            'spiritual_mitra', 
+            'spiritual_mitra',
             'system_instruction'
         )
         
@@ -475,9 +475,9 @@ class LLMService:
     def _build_gen_config(self, config_override: Optional[Dict] = None) -> Dict:
         """Build the Gemini generation config dict."""
         gen_config = config_override.copy() if config_override else {
-            "temperature": 0.7,
+            "temperature": settings.RESPONSE_TEMPERATURE,
             "thinking_config": {"thinking_budget": 256},
-            "max_output_tokens": 1024,
+            "max_output_tokens": settings.RESPONSE_MAX_TOKENS,
             "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
@@ -567,8 +567,58 @@ class LLMService:
             
             # 🗓️ Current Panchang Context
             if user_profile.get('current_panchang'):
-                p = user_profile.get('current_panchang')
-                profile_parts.append(f"   • CURRENT PANCHANG (Today): Tithi: {p.get('tithi')}, Nakshatra: {p.get('nakshatra')}, Info: {p.get('special_day')}")
+                p = user_profile['current_panchang']
+                panchang_lines = ["   • CURRENT PANCHANG (Today):"]
+
+                # Tithi with significance
+                tithi_line = f"     Tithi: {p.get('tithi', '')}"
+                if p.get('tithi_significance'):
+                    tithi_line += f" — {p['tithi_significance']}"
+                if p.get('tithi_vrat'):
+                    tithi_line += f" ({p['tithi_vrat']})"
+                panchang_lines.append(tithi_line)
+
+                # Nakshatra with quality
+                nak_line = f"     Nakshatra: {p.get('nakshatra', '')}"
+                if p.get('nakshatra_quality'):
+                    nak_line += f" — {p['nakshatra_quality']}"
+                if p.get('nakshatra_good_for'):
+                    nak_line += f". Good for: {p['nakshatra_good_for']}"
+                panchang_lines.append(nak_line)
+
+                # Yoga
+                if p.get('yoga') and p.get('yoga_quality'):
+                    panchang_lines.append(f"     Yoga: {p['yoga']} — {p['yoga_quality']}")
+
+                # Paksha + Masa
+                if p.get('paksha') and p.get('masa'):
+                    panchang_lines.append(f"     {p['paksha']} Paksha, {p['masa']} month — {p.get('masa_significance', '')}")
+
+                # Festival with spiritual context (conditional)
+                if p.get('festival'):
+                    panchang_lines.append(f"     FESTIVAL TODAY: {p['festival']}")
+                    if p.get('festival_significance'):
+                        panchang_lines.append(f"       Significance: {p['festival_significance']}")
+                    if p.get('festival_mantra'):
+                        panchang_lines.append(f"       Mantra: {p['festival_mantra']}")
+                    if p.get('festival_rituals'):
+                        panchang_lines.append(f"       Rituals: {p['festival_rituals']}")
+
+                # Special day info
+                if p.get('special_day'):
+                    panchang_lines.append(f"     Note: {p['special_day']}")
+
+                # Upcoming festivals (next 1-3 days)
+                if p.get('upcoming_festivals'):
+                    for uf in p['upcoming_festivals']:
+                        days = uf['days_away']
+                        when = "Tomorrow" if days == 1 else f"In {days} days"
+                        line = f"     UPCOMING: {when} — {uf['festival']}"
+                        if uf.get('mantra'):
+                            line += f" (Mantra: {uf['mantra']})"
+                        panchang_lines.append(line)
+
+                profile_parts.append("\n".join(panchang_lines))
                 has_data = True
             
             # 🧠 Semantic Long-Term Memories
@@ -644,7 +694,10 @@ class LLMService:
                 facts.append(f"• Temple Visits: {', '.join(story.temple_visits)}")
             if story.purchase_history:
                 facts.append(f"• Purchase History: {', '.join(story.purchase_history)}")
-            
+            if story.detected_topics:
+                recent_topics = list(dict.fromkeys(story.detected_topics[-5:]))
+                facts.append(f"• Topic journey: {' → '.join(recent_topics)}")
+
             # Also extract specific user quotes as "Facts"
             if hasattr(memory_context, 'user_quotes'):
                 for quote in memory_context.user_quotes[-10:]:
@@ -666,35 +719,52 @@ class LLMService:
             scripture_context += "RESOURCES AVAILABLE (Use ONLY if they naturally fit the conversation):\n"
             scripture_context += "═══════════════════════════════════════════════════════════\n\n"
             
-            for i, doc in enumerate(context_docs[:3], 1):  # Show up to 3 most relevant
+            # Fix 5: Compute relative baseline for quality labels
+            from rag.scoring_utils import get_doc_score
+            surviving_scores = [
+                get_doc_score(d)
+                for d in context_docs if not d.get('is_context_verse')
+            ]
+            max_surviving = max(surviving_scores) if surviving_scores else 1.0
+
+            for i, doc in enumerate(context_docs, 1):
+                # Context verses from parent-child expansion: compact inline format
+                if doc.get("is_context_verse"):
+                    scripture_context += f"  (Adjacent context: {doc.get('reference', '')})\n"
+                    scripture_context += f"  Text: \"{(doc.get('text') or '')[:200]}\"\n"
+                    ctx_meaning = doc.get('meaning') or doc.get('translation', '')
+                    if ctx_meaning:
+                        scripture_context += f"  Meaning: {ctx_meaning[:200]}\n"
+                    scripture_context += "\n"
+                    continue
+
                 scripture = doc.get('scripture', 'Scripture')
                 reference = doc.get('reference', '')
                 doc_type = (doc.get('type') or 'scripture').lower()
-                
-                # Score display (best available)
-                quality_score = float(
-                    doc.get('final_score') or doc.get('rerank_score') or doc.get('score') or 0.0
-                )
+
+                # Fix 5: Relative quality labels — docs that survived ContextValidator are the best available
+                quality_score = get_doc_score(doc)
+                relative_score = quality_score / max_surviving if max_surviving > 0 else 0
                 quality_label = (
-                    "HIGH relevance" if quality_score >= 0.50 else
-                    "MEDIUM relevance" if quality_score >= 0.25 else
-                    "LOW relevance"
+                    "BEST MATCH" if relative_score >= 0.85 else
+                    "GOOD MATCH" if relative_score >= 0.60 else
+                    "SUPPORTING"
                 )
-                
+
                 # Robustly find the original verse text and its meaning
                 # Skip placeholder text like "intermediate" or very short technical strings
                 verse_raw = doc.get('verse')
                 if verse_raw and verse_raw.lower() in ['intermediate', 'beginner', 'advanced', 'none', 'null']:
                     verse_raw = None
-                
+
                 # Priority: hindi (for original) -> verse -> text
                 original_text = doc.get('hindi') or verse_raw or doc.get('text', '')
-                
+
                 # Identify meaning/translation
                 meaning = doc.get('meaning') or doc.get('translation')
                 if not meaning and doc.get('verse') and doc.get('text') and doc.get('text') != original_text:
                     meaning = doc.get('text')
-                
+
                 # Final check: if original is still placeholder-ish, try to clean it
                 if len(original_text) < 5 and doc.get('text'):
                     original_text = doc.get('text')
@@ -713,12 +783,20 @@ class LLMService:
                 if reference:
                     scripture_context += f" — {reference}"
                 scripture_context += f"\n\nORIGINAL TEXT (Sanskrit/Hindi/Procedural): \"{original_text}\"\n"
-                
+
                 if meaning:
                     scripture_context += f"MEANING/TRANSLATION (English): {meaning}\n"
-                
+
                 scripture_context += "\n" + "-" * 60 + "\n\n"
-            
+
+            # Fix 5: Relative "low confidence" warning instead of absolute threshold
+            if max_surviving < 0.25:
+                scripture_context += (
+                    "\nNOTE: These are the best available resources for this specific query. "
+                    "Use them if they resonate with the user's situation, "
+                    "but feel free to draw on general spiritual knowledge too.\n\n"
+                )
+
             # Load RAG usage instructions from YAML (centralised prompt management)
             rag_instructions = self.prompt_manager.get_prompt(
                 'spiritual_mitra',
@@ -732,15 +810,28 @@ class LLMService:
                 scripture_context += """\
 HOW TO USE THESE RESOURCES:
 - Only use a resource if it GENUINELY helps the user's specific situation.
-- Only reference verses that score MEDIUM or HIGH relevance. Skip LOW relevance docs entirely.
+- Prioritize BEST MATCH resources. SUPPORTING resources may provide additional context.
 - SCRIPTURE: Cite it (e.g., Bhagavad Gita 2.47), explain it simply, connect to their life.
 - TEMPLE: Suggest a visit only if the user is seeking pilgrimage, spiritual courage, or blessings.
 - PROCEDURAL: Share the steps when user explicitly asked HOW to do a ritual or practice.
 - Quality matters more than quantity.
 """
+        else:
+            scripture_context = (
+                "\n═══════════════════════════════════════════════════════════\n"
+                "SCRIPTURE CONTEXT: NONE AVAILABLE\n"
+                "═══════════════════════════════════════════════════════════\n"
+                "No relevant scripture matches were found for this query. "
+                "Respond with general spiritual wisdom. "
+                "Do NOT cite any specific verse, chapter, or shloka number. "
+                "Use phrases like 'the Gita teaches us...' or 'as our scriptures remind us...' "
+                "instead of specific references like 'Bhagavad Gita 2.47'.\n"
+            )
 
-        
+
         # Build final prompt
+        returning_user_section = self._build_returning_user_section(is_returning_user, memory_context)
+
         prompt = f"""
 {profile_text}
 
@@ -753,6 +844,8 @@ EXTRACTED FACTS & PLANS:
 WHAT YOU KNOW SO FAR (EMOTIONAL CONTEXT):
 ═══════════════════════════════════════════════════════════
 {context_summary}
+
+{returning_user_section}
 
 ═══════════════════════════════════════════════════════════
 CONVERSATION FLOW:
@@ -769,24 +862,104 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 
 {scripture_context}
 
-{'═'*70}
-⚠️ RETURNING USER DETECTION:
-{'═'*70}
-{"🔄 This user has conversed with you before. The CONVERSATION FLOW above shows their past journey with you. Acknowledge this continuity naturally if relevant (e.g., 'Welcome back! How have you been since we last spoke?'). Reference their past concerns when appropriate." if is_returning_user else "✨ This is a new user. Make them feel welcome and safe."}
-
 BEFORE YOU RESPOND — CHECK THESE (violations = failure):
 1. SCAN your first 5 words. If they contain "I hear you", "I understand", or "It sounds like" — DELETE and rewrite. Start with something specific: "That is a lot to carry", "Twelve years is a lifetime of love", "Of course you are angry."
-2. SCAN for echoed dismissive words. If the user complained about "adjust", "get over it", "move on", or "just a [thing]" — make sure NONE of those words or substrings appear in your response. "just a" must not appear even inside other phrases like "just as" or "just a moment". Rephrase completely.
-3. NO numbered lists (1. 2. 3.), NO bullet points (- or *), NO bold (**text**), NO headers (#). Even for ritual how-to — use flowing prose with "First... then... after that..." transitions.
+2. SCAN for echoed dismissive words. If the user complained about "adjust", "get over it", "move on", or "just a [thing]" — make sure NONE of those words or substrings appear in your response. Rephrase completely.
+3. NO numbered lists (1. 2. 3.), NO bullet points (- or *), NO bold (**text**), NO headers (#). Even for ritual how-to — use flowing prose.
 4. Don't end with "How does that sound?", "Would you like to hear more?", or "Does this resonate?" — just end.
 5. One verse maximum, only if it truly fits.
 6. You are a companion, not a therapist running an assessment.
 7. When discussing a specific deity, always use their NAME at least once (Shiva, Krishna, Hanuman, Durga) — never just "He" or "His".
+8. RETURNING USER CHECK: If the RETURNING USER section exists above, re-read it now. Your response MUST include one specific detail from their journey.
+9. REPETITION CHECK: Read your last 2 responses in the conversation. If you already gave a mantra/practice/Gita reference and the user is STILL processing the same emotion — do NOT give another mantra/practice/Gita reference. Ask a deeper question instead. Break the pattern.
+10. LISTENING PHASE CHECK: If the phase is LISTENING and the user is sharing pain — your response should end with a QUESTION, not a practice. "What part of this weighs heaviest?" is better than "Chant Om Shanti 11 times tonight."
+11. "TONIGHT" CHECK: Does your response contain "Tonight" as a practice timing? If your previous response ALSO said "Tonight" — REWRITE with a different timing: "tomorrow morning", "this week", "right now", "before your chai".
+12. DHARMA BOUNDARY CHECK: Is the user asking about another religion, coding, politics, or non-spiritual topics? Do NOT answer the question. Do NOT bridge it into spirituality. Just warmly redirect: "That is outside my world — I am here for your spiritual journey."
 
 Your response:
 """
         
         return prompt.strip()
+
+    def _extract_key_topics(self, summary: str) -> list:
+        """Extract key topic words from a session summary for mandatory reference."""
+        # Common stop words to exclude
+        stop_words = {
+            "the", "a", "an", "is", "was", "are", "were", "been", "be", "have", "has",
+            "had", "do", "does", "did", "will", "would", "could", "should", "may", "might",
+            "shall", "can", "need", "must", "to", "of", "in", "for", "on", "with", "at",
+            "by", "from", "as", "into", "through", "during", "before", "after", "above",
+            "below", "between", "out", "off", "over", "under", "again", "further", "then",
+            "once", "here", "there", "when", "where", "why", "how", "all", "each", "every",
+            "both", "few", "more", "most", "other", "some", "such", "no", "nor", "not",
+            "only", "own", "same", "so", "than", "too", "very", "just", "about", "up",
+            "and", "but", "or", "if", "while", "because", "until", "that", "which", "who",
+            "whom", "this", "these", "those", "am", "it", "its", "i", "me", "my", "we",
+            "our", "you", "your", "he", "him", "his", "she", "her", "they", "them", "their",
+            "what", "also", "like", "much", "many", "still", "even", "back", "get", "got",
+            "make", "made", "take", "took", "come", "came", "go", "went", "see", "saw",
+            "know", "knew", "think", "thought", "feel", "felt", "say", "said", "tell",
+            "told", "give", "gave", "find", "found", "want", "let", "seem", "try", "keep",
+            "put", "thing", "things", "something", "user", "mentioned", "discussed",
+            "talked", "session", "conversation", "expressed", "shared", "feeling",
+        }
+        words = re.findall(r'[a-zA-Z]{3,}', summary.lower())
+        topics = []
+        seen = set()
+        for w in words:
+            if w not in stop_words and w not in seen:
+                seen.add(w)
+                topics.append(w)
+        return topics[:8]  # Top 8 unique topic words
+
+    def _build_returning_user_section(self, is_returning_user: bool, memory_context) -> str:
+        """Build the returning-user prompt section with journey context."""
+        if not is_returning_user:
+            return ""
+
+        prev_summary = ""
+        if memory_context and getattr(memory_context, 'previous_session_summary', ''):
+            prev_summary = memory_context.previous_session_summary
+        elif memory_context:
+            prev_summary = memory_context.get_memory_summary()
+
+        if not prev_summary:
+            prev_summary = "This user has had previous conversations with you. They are returning for continued support."
+
+        sensitive_markers = ["divorce", "separation", "abuse", "suicide", "death",
+                             "passed away", "miscarriage", "assault", "violence"]
+        is_sensitive = any(m in prev_summary.lower() for m in sensitive_markers)
+
+        key_topics = self._extract_key_topics(prev_summary)
+        topic_list = ", ".join(key_topics) if key_topics else "their past experience"
+
+        section = f"""{'═'*70}
+🔄 RETURNING USER — MANDATORY CONTEXT REFERENCE
+{'═'*70}
+THEIR JOURNEY SO FAR: {prev_summary}
+
+KEY TOPICS FROM THEIR JOURNEY: {topic_list}
+
+⚠️ CRITICAL RULE: This user is RETURNING. Your VERY FIRST response MUST use at least ONE word from the KEY TOPICS list above. A generic "good to see you again" without mentioning any topic is a FAILURE. This is NOT optional — it is a hard requirement.
+"""
+        if is_sensitive:
+            section += f"""SENSITIVE TOPIC DETECTED — reference gently but SPECIFICALLY:
+- Do NOT name the painful event directly (no "How is your divorce?")
+- DO use soft references that still contain a KEY TOPIC word: "the strength you showed through this difficult time", "your journey with your family", "what you have been carrying"
+- Reference any COPING action from last time (temple visits, practices, mantras)
+- Show you remember WITHOUT reopening the wound
+- YOU MUST STILL USE at least one word from: {topic_list}
+Example: "It is good to see you again. I remember the strength you showed for your family when we last spoke."
+"""
+        else:
+            section += f"""Reference their past using a specific topic word. Examples:
+- "Good to see you again — last time we spoke about [topic]. How has that been?"
+- "Welcome back. I remember you were working through [topic] — tell me how things are."
+- "I have been thinking about what you shared regarding [topic]."
+MANDATORY: Your greeting MUST contain at least one of these words: {topic_list}
+Do NOT just say "good to see you again" — that is a generic greeting and counts as a failure.
+"""
+        return section
 
     def _format_context(self, context: UserContext) -> str:
         """Format context into readable summary"""
@@ -812,7 +985,7 @@ Your response:
             return ""
             
         return self.prompt_manager.get_prompt(
-            'spiritual_mitra', 
+            'spiritual_mitra',
             f'phase_prompts.{phase.value}',
             default=""
         )
@@ -825,7 +998,6 @@ Your response:
         self,
         query: str,
         context_docs: List[Dict] = None,
-        language: str = "en",
         conversation_history: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
@@ -839,7 +1011,6 @@ Your response:
         Args:
             query: User's current message
             context_docs: Retrieved scripture documents (optional)
-            language: Response language (default: "en")
             conversation_history: Previous messages in conversation
             user_profile: User profile data for personalization
             model_override: Override the default model (for routing)
@@ -855,14 +1026,18 @@ Your response:
             return
 
         try:
-            # Extract context from query and history
-            context = self._extract_context(query, conversation_history)
+            # Extract context from query and history (skip when memory_context provides it)
+            if memory_context:
+                context = None
+            else:
+                context = self._extract_context(query, conversation_history)
 
             # Get history length for logging and logic
             history_len = len(conversation_history) if conversation_history else 0
 
             # Detect conversation phase if not provided
             if phase is None:
+                context = context or self._extract_context(query, conversation_history)
                 phase = self._detect_phase(query, context, history_len)
 
             active_model = model_override or settings.GEMINI_MODEL
@@ -879,7 +1054,19 @@ Your response:
                 memory_context=memory_context,
             )
 
-            gen_config = self._build_gen_config(config_override)
+            # Handle grounding instruction flag (from retrieval judge)
+            effective_config = config_override
+            if config_override and config_override.get("grounding_instruction"):
+                effective_config = {k: v for k, v in config_override.items() if k != "grounding_instruction"}
+                prompt += (
+                    "\n\nCRITICAL: Your previous response contained ungrounded claims. "
+                    "Use ONLY the scripture sources provided above in RESOURCES AVAILABLE. "
+                    "Do not reference any verse, chapter, or teaching not listed there. "
+                    "If no suitable source exists, respond with general spiritual wisdom "
+                    "without specific citations."
+                )
+
+            gen_config = self._build_gen_config(effective_config or None)
 
             # Generate response from Gemini with streaming via Circuit Breaker
 
@@ -923,7 +1110,6 @@ Your response:
         self,
         query: str,
         context_docs: List[Dict] = None,
-        language: str = "en",
         conversation_history: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
         phase: Optional[ConversationPhase] = None,
@@ -937,7 +1123,6 @@ Your response:
         Args:
             query: User's current message
             context_docs: Retrieved scripture documents (optional)
-            language: Response language (default: "en")
             conversation_history: Previous messages in conversation
             user_profile: User profile data (name, age, profession, etc.) for personalization
             model_override: Override the default model (for routing)
@@ -953,14 +1138,18 @@ Your response:
             return "I'm here with you. Please share what's on your mind."
 
         try:
-            # Extract context from query and history
-            context = self._extract_context(query, conversation_history)
+            # Extract context from query and history (skip when memory_context provides it)
+            if memory_context:
+                context = None
+            else:
+                context = self._extract_context(query, conversation_history)
 
             # Get history length for logging and logic
             history_len = len(conversation_history) if conversation_history else 0
 
             # Detect conversation phase if not provided
             if phase is None:
+                context = context or self._extract_context(query, conversation_history)
                 phase = self._detect_phase(query, context, history_len)
 
             active_model = model_override or settings.GEMINI_MODEL
@@ -977,7 +1166,19 @@ Your response:
                 memory_context=memory_context,
             )
 
-            gen_config = self._build_gen_config(config_override)
+            # Handle grounding instruction flag (from retrieval judge)
+            effective_config = config_override
+            if config_override and config_override.get("grounding_instruction"):
+                effective_config = {k: v for k, v in config_override.items() if k != "grounding_instruction"}
+                prompt += (
+                    "\n\nCRITICAL: Your previous response contained ungrounded claims. "
+                    "Use ONLY the scripture sources provided above in RESOURCES AVAILABLE. "
+                    "Do not reference any verse, chapter, or teaching not listed there. "
+                    "If no suitable source exists, respond with general spiritual wisdom "
+                    "without specific citations."
+                )
+
+            gen_config = self._build_gen_config(effective_config or None)
 
             # Generate response from Gemini via Circuit Breaker
 
@@ -1061,6 +1262,17 @@ Your response:
                 "I'm listening. You're not alone in this."
             ]
             return random.choice(fallbacks)
+
+    async def generate_quick_response(self, prompt: str) -> str:
+        """Quick generation using the flash model for internal tasks (summaries, etc.)."""
+        try:
+            import google.generativeai as genai
+            model = genai.GenerativeModel("gemini-2.0-flash")
+            response = await model.generate_content_async(prompt)
+            return response.text.strip() if response.text else ""
+        except Exception as e:
+            logger.error(f"Quick generation failed: {e}")
+            return ""
 
 
 # --------------------------------------------------

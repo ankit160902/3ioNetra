@@ -134,6 +134,9 @@ class ConversationMemory:
     # Returning user flag
     is_returning_user: bool = False
 
+    # Summary of previous sessions for returning users
+    previous_session_summary: str = ""
+
     def to_dict(self) -> Dict:
         return {
             "story": self.story.to_dict(),
@@ -148,7 +151,8 @@ class ConversationMemory:
             "user_phone": self.user_phone,
             "user_dob": self.user_dob,
             "user_created_at": self.user_created_at,
-            "is_returning_user": self.is_returning_user
+            "is_returning_user": self.is_returning_user,
+            "previous_session_summary": self.previous_session_summary
         }
     
     @classmethod
@@ -168,7 +172,8 @@ class ConversationMemory:
             user_phone=data.get("user_phone", ""),
             user_dob=data.get("user_dob", ""),
             user_created_at=data.get("user_created_at", ""),
-            is_returning_user=data.get("is_returning_user", False)
+            is_returning_user=data.get("is_returning_user", False),
+            previous_session_summary=data.get("previous_session_summary", "")
         )
         return memory
 

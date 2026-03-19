@@ -168,7 +168,7 @@ Abstract base with 3 backends (singleton factory auto-selects):
 5-gate sequential filter between RAG retrieval and LLM prompt:
 1. **Relevance Gate** — drop below `min_score` (default 0.12)
 2. **Content Gate** — drop empty/placeholder/too-short text
-3. **Type Gate** — exclude spatial/temple docs for emotional intents
+3. **Type Gate** — exclude spatial/temple docs for emotional intents; exclude meditation templates for emotional queries
 4. **Scripture Gate** — hard-filter to allowed scriptures (graceful fallback)
 5. **Diversity Gate** — max N docs per source to prevent echo-chamber
 
@@ -259,11 +259,11 @@ user_id, user_name, user_email, user_phone, user_dob, user_created_at
 1. **Query Expansion** — LLM generates 2 alternative search terms for short queries (<4 words)
 2. **Hybrid Search** — semantic cosine similarity (70%) + BM25 keyword scores (30%)
 3. **Candidate Retrieval** — top 20 candidates via `np.argpartition`
-4. **Neural Reranking** — CrossEncoder (`ms-marco-MiniLM-L-6-v2`) with intent-based weight adjustments
+4. **Neural Reranking** — CrossEncoder (`bge-reranker-v2-m3`, multilingual) with intent-based weight adjustments
 5. **Post-filters** — min_score gate, doc_type exclusion, final top_k cut
 
 ### Embedding Model
-- `sentence-transformers/paraphrase-multilingual-mpnet-base-v2` (768-dim)
+- `intfloat/multilingual-e5-large` (1024-dim, with query/passage prefix)
 - Pre-normalized during ingestion for fast dot-product similarity
 
 ---
@@ -348,7 +348,7 @@ All settings in `backend/config.py` via `pydantic-settings`. Key env vars:
 | `REDIS_HOST` | `localhost` | Redis host |
 | `REDIS_PORT` | `6379` | Redis port |
 | `REDIS_PASSWORD` | (optional) | Redis auth |
-| `EMBEDDING_MODEL` | `paraphrase-multilingual-mpnet-base-v2` | SentenceTransformer model |
+| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | SentenceTransformer model (1024-dim, E5 prefix) |
 | `RETRIEVAL_TOP_K` | `7` | Number of RAG results |
 | `RERANK_TOP_K` | `3` | Results after reranking |
 | `MIN_SIMILARITY_SCORE` | `0.15` | Minimum cosine similarity |

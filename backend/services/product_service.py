@@ -6,6 +6,37 @@ from .auth_service import get_mongo_client
 logger = logging.getLogger(__name__)
 
 class ProductService:
+    # Domain → categories map (used for reranking boosts AND category-level fallback)
+    DOMAIN_CATEGORY_MAP = {
+        "career": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
+        "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential", "Astro List", "Mangal"],
+        "health": ["Astrostore", "GST-Included"],
+        "spiritual": [
+            "Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore",
+            "Pooja Murti", "Seva", "Puja", "members-form",
+            "Sculptures & Statues", "Chadhawa", "lord vishnu",
+            "bhagwan krishna blessings", "flower offering to maa durga", "Bhajan Clubbing",
+        ],
+        "family": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Pooja Murti", "Sculptures & Statues"],
+        "finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
+        "education": ["Astrostore", "Astro List"],
+        "self-improvement": [
+            "Astrostore", "Astro List",
+            "Abundance alignment", "Abundance Mindset", "Conscious Parenting",
+        ],
+        # _update_memory domain labels
+        "career & finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
+        "physical health": ["Astrostore", "GST-Included"],
+        "ayurveda & wellness": ["Astrostore", "GST-Included"],
+        "yoga practice": ["Astrostore", "GST-Included"],
+        "meditation & mind": ["Astrostore", "Pooja Essential"],
+        "spiritual growth": [
+            "Pooja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva", "members-form",
+            "Sculptures & Statues", "Chadhawa", "lord vishnu",
+            "bhagwan krishna blessings", "flower offering to maa durga", "Bhajan Clubbing",
+        ],
+    }
+
     def __init__(self):
         self.db = get_mongo_client()
         self.collection = self.db["products"] if self.db is not None else None
@@ -41,7 +72,7 @@ class ProductService:
         import re
         # Tokenize and clean
         tokens = re.findall(r'\w+', query_text.lower())
-        stop_words = {'i', 'want', 'to', 'buy', 'a', 'the', 'is', 'for', 'in', 'of', 'and', 'my', 'with', 'give', 'me', 'some', 'any', 'essentials', 'requirements', 'needed', 'please', 'take', 'help', 'from', 'book'}
+        stop_words = {'i', 'want', 'to', 'buy', 'a', 'the', 'is', 'for', 'in', 'of', 'and', 'my', 'with', 'give', 'me', 'some', 'any', 'essentials', 'requirements', 'needed', 'please', 'take', 'help', 'from'}
         # Use a list to maintain order but deduplicate
         seen = set()
         keywords = []
@@ -115,30 +146,14 @@ class ProductService:
                 if has_match:
                     matched_keywords += 1
 
-            # Multi-term boost: significantly reward products that match more of the search terms
+            # Multi-term boost: additive bonus per extra match (avoids multiplicative distortion)
             if matched_keywords > 1:
-                score *= (1 + matched_keywords) 
+                score += 10 * (matched_keywords - 1)
 
-            # Life Domain Category Boosting
-            domain_category_map = {
-                "career": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
-                "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential", "Astro List"],
-                "health": ["Astrostore", "GST-Included"],
-                "spiritual": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva", "Puja"],
-                "family": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Pooja Murti"],
-                "finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
-                # _update_memory domain labels
-                "career & finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now"],
-                "physical health": ["Astrostore", "GST-Included"],
-                "ayurveda & wellness": ["Astrostore", "GST-Included"],
-                "yoga practice": ["Astrostore", "GST-Included"],
-                "meditation & mind": ["Astrostore", "Pooja Essential"],
-                "spiritual growth": ["Pooja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva"],
-            }
-
-            boosted_categories = domain_category_map.get(life_domain.lower(), [])
+            # Life Domain Category Boosting (uses class-level DOMAIN_CATEGORY_MAP)
+            boosted_categories = ProductService.DOMAIN_CATEGORY_MAP.get(life_domain.lower(), [])
             if any(cat in product.get("category", "") for cat in boosted_categories):
-                score += 25  # Significant boost for domain match
+                score += 30  # Domain match boost (higher than emotion)
 
             # Deity name boost
             if deity:
@@ -158,22 +173,44 @@ class ProductService:
                 "fear": ["Astrostore", "Pooja Murti"],
                 "hopelessness": ["Astro List", "Spiritual"],
                 "sadness": ["Astrostore", "Astro List"],
+                "loneliness": ["Astrostore", "GST-Included", "Astro List"],
+                "frustration": ["Astrostore", "Astro List"],
+                "despair": ["Astro List", "Spiritual", "Seva"],
+                "shame": ["Astro List", "Astrostore"],
+                "guilt": ["Seva", "Astro List", "Astrostore"],
+                "jealousy": ["Astrostore"],
             }
             if emotion:
                 emotion_cats = emotion_category_boost.get(emotion.lower(), [])
                 if any(cat in product.get("category", "") for cat in emotion_cats):
-                    score += 15
+                    score += 20  # Emotion boost (lower than domain)
 
             # Category Boosts
             # 1. Physical products boost
-            physical_categories = ["Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home"]
+            physical_categories = [
+                "Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home",
+                "Sculptures & Statues", "Chadhawa", "lord vishnu", "Pooja Murti",
+                "flower offering to maa durga", "bhagwan krishna blessings",
+            ]
             if product.get("category") in physical_categories:
                 score += 10
 
             # 2. Spiritual Services and Astrology boost
-            service_categories = ["ASTROLOGY", "Astro List", "Puja", "Seva", "Ank Shastra"]
+            service_categories = [
+                "ASTROLOGY", "Astro List", "Puja", "Seva", "Ank Shastra",
+                "Book-now", "members-form", "Mangal", "Bhajan Clubbing",
+                "Abundance alignment", "Abundance Mindset", "Conscious Parenting",
+            ]
             if product.get("category") in service_categories:
-                score += 15 
+                score += 15
+
+            # 3. Price-tier moderation: mildly boost accessible items, penalize expensive ones
+            price = product.get("amount", 0)
+            if isinstance(price, (int, float)):
+                if price <= 999:
+                    score += 5
+                elif price >= 3000:
+                    score -= 5
 
             return score
 
@@ -184,7 +221,67 @@ class ProductService:
         for p in sorted_products:
             p.pop("_text_score", None)
 
-        return sorted_products[:limit]
+        # Deduplicate products by name (catalog may have duplicate entries)
+        seen_names = set()
+        deduped = []
+        for p in sorted_products:
+            if p["name"] not in seen_names:
+                seen_names.add(p["name"])
+                deduped.append(p)
+
+        # Category-level diversity: max 2 products per subcategory name pattern
+        # Prevents returning 3 Rose Quartz variants or 3 similar Moon Lamps
+        diverse = []
+        pattern_counts: Dict[str, int] = {}
+        max_per_pattern = 2
+        for p in deduped:
+            # Extract a normalised pattern from product name: first two significant words
+            name_words = re.findall(r'[a-zA-Z]+', p.get("name", "").lower())
+            pattern_key = " ".join(name_words[:2]) if len(name_words) >= 2 else p.get("name", "").lower()
+            count = pattern_counts.get(pattern_key, 0)
+            if count < max_per_pattern:
+                diverse.append(p)
+                pattern_counts[pattern_key] = count + 1
+            if len(diverse) >= limit:
+                break
+
+        # Category-level fallback: fill remaining slots from domain-relevant categories
+        if len(diverse) < limit and life_domain:
+            fallback_categories = self.DOMAIN_CATEGORY_MAP.get(life_domain.lower(), [])
+            if fallback_categories and self.collection is not None:
+                existing_names = {p.get("name") for p in diverse}
+                cat_query = {
+                    "is_active": True,
+                    "category": {"$in": fallback_categories},
+                }
+                try:
+                    cat_cursor = self.collection.find(cat_query).limit(limit * 3)
+                    fallback_pool = []
+                    for doc in cat_cursor:
+                        doc = self._serialize_doc(doc)
+                        if doc.get("name") not in existing_names:
+                            fallback_pool.append(doc)
+                except Exception as e:
+                    logger.warning(f"Category fallback query failed: {e}")
+                    fallback_pool = []
+
+                # Score and sort fallback products
+                fallback_pool.sort(key=calculate_score, reverse=True)
+
+                for p in fallback_pool:
+                    if len(diverse) >= limit:
+                        break
+                    if p["name"] in seen_names:
+                        continue
+                    name_words = re.findall(r'[a-zA-Z]+', p.get("name", "").lower())
+                    pattern_key = " ".join(name_words[:2]) if len(name_words) >= 2 else p.get("name", "").lower()
+                    count = pattern_counts.get(pattern_key, 0)
+                    if count < max_per_pattern:
+                        diverse.append(p)
+                        seen_names.add(p["name"])
+                        pattern_counts[pattern_key] = count + 1
+
+        return diverse[:limit]
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
         """Get recommended products, optionally filtered by category"""

@@ -41,7 +41,7 @@ class GeminiFastIntentProvider(IntentProvider):
                 model=self._model,
                 contents=prompt,
                 config={
-                    "temperature": 0.1,
+                    "temperature": settings.INTENT_TEMPERATURE,
                     "response_mime_type": "application/json",
                     "automatic_function_calling": {"disable": True},
                 },

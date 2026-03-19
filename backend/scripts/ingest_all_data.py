@@ -125,23 +125,29 @@ class UniversalScriptureIngester:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            def extract_from_any(obj):
-                extracted = []
-                if isinstance(obj, list):
-                    for item in obj:
-                        extracted.extend(extract_from_any(item))
-                elif isinstance(obj, dict):
-                    verse = self._extract_verse_from_dict(obj, file_path.stem)
-                    if verse:
-                        extracted.append(verse)
-                    else:
-                        # Check nested lists in dict values
-                        for val in obj.values():
-                            if isinstance(val, (list, dict)):
-                                extracted.extend(extract_from_any(val))
-                return extracted
+            # Detect Yoga Sutras pattern: list of lists of dicts with 'shloka' key
+            if (isinstance(data, list) and len(data) > 0 and
+                    isinstance(data[0], list) and len(data[0]) > 0 and
+                    isinstance(data[0][0], dict) and 'shloka' in data[0][0]):
+                verses = self._parse_yoga_sutras(data, file_path.stem)
+            else:
+                def extract_from_any(obj):
+                    extracted = []
+                    if isinstance(obj, list):
+                        for item in obj:
+                            extracted.extend(extract_from_any(item))
+                    elif isinstance(obj, dict):
+                        verse = self._extract_verse_from_dict(obj, file_path.stem)
+                        if verse:
+                            extracted.append(verse)
+                        else:
+                            # Check nested lists in dict values
+                            for val in obj.values():
+                                if isinstance(val, (list, dict)):
+                                    extracted.extend(extract_from_any(val))
+                    return extracted
 
-            verses = extract_from_any(data)
+                verses = extract_from_any(data)
             
             # Limit for performance
             if len(verses) > 10000 and "gita" not in file_path.name.lower():
@@ -342,7 +348,8 @@ class UniversalScriptureIngester:
         # Extract fields
         verse['chapter'] = row_lower.get('book') or row_lower.get('mandala') or row_lower.get('kaanda') or row_lower.get('chapter') or row_lower.get('adhyaya')
         verse['section'] = row_lower.get('section') or row_lower.get('sarg') or row_lower.get('sarga') or (row_lower.get('chapter') if 'kaanda' in row_lower or 'book' in row_lower else None)
-        verse['verse'] = row_lower.get('shloka') or row_lower.get('verse') or row_lower.get('shloka_number') or row_lower.get('sukta')
+        verse['verse_number'] = row_lower.get('verse') or row_lower.get('shloka_number') or row_lower.get('sukta')
+        verse['verse'] = row_lower.get('shloka')  # Keep shloka for sanskrit field
         
         # Priority for English content
         verse['text'] = row_lower.get('engmeaning') or row_lower.get('translation') or row_lower.get('english') or row_lower.get('text')
@@ -361,18 +368,20 @@ class UniversalScriptureIngester:
             verse['text'] = f"Context: {row_lower.get('context', 'N/A')}\nGuidance: {row_lower.get('meditation_guidance')}\nTechniques: {row_lower.get('suggested_techniques', 'N/A')}"
             verse['chapter'] = row_lower.get('meditation_style', 'General')
             verse['verse'] = row_lower.get('user_experience_level', 'All levels')
+            verse['verse_number'] = row_lower.get('user_experience_level', 'All levels')
             verse['topic'] = 'Meditation'
+            verse['type'] = 'procedural'
 
         # Only return if we have essential fields
-        if (verse.get('chapter') and verse.get('verse') and verse.get('text')) or 'meditation_guidance' in row_lower:
+        if (verse.get('chapter') and (verse.get('verse_number') or verse.get('verse')) and verse.get('text')) or 'meditation_guidance' in row_lower:
             verse['scripture'] = self._infer_scripture(source)
             verse['source'] = source
-            
-            # Construct more granular reference
+
+            # Construct more granular reference using verse_number (not shloka text)
             ref = f"{verse['scripture']} {verse['chapter']}"
             if verse.get('section') and str(verse['section']) != str(verse['chapter']):
                 ref += f" {verse['section']}"
-            ref += f".{verse['verse']}"
+            ref += f".{verse.get('verse_number', verse.get('verse', ''))}"
             verse['reference'] = ref
             
             verse['language'] = 'en'
@@ -423,7 +432,7 @@ class UniversalScriptureIngester:
             # Standardized Verse Output
             final_verse = {
                 'id': str(uuid.uuid4()),
-                'type': item.get('type', 'scripture'),
+                'type': item.get('type', 'procedural' if 'meditation' in source.lower() else 'scripture'),
                 'scripture': self._infer_scripture(source),
                 'source': source,
                 'chapter': verse.get('chapter'),
@@ -449,6 +458,46 @@ class UniversalScriptureIngester:
             return final_verse
 
         return None
+
+    def _parse_yoga_sutras(self, data: list, source: str) -> List[Dict]:
+        """Parse Yoga Sutras JSON: list of 4 padas, each a list of sutra dicts."""
+        verses = []
+        for pada_idx, pada in enumerate(data):
+            if not isinstance(pada, list):
+                continue
+            pada_num = pada_idx + 1
+            for sutra_idx, sutra in enumerate(pada):
+                if not isinstance(sutra, dict):
+                    continue
+                sutra_num = sutra_idx + 1
+                reference = f"Patanjali Yoga Sutras {pada_num}.{sutra_num}"
+
+                # meaning field has English, shloka has Sanskrit, words has word-by-word
+                text = sutra.get('meaning') or sutra.get('words') or ''
+                sanskrit = sutra.get('shloka') or ''
+                meaning = sutra.get('words') or ''
+
+                verse = {
+                    'id': str(uuid.uuid4()),
+                    'type': 'scripture',
+                    'scripture': 'Patanjali Yoga Sutras',
+                    'source': source,
+                    'chapter': str(pada_num),
+                    'section': '',
+                    'verse_number': str(sutra_num),
+                    'text': text,
+                    'sanskrit': sanskrit,
+                    'meaning': meaning,
+                    'transliteration': '',
+                    'language': 'en',
+                    'reference': reference,
+                    'embedding': [],
+                }
+                verse['topic'] = self._infer_topic(verse)
+                verses.append(verse)
+
+        logger.info(f"Parsed {len(verses)} sutras from Yoga Sutras ({len(data)} padas)")
+        return verses
 
     def _infer_scripture(self, source: str) -> str:
         """Infer scripture name from filename"""
@@ -481,41 +530,215 @@ class UniversalScriptureIngester:
         else:
             return 'Sanatan Scriptures'
 
+    # Scripture+chapter fallback mapping for topic inference
+    _SCRIPTURE_CHAPTER_DEFAULTS = {
+        ('Ramayana', 'balakanda'): 'Dharma',
+        ('Ramayana', 'ayodhyakanda'): 'Dharma',
+        ('Ramayana', 'aranyakanda'): 'Dharma',
+        ('Ramayana', 'kishkindhakanda'): 'Bhakti Yoga',
+        ('Ramayana', 'sundarakanda'): 'Bhakti Yoga',
+        ('Ramayana', 'yudhhakanda'): 'War',
+        ('Ramayana', 'uttarakanda'): 'Dharma',
+        ('Mahabharata', '1'): 'Dharma',
+        ('Mahabharata', '2'): 'Dharma',
+        ('Mahabharata', '3'): 'Dharma',
+        ('Mahabharata', '5'): 'Dharma',
+        ('Mahabharata', '6'): 'War',
+        ('Mahabharata', '12'): 'Dharma',
+        ('Mahabharata', '13'): 'Dharma',
+    }
+
     def _infer_topic(self, verse: Dict) -> str:
-        """Infer topic from verse content using regex for word boundaries"""
+        """Infer topic from verse content using regex for word boundaries, with Sanskrit keyword support"""
+        # If topic was already set (e.g., meditation), preserve it
+        if verse.get('topic') and verse['topic'] != 'Spiritual Wisdom':
+            return verse['topic']
+
         text = ' '.join([str(verse.get(f, '')) for f in ['text', 'meaning', 'sanskrit'] if verse.get(f)]).lower()
 
         topics = {
-            'Karma Yoga': ['action', 'duty', 'work', 'karma', 'perform', 'karm'],
-            'Bhakti Yoga': ['devotion', 'love', 'surrender', 'worship', 'bhakti', 'prem'],
-            'Jnana Yoga': ['knowledge', 'wisdom', 'understand', 'jnana', 'learning', 'gyan'],
-            'Mind Control': ['mind', 'control', 'meditation', 'focus', 'discipline', 'mana'],
-            'Soul': ['soul', 'atman', 'self', 'eternal', 'immortal', 'aatma'],
-            'Equanimity': ['equal', 'balance', 'neutral', 'steady', 'sama', 'equanimity'],
-            'Fear': ['fear', 'afraid', 'courage', 'fearless', 'bhaya'],
-            'Death': ['death', 'mortality', 'rebirth', 'reincarnation', 'mrutyu'],
-            'Liberation': ['liberation', 'moksha', 'freedom', 'enlightenment', 'mukt'],
-            'Dharma': ['dharma', 'righteousness', 'duty', 'moral', 'dharm'],
-            'Truth': ['truth', 'satya', 'honest', 'real'],
-            'Wealth': ['wealth', 'money', 'prosperity', 'success'],
-            'Love': ['love', 'affection', 'compassion', 'prem', 'sneh'],
-            'War': ['war', 'battle', 'fight', 'yuddh', 'yudh'],
-            'Health & Ayurveda': ['health', 'disease', 'medicine', 'ayurveda', 'dosha', 'vata', 'pitta', 'kapha', 'herb', 'cure', 'healing'],
-            'Yoga & Meditation': ['yoga', 'asana', 'meditation', 'breath', 'pranayama', 'dhyana', 'mindfulness', 'concentration'],
+            'Karma Yoga': ['action', 'duty', 'work', 'karma', 'perform', 'karm', 'कर्म', 'कर्तव्य', 'कर्मण'],
+            'Bhakti Yoga': ['devotion', 'love', 'surrender', 'worship', 'bhakti', 'prem', 'भक्ति', 'प्रेम', 'पूजा', 'भगवान'],
+            'Jnana Yoga': ['knowledge', 'wisdom', 'understand', 'jnana', 'learning', 'gyan', 'ज्ञान', 'विद्या', 'बुद्धि'],
+            'Mind Control': ['mind', 'control', 'meditation', 'focus', 'discipline', 'mana', 'मन', 'चित्त', 'ध्यान', 'एकाग्र'],
+            'Soul': ['soul', 'atman', 'self', 'eternal', 'immortal', 'aatma', 'आत्मा', 'आत्मन'],
+            'Equanimity': ['equal', 'balance', 'neutral', 'steady', 'sama', 'equanimity', 'सम', 'समत्व'],
+            'Fear': ['fear', 'afraid', 'courage', 'fearless', 'bhaya', 'भय', 'निर्भय'],
+            'Death': ['death', 'mortality', 'rebirth', 'reincarnation', 'mrutyu', 'मृत्यु', 'मरण', 'पुनर्जन्म'],
+            'Liberation': ['liberation', 'moksha', 'freedom', 'enlightenment', 'mukt', 'मोक्ष', 'मुक्ति', 'निर्वाण'],
+            'Dharma': ['dharma', 'righteousness', 'duty', 'moral', 'dharm', 'धर्म', 'न्याय', 'सत्य'],
+            'Truth': ['truth', 'satya', 'honest', 'real', 'सत्य'],
+            'Wealth': ['wealth', 'money', 'prosperity', 'success', 'धन', 'सम्पत्ति'],
+            'Love': ['love', 'affection', 'compassion', 'prem', 'sneh', 'प्रेम', 'स्नेह', 'करुणा'],
+            'War': ['war', 'battle', 'fight', 'yuddh', 'yudh', 'युद्ध', 'संग्राम', 'रण'],
+            'Health & Ayurveda': ['health', 'disease', 'medicine', 'ayurveda', 'dosha', 'vata', 'pitta', 'kapha', 'herb', 'cure', 'healing', 'आयुर्वेद', 'रोग', 'औषधि'],
+            'Yoga & Meditation': ['yoga', 'asana', 'meditation', 'breath', 'pranayama', 'dhyana', 'mindfulness', 'concentration', 'योग', 'आसन', 'प्राणायाम'],
         }
 
         for topic, keywords in topics.items():
-            pattern = r'\b(' + '|'.join(map(re.escape, keywords)) + r')\b'
+            pattern = r'(' + '|'.join(map(re.escape, keywords)) + r')'
             if re.search(pattern, text):
+                return topic
+
+        # Scripture+chapter fallback when keyword matching fails
+        scripture = verse.get('scripture', '')
+        chapter = str(verse.get('chapter', '')).lower()
+        for (scr, ch), topic in self._SCRIPTURE_CHAPTER_DEFAULTS.items():
+            if scr in scripture and ch in chapter:
                 return topic
 
         return 'Spiritual Wisdom'
 
+    def _needs_translation(self, verse: Dict) -> bool:
+        """Check if a verse needs translation (Sanskrit-only, no English content)."""
+        # Already has English content
+        if verse.get('text') and not self._is_primarily_devanagari(verse['text']):
+            return False
+        if verse.get('meaning') and not self._is_primarily_devanagari(verse['meaning']):
+            return False
+        # Has Sanskrit content that could be translated
+        sanskrit = verse.get('sanskrit') or verse.get('text') or ''
+        return bool(sanskrit.strip()) and self._is_primarily_devanagari(sanskrit)
+
+    def _is_primarily_devanagari(self, text: str) -> bool:
+        """Check if >50% of non-whitespace chars are Devanagari (Unicode 0900-097F)."""
+        if not text:
+            return False
+        chars = [c for c in text if not c.isspace()]
+        if not chars:
+            return False
+        devanagari = sum(1 for c in chars if '\u0900' <= c <= '\u097F')
+        return devanagari / len(chars) > 0.5
+
+    async def _batch_translate_verses(self, verses: List[Dict]):
+        """Translate Sanskrit-only verses to English using Gemini Flash in batches."""
+        try:
+            from google import genai
+        except ImportError:
+            logger.warning("google-genai not available, skipping translation")
+            return
+
+        checkpoint_path = self.processed_data_dir / "translation_checkpoint.json"
+
+        # Load checkpoint if exists
+        translated_refs = set()
+        if checkpoint_path.exists():
+            try:
+                with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                    checkpoint = json.load(f)
+                translated_refs = set(checkpoint.get('translated_refs', []))
+                logger.info(f"Resuming translation: {len(translated_refs)} already done")
+            except Exception:
+                pass
+
+        # Filter out already-translated
+        remaining = [v for v in verses if v.get('reference') not in translated_refs]
+        if not remaining:
+            logger.info("All verses already translated (checkpoint)")
+            return
+
+        # Priority tiers
+        def get_tier(v):
+            scripture = (v.get('scripture') or '').lower()
+            chapter = str(v.get('chapter') or '').lower()
+            if 'atharva veda' in scripture:
+                return 1
+            if 'rig veda' in scripture and any(m in chapter for m in ['7', '10']):
+                return 1
+            if 'ramayana' in scripture and any(k in chapter for k in ['balakanda', 'sundarakanda', 'yudhhakanda']):
+                return 1
+            if 'mahabharata' in scripture and chapter in ('1', '6'):
+                return 1
+            if 'ramayana' in scripture:
+                return 2
+            if 'rig veda' in scripture:
+                return 2
+            if 'mahabharata' in scripture and chapter in ('3', '5', '12', '13'):
+                return 2
+            return 3
+
+        remaining.sort(key=get_tier)
+
+        # Initialize Gemini client
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        batch_size = 50
+        total_translated = 0
+        backoff = 4  # seconds between batches
+
+        logger.info(f"Translating {len(remaining)} verses in batches of {batch_size}...")
+
+        for batch_start in range(0, len(remaining), batch_size):
+            batch = remaining[batch_start:batch_start + batch_size]
+
+            # Build prompt
+            lines = ["Translate these Sanskrit/Hindi verses to brief English (1-2 sentences each).",
+                      "Return ONLY translations, one per line, numbered to match input.", ""]
+            for idx, v in enumerate(batch):
+                sanskrit = v.get('sanskrit') or v.get('text') or ''
+                lines.append(f"{idx + 1}: {sanskrit[:500]}")
+
+            prompt = "\n".join(lines)
+
+            try:
+                response = client.models.generate_content(
+                    model=settings.GEMINI_FAST_MODEL,
+                    contents=prompt,
+                    config={"temperature": 0.2, "max_output_tokens": 4096}
+                )
+
+                if response.text:
+                    # Parse numbered responses
+                    translations = {}
+                    for line in response.text.strip().split('\n'):
+                        line = line.strip()
+                        m = re.match(r'^(\d+)[:\.\)]\s*(.*)', line)
+                        if m:
+                            idx = int(m.group(1)) - 1
+                            translations[idx] = m.group(2).strip()
+
+                    # Apply translations
+                    for idx, v in enumerate(batch):
+                        if idx in translations and translations[idx]:
+                            v['meaning'] = translations[idx]
+                            # Also update text if it was Sanskrit-only
+                            if self._is_primarily_devanagari(v.get('text', '')):
+                                v['text'] = translations[idx]
+                            translated_refs.add(v.get('reference', ''))
+                            total_translated += 1
+
+                logger.info(f"Translated batch {batch_start // batch_size + 1}: "
+                           f"{total_translated}/{len(remaining)} done")
+
+                # Save checkpoint
+                with open(checkpoint_path, 'w', encoding='utf-8') as f:
+                    json.dump({'translated_refs': list(translated_refs),
+                              'total': total_translated}, f)
+
+            except Exception as e:
+                error_str = str(e)
+                if '429' in error_str or 'rate' in error_str.lower():
+                    # Rate limited - exponential backoff
+                    backoff = min(backoff * 2, 60)
+                    logger.warning(f"Rate limited, backing off {backoff}s")
+                else:
+                    logger.error(f"Translation batch failed: {e}")
+
+            # Rate limit sleep
+            await asyncio.sleep(backoff)
+
+        logger.info(f"Translation complete: {total_translated} verses translated")
+
+    def _needs_instruction_prefix(self) -> bool:
+        """Check if the embedding model requires query/passage prefixes (e.g., E5 models)."""
+        return "e5" in settings.EMBEDDING_MODEL.lower()
+
     def generate_embeddings(self, verses: List[Dict]) -> np.ndarray:
         """Generate embeddings for all verses"""
         if not self.embedding_model:
-            logger.warning("⚠ No embedding model available - using dummy embeddings")
+            logger.warning("No embedding model available - using dummy embeddings")
             return np.zeros((len(verses), settings.EMBEDDING_DIM))
+
+        use_prefix = self._needs_instruction_prefix()
 
         texts = []
         for verse in verses:
@@ -526,20 +749,25 @@ class UniversalScriptureIngester:
                 verse.get('meaning', ''),
             ]
             combined_text = ' '.join([p for p in text_parts if p])
-            
-            # Normalize text: strip whitespace, replace newlines (matches RAGPipeline)
-            clean_text = combined_text.strip().replace("\n", " ")
-            texts.append(clean_text[:1000])  # Limit length
 
-        logger.info(f"Generating embeddings for {len(texts)} verses...")
+            # Normalize text: strip whitespace, replace newlines (matches RAGPipeline)
+            clean_text = combined_text.strip().replace("\n", " ")[:1000]
+
+            # E5 models require "passage: " prefix for document encoding
+            if use_prefix:
+                clean_text = "passage: " + clean_text
+
+            texts.append(clean_text)
+
+        logger.info(f"Generating embeddings for {len(texts)} verses (prefix={'passage' if use_prefix else 'none'})...")
         embeddings = self.embedding_model.encode(
-            texts, 
-            convert_to_tensor=False, 
+            texts,
+            convert_to_tensor=False,
             show_progress_bar=True,
             normalize_embeddings=True
         )
 
-        logger.info(f"✓ Generated embeddings shape: {embeddings.shape}")
+        logger.info(f"Generated embeddings shape: {embeddings.shape}")
         return embeddings
 
     def save_processed_data(self, verses: List[Dict], embeddings: np.ndarray):
@@ -628,6 +856,15 @@ class UniversalScriptureIngester:
 
         all_verses = list(unique_verses.values())
         logger.info(f"\n✅ {len(all_verses)} unique verses after deduplication")
+
+        # Translate Sanskrit-only verses to English
+        # NOTE: Uncomment for Phase 2 (translation via Gemini Flash, ~2h for full corpus)
+        verses_needing_translation = [v for v in all_verses if self._needs_translation(v)]
+        if verses_needing_translation:
+            logger.info(f"\n🌐 {len(verses_needing_translation)} verses need translation")
+            await self._batch_translate_verses(verses_needing_translation)
+        else:
+            logger.info("\n✅ All verses already have English content")
 
         # Generate embeddings
         logger.info("\n🔄 Generating embeddings...")

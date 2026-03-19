@@ -48,8 +48,8 @@ class GeminiResponseProvider(ResponseProvider):
                 contents=prompt,
                 config={
                     "system_instruction": system_instruction,
-                    "temperature": 0.7,
-                    "max_output_tokens": 1024,
+                    "temperature": settings.RESPONSE_TEMPERATURE,
+                    "max_output_tokens": settings.RESPONSE_MAX_TOKENS,
                     "automatic_function_calling": {"disable": True},
                 },
             )

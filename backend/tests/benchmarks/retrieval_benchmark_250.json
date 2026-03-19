@@ -1,0 +1,3068 @@
+[
+  {
+    "id": 1,
+    "query": "What is the meaning of dharma?",
+    "language": "en",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 4.7",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 2,
+    "query": "How do I deal with grief and loss?",
+    "language": "en",
+    "category": "grief",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 2.27"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 3,
+    "query": "What does Krishna say about performing your duty without attachment to results?",
+    "language": "en",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 3.19",
+      "Bhagavad Gita 5.10"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 18.9",
+      "Bhagavad Gita 18.11",
+      "Concept — Karma Yoga Explained"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 4,
+    "query": "How to practice meditation according to Hindu scriptures?",
+    "language": "en",
+    "category": "meditation",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Bhagavad Gita 6.11",
+      "Bhagavad Gita 6.12",
+      "Patanjali Yoga Sutras 1.2",
+      "Patanjali Yoga Sutras 1.3"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 5,
+    "query": "How to control anger according to the Gita?",
+    "language": "en",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 16.21"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 5.26",
+      "Bhagavad Gita 3.37",
+      "Concept — Anger Control in Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 6,
+    "query": "What is the nature of the soul or atman?",
+    "language": "en",
+    "category": "soul/atman",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Bhagavad Gita 2.18",
+      "Bhagavad Gita 2.20",
+      "Bhagavad Gita 2.23"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 7,
+    "query": "What is the path to moksha or liberation?",
+    "language": "en",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 4.9",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 8.6",
+      "Bhagavad Gita 18.55"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 8,
+    "query": "How should I fulfill my family responsibilities?",
+    "language": "en",
+    "category": "family",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47",
+      "Ramayana Ayodhya Kanda 2.12",
+      "Ramayana Ayodhya Kanda 109.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 9,
+    "query": "How to practice devotion and bhakti?",
+    "language": "en",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 9.22",
+      "Bhagavad Gita 9.26",
+      "Bhagavad Gita 9.34",
+      "Bhagavad Gita 12.8"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 10,
+    "query": "What are the most sacred Shiva temples in India?",
+    "language": "en",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Temple: Somnath (Gujarat)",
+      "Temple: Mahakaleshwar (Madhya Pradesh)",
+      "Temple: Ramanathaswamy (Tamil Nadu)"
+    ]
+  },
+  {
+    "id": 11,
+    "query": "What are the eight limbs of yoga?",
+    "language": "en",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.29",
+      "Patanjali Yoga Sutras 2.30",
+      "Patanjali Yoga Sutras 2.46",
+      "Patanjali Yoga Sutras 2.49"
+    ]
+  },
+  {
+    "id": 12,
+    "query": "What does Ayurveda say about balancing body and mind?",
+    "language": "en",
+    "category": "ayurveda",
+    "relevant_references": [
+      "Atharva Veda 10.2.1",
+      "Atharva Veda 11.8.1",
+      "Rig Veda 10.97.1"
+    ],
+    "alternative_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Bhagavad Gita 6.17",
+      "Patanjali Yoga Sutras 3.46"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 13,
+    "query": "How to overcome fear of death?",
+    "language": "en",
+    "category": "death",
+    "relevant_references": [
+      "Bhagavad Gita 2.20",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 2.27",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 8.6"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 14,
+    "query": "What is karma yoga and how to practice it?",
+    "language": "en",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 3.3",
+      "Bhagavad Gita 3.7",
+      "Bhagavad Gita 3.9",
+      "Bhagavad Gita 3.19"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 15,
+    "query": "What is the significance of Om in Hindu philosophy?",
+    "language": "en",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 7.8",
+      "Bhagavad Gita 8.13",
+      "Bhagavad Gita 17.24",
+      "Rig Veda 1.1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 16,
+    "query": "How does Lord Rama exemplify ideal duty and righteousness?",
+    "language": "en",
+    "category": "duty",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 16.10",
+      "Ramayana Ayodhya Kanda 109.25",
+      "Ramayana Aranya Kanda 10.4",
+      "Bhagavad Gita 3.21"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 17,
+    "query": "What is divine love according to Hindu scriptures?",
+    "language": "en",
+    "category": "love",
+    "relevant_references": [
+      "Bhagavad Gita 9.29",
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 12.14",
+      "Bhagavad Gita 18.65"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 18,
+    "query": "How to overcome fear and anxiety?",
+    "language": "en",
+    "category": "fear",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 11.50",
+      "Bhagavad Gita 18.30",
+      "Patanjali Yoga Sutras 2.3"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 19,
+    "query": "What does the Gita teach about the three gunas?",
+    "language": "en",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 14.5",
+      "Bhagavad Gita 14.6",
+      "Bhagavad Gita 14.7",
+      "Bhagavad Gita 14.8",
+      "Bhagavad Gita 14.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 20,
+    "query": "How to find inner peace through yoga and meditation?",
+    "language": "en",
+    "category": "meditation",
+    "relevant_references": [
+      "Bhagavad Gita 6.14",
+      "Bhagavad Gita 6.15",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Meditation and Mindfulness general.1"
+    ]
+  },
+  {
+    "id": 21,
+    "query": "What is the concept of rebirth and reincarnation?",
+    "language": "en",
+    "category": "soul/atman",
+    "relevant_references": [
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 4.5",
+      "Bhagavad Gita 8.15"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 22,
+    "query": "Where are the famous Vishnu temples in South India?",
+    "language": "en",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Tirupati Balaji (Andhra Pradesh)",
+      "Temple: Sri Ranganathaswamy (Tamil Nadu)",
+      "Temple: Padmanabhaswamy (Kerala)",
+      "Temple: Guruvayur (Kerala)"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 23,
+    "query": "What is the significance of Hanuman's devotion to Rama?",
+    "language": "en",
+    "category": "devotion",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 35.12",
+      "Ramayana Sundara Kanda 1.1",
+      "Ramayana Yuddha Kanda 30.40",
+      "Bhagavad Gita 11.54"
+    ],
+    "alternative_references": [
+      "Mahabharata",
+      "Patanjali Yoga Sutras 1.23"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 24,
+    "query": "How should one deal with enemies according to Hindu philosophy?",
+    "language": "en",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 6.9",
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 12.14",
+      "Ramayana Yuddha Kanda 115.20"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 25,
+    "query": "What is the role of pranayama in yoga practice?",
+    "language": "en",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49",
+      "Patanjali Yoga Sutras 2.50",
+      "Patanjali Yoga Sutras 2.51",
+      "Bhagavad Gita 4.29"
+    ]
+  },
+  {
+    "id": 26,
+    "query": "What Ayurvedic principles promote good health?",
+    "language": "en",
+    "category": "health",
+    "relevant_references": [
+      "Atharva Veda 2.3.1",
+      "Atharva Veda 6.136.1",
+      "Rig Veda 10.97.6",
+      "Rig Veda 10.97.8"
+    ],
+    "alternative_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Bhagavad Gita 6.17"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 27,
+    "query": "Why does God allow suffering in the world?",
+    "language": "en",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 2.14",
+      "Bhagavad Gita 5.14",
+      "Bhagavad Gita 5.15",
+      "Bhagavad Gita 13.21"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 28,
+    "query": "What is the meaning of surrender to God?",
+    "language": "en",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 18.66",
+      "Bhagavad Gita 7.14",
+      "Bhagavad Gita 9.22",
+      "Bhagavad Gita 15.4"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 29,
+    "query": "How to practice non-attachment while living in the world?",
+    "language": "en",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.19",
+      "Bhagavad Gita 5.7",
+      "Bhagavad Gita 12.12"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Concept — Karma Yoga Explained",
+      "Concept — Karma Sannyasa — Renunciation Through Action",
+      "Meditation and Mindfulness increase mindfulness.1"
+    ]
+  },
+  {
+    "id": 30,
+    "query": "What are the qualities of a wise person according to Krishna?",
+    "language": "en",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.54",
+      "Bhagavad Gita 2.55",
+      "Bhagavad Gita 2.56",
+      "Bhagavad Gita 2.57",
+      "Bhagavad Gita 2.58"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 31,
+    "query": "How to maintain mental equilibrium in success and failure?",
+    "language": "en",
+    "category": "meditation",
+    "relevant_references": [
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 6.7",
+      "Bhagavad Gita 12.18",
+      "Bhagavad Gita 14.24"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 2.38",
+      "Bhagavad Gita 2.50",
+      "Bhagavad Gita 5.20"
+    ]
+  },
+  {
+    "id": 32,
+    "query": "What is Jnana Yoga or the path of knowledge?",
+    "language": "en",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 4.33",
+      "Bhagavad Gita 4.34",
+      "Bhagavad Gita 4.38",
+      "Bhagavad Gita 7.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 33,
+    "query": "What are the famous Jyotirlinga temples?",
+    "language": "en",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Temple: Somnath (Gujarat)",
+      "Temple: Mallikarjuna (Andhra Pradesh)",
+      "Temple: Omkareshwar (Madhya Pradesh)",
+      "Temple: Kedarnath (Uttarakhand)"
+    ]
+  },
+  {
+    "id": 34,
+    "query": "How should parents guide their children according to Vedic teachings?",
+    "language": "en",
+    "category": "family",
+    "relevant_references": [
+      "Rig Veda 10.85.42",
+      "Ramayana Ayodhya Kanda 4.18",
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 16.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 35,
+    "query": "What is the purpose of human life according to the Upanishads?",
+    "language": "en",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 4.7",
+      "Bhagavad Gita 4.8",
+      "Bhagavad Gita 15.7",
+      "Rig Veda 1.164.46"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 36,
+    "query": "How does one achieve samadhi through yoga?",
+    "language": "en",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.17",
+      "Patanjali Yoga Sutras 1.18",
+      "Patanjali Yoga Sutras 1.41",
+      "Patanjali Yoga Sutras 3.3"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 1.22",
+      "Patanjali Yoga Sutras 3.3",
+      "Concept — Samadhi — Highest State of Yoga"
+    ]
+  },
+  {
+    "id": 37,
+    "query": "What does the Gita say about vegetarian food and diet?",
+    "language": "en",
+    "category": "health",
+    "relevant_references": [
+      "Bhagavad Gita 17.8",
+      "Bhagavad Gita 17.9",
+      "Bhagavad Gita 17.10",
+      "Bhagavad Gita 6.17"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 3.14",
+      "Bhagavad Gita 15.14",
+      "Concept — Sattvic Diet in Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 38,
+    "query": "How did Sita endure suffering with grace?",
+    "language": "en",
+    "category": "grief",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 15.40",
+      "Ramayana Sundara Kanda 28.5",
+      "Ramayana Aranya Kanda 47.35",
+      "Bhagavad Gita 2.14"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 39,
+    "query": "What is the concept of dharmic warfare or just war?",
+    "language": "en",
+    "category": "duty",
+    "relevant_references": [
+      "Bhagavad Gita 2.31",
+      "Bhagavad Gita 2.32",
+      "Bhagavad Gita 2.33",
+      "Bhagavad Gita 11.33"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 2.37",
+      "Bhagavad Gita 18.43",
+      "Concept — Dharmic Warfare (Yuddh Dharma)"
+    ]
+  },
+  {
+    "id": 40,
+    "query": "What is the universal form of God described in the Gita?",
+    "language": "en",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 11.5",
+      "Bhagavad Gita 11.9",
+      "Bhagavad Gita 11.12",
+      "Bhagavad Gita 11.16",
+      "Bhagavad Gita 11.32"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 11.10",
+      "Bhagavad Gita 11.13",
+      "Bhagavad Gita 11.20"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 41,
+    "query": "कर्म का अर्थ क्या है?",
+    "language": "hi",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.5",
+      "Bhagavad Gita 3.8",
+      "Bhagavad Gita 4.17"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 42,
+    "query": "ध्यान कैसे करें?",
+    "language": "hi",
+    "category": "meditation",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Bhagavad Gita 6.11",
+      "Bhagavad Gita 6.13",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 43,
+    "query": "शिव जी की पूजा कैसे करें?",
+    "language": "hi",
+    "category": "devotion",
+    "relevant_references": [
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Temple: Somnath (Gujarat)",
+      "Rig Veda 7.59.12",
+      "Atharva Veda 11.2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 44,
+    "query": "भगवद गीता में आत्मा के बारे में क्या कहा गया है?",
+    "language": "hi",
+    "category": "soul/atman",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Bhagavad Gita 2.18",
+      "Bhagavad Gita 2.19",
+      "Bhagavad Gita 2.20"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 45,
+    "query": "मोक्ष प्राप्ति का मार्ग क्या है?",
+    "language": "hi",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 4.9",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 18.55",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 46,
+    "query": "क्रोध पर नियंत्रण कैसे करें?",
+    "language": "hi",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 5.26",
+      "Bhagavad Gita 16.21"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 47,
+    "query": "भक्ति योग क्या है और कैसे करें?",
+    "language": "hi",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 12.2",
+      "Bhagavad Gita 12.6",
+      "Bhagavad Gita 12.8",
+      "Bhagavad Gita 9.34"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 48,
+    "query": "परिवार में शांति कैसे बनाए रखें?",
+    "language": "hi",
+    "category": "family",
+    "relevant_references": [
+      "Bhagavad Gita 6.9",
+      "Bhagavad Gita 13.8",
+      "Ramayana Ayodhya Kanda 2.12",
+      "Rig Veda 10.191.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 49,
+    "query": "रामायण में राम का वनवास क्यों हुआ?",
+    "language": "hi",
+    "category": "duty",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 16.10",
+      "Ramayana Ayodhya Kanda 19.2",
+      "Ramayana Ayodhya Kanda 20.30",
+      "Ramayana Ayodhya Kanda 24.15"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 3.35",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 50,
+    "query": "दुःख से कैसे उबरें?",
+    "language": "hi",
+    "category": "grief",
+    "relevant_references": [
+      "Bhagavad Gita 2.3",
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.14",
+      "Bhagavad Gita 5.21"
+    ],
+    "alternative_references": [
+      "Mahabharata",
+      "Rig Veda 10.97.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 51,
+    "query": "योग सूत्र में यम और नियम क्या हैं?",
+    "language": "hi",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.30",
+      "Patanjali Yoga Sutras 2.31",
+      "Patanjali Yoga Sutras 2.32",
+      "Patanjali Yoga Sutras 2.35"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 52,
+    "query": "आयुर्वेद में तीन दोष क्या हैं?",
+    "language": "hi",
+    "category": "ayurveda",
+    "relevant_references": [
+      "Atharva Veda 1.12.1",
+      "Atharva Veda 6.44.1",
+      "Rig Veda 10.97.1",
+      "Rig Veda 10.97.12"
+    ],
+    "alternative_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Patanjali Yoga Sutras 3.46"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 53,
+    "query": "मृत्यु के बाद क्या होता है?",
+    "language": "hi",
+    "category": "death",
+    "relevant_references": [
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 8.6",
+      "Bhagavad Gita 15.8"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 54,
+    "query": "भारत के प्रसिद्ध मंदिर कौन से हैं?",
+    "language": "hi",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Temple: Tirupati Balaji (Andhra Pradesh)",
+      "Temple: Jagannath (Odisha)",
+      "Temple: Meenakshi (Tamil Nadu)",
+      "Temple: Somnath (Gujarat)"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 55,
+    "query": "भगवान से प्रेम कैसे करें?",
+    "language": "hi",
+    "category": "love",
+    "relevant_references": [
+      "Bhagavad Gita 9.29",
+      "Bhagavad Gita 12.14",
+      "Bhagavad Gita 18.65",
+      "Bhagavad Gita 18.55"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 56,
+    "query": "भय से मुक्ति कैसे पाएं?",
+    "language": "hi",
+    "category": "fear",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 11.49",
+      "Bhagavad Gita 18.30",
+      "Patanjali Yoga Sutras 2.3"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 57,
+    "query": "गीता में ईश्वर के विश्वरूप का वर्णन",
+    "language": "hi",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 11.5",
+      "Bhagavad Gita 11.9",
+      "Bhagavad Gita 11.12",
+      "Bhagavad Gita 11.16"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 58,
+    "query": "धर्म का पालन कैसे करें?",
+    "language": "hi",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47",
+      "Ramayana Ayodhya Kanda 109.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 59,
+    "query": "स्वस्थ जीवन के लिए वैदिक उपाय",
+    "language": "hi",
+    "category": "health",
+    "relevant_references": [
+      "Atharva Veda 2.3.1",
+      "Rig Veda 10.97.1",
+      "Bhagavad Gita 6.17",
+      "Bhagavad Gita 17.8"
+    ],
+    "alternative_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 60,
+    "query": "हनुमान जी की भक्ति का महत्व",
+    "language": "hi",
+    "category": "devotion",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 1.1",
+      "Ramayana Sundara Kanda 35.12",
+      "Ramayana Yuddha Kanda 30.40",
+      "Bhagavad Gita 12.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 61,
+    "query": "dharma kya hai",
+    "language": "transliterated",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 4.7",
+      "Bhagavad Gita 4.8",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 62,
+    "query": "Om Namah Shivaya ka arth",
+    "language": "transliterated",
+    "category": "devotion",
+    "relevant_references": [
+      "Rig Veda 7.59.12",
+      "Atharva Veda 11.2.1",
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Bhagavad Gita 8.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 63,
+    "query": "karma yoga kaise kare",
+    "language": "transliterated",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 3.3",
+      "Bhagavad Gita 3.7",
+      "Bhagavad Gita 3.9",
+      "Bhagavad Gita 3.19"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 64,
+    "query": "Bhagavad Gita mein atma ke baare mein",
+    "language": "transliterated",
+    "category": "soul/atman",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Bhagavad Gita 2.20",
+      "Bhagavad Gita 2.23",
+      "Bhagavad Gita 2.24"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 65,
+    "query": "moksha kaise milta hai",
+    "language": "transliterated",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 4.9",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 18.55",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 66,
+    "query": "gussa control karne ka tarika",
+    "language": "transliterated",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 5.26",
+      "Bhagavad Gita 16.21"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 2.3",
+      "Atharva Veda 6.44.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 67,
+    "query": "dhyan lagane ka sahi tarika",
+    "language": "transliterated",
+    "category": "meditation",
+    "relevant_references": [
+      "Bhagavad Gita 6.11",
+      "Bhagavad Gita 6.12",
+      "Bhagavad Gita 6.13",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 68,
+    "query": "Ram bhagwan ki katha sunao",
+    "language": "transliterated",
+    "category": "devotion",
+    "relevant_references": [
+      "Ramayana Bala Kanda 1.1",
+      "Ramayana Ayodhya Kanda 1.1",
+      "Ramayana Aranya Kanda 1.1",
+      "Ramayana Sundara Kanda 1.1"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 4.7",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 69,
+    "query": "maut ke baad kya hota hai",
+    "language": "transliterated",
+    "category": "death",
+    "relevant_references": [
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 8.5",
+      "Bhagavad Gita 8.6"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 70,
+    "query": "yoga kaise shuru kare beginners ke liye",
+    "language": "transliterated",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.1",
+      "Patanjali Yoga Sutras 1.2",
+      "Patanjali Yoga Sutras 2.46",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 71,
+    "query": "parivar mein pyaar aur shanti kaise laaye",
+    "language": "transliterated",
+    "category": "family",
+    "relevant_references": [
+      "Bhagavad Gita 6.9",
+      "Bhagavad Gita 13.8",
+      "Rig Veda 10.191.2",
+      "Rig Veda 10.191.4"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 72,
+    "query": "Tirupati Balaji mandir kahan hai",
+    "language": "transliterated",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Tirupati Balaji (Andhra Pradesh)",
+      "Bhagavad Gita 9.22"
+    ]
+  },
+  {
+    "id": 73,
+    "query": "bhakti ka sahi raasta kya hai",
+    "language": "transliterated",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 9.26",
+      "Bhagavad Gita 9.34",
+      "Bhagavad Gita 12.2",
+      "Bhagavad Gita 12.8"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 74,
+    "query": "accha health ke liye Ayurveda tips",
+    "language": "transliterated",
+    "category": "ayurveda",
+    "relevant_references": [
+      "Atharva Veda 2.3.1",
+      "Atharva Veda 6.136.1",
+      "Rig Veda 10.97.1",
+      "Bhagavad Gita 6.17"
+    ],
+    "alternative_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 75,
+    "query": "darr aur chinta se kaise bache",
+    "language": "transliterated",
+    "category": "fear",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 18.30",
+      "Patanjali Yoga Sutras 2.3",
+      "Patanjali Yoga Sutras 2.34"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 76,
+    "query": "Gita mein teen gunas ka matlab",
+    "language": "transliterated",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 14.5",
+      "Bhagavad Gita 14.6",
+      "Bhagavad Gita 14.7",
+      "Bhagavad Gita 14.8"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 77,
+    "query": "Hanuman ji ki shakti ka raaz",
+    "language": "transliterated",
+    "category": "devotion",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 1.1",
+      "Ramayana Sundara Kanda 35.12",
+      "Ramayana Yuddha Kanda 30.40"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 11.54",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 78,
+    "query": "sanskar aur parvarish ke vedic niyam",
+    "language": "transliterated",
+    "category": "family",
+    "relevant_references": [
+      "Rig Veda 10.85.42",
+      "Ramayana Ayodhya Kanda 4.18",
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 16.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 79,
+    "query": "Kedarnath mandir ka itihaas",
+    "language": "transliterated",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Kedarnath (Uttarakhand)",
+      "Temple: Kashi Vishwanath (Uttar Pradesh)",
+      "Rig Veda 7.59.12"
+    ]
+  },
+  {
+    "id": 80,
+    "query": "satvik bhojan ka mahatva Gita mein",
+    "language": "transliterated",
+    "category": "health",
+    "relevant_references": [
+      "Bhagavad Gita 17.8",
+      "Bhagavad Gita 17.9",
+      "Bhagavad Gita 17.10",
+      "Bhagavad Gita 6.17"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 81,
+    "query": "I'm going through a really tough breakup and feel lost",
+    "language": "en",
+    "category": "relationships",
+    "relevant_references": [
+      "Bhagavad Gita 2.14",
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 6.5"
+    ],
+    "alternative_references": [
+      "Mahabharata",
+      "Patanjali Yoga Sutras 1.33"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 82,
+    "query": "My parent passed away recently, I can't stop crying",
+    "language": "en",
+    "category": "grief",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 2.27"
+    ],
+    "alternative_references": [
+      "Mahabharata",
+      "Yajur Veda"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 83,
+    "query": "I feel jealous of my colleague's success at work",
+    "language": "en",
+    "category": "self-worth",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Concept — Overcoming Jealousy and Envy",
+      "Ramayana Ayodhya Kanda 72.49"
+    ]
+  },
+  {
+    "id": 84,
+    "query": "How do I stop overthinking everything?",
+    "language": "en",
+    "category": "anxiety",
+    "relevant_references": [
+      "Bhagavad Gita 6.35",
+      "Bhagavad Gita 2.66",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 85,
+    "query": "I want to start doing daily spiritual practice",
+    "language": "en",
+    "category": "spiritual_practice",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Bhagavad Gita 6.11",
+      "Patanjali Yoga Sutras 1.12",
+      "Patanjali Yoga Sutras 2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 86,
+    "query": "Is it wrong to feel angry at God?",
+    "language": "en",
+    "category": "faith",
+    "relevant_references": [
+      "Bhagavad Gita 4.11",
+      "Bhagavad Gita 9.29",
+      "Bhagavad Gita 7.21"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 87,
+    "query": "I'm addicted to my phone and social media",
+    "language": "en",
+    "category": "digital_life",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 6.35"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 1.12",
+      "Patanjali Yoga Sutras 2.3",
+      "Mahabharata",
+      "Meditation and Mindfulness"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 88,
+    "query": "My child doesn't listen to me at all",
+    "language": "en",
+    "category": "parenting",
+    "relevant_references": [
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 16.1",
+      "Ramayana Ayodhya Kanda 4.18"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 89,
+    "query": "What is the story of Draupadi and her suffering?",
+    "language": "en",
+    "category": "narrative",
+    "relevant_references": [
+      "Mahabharata"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 2.14"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 90,
+    "query": "Which mantra should I chant for peace?",
+    "language": "en",
+    "category": "mantra",
+    "relevant_references": [
+      "Bhagavad Gita 8.13",
+      "Bhagavad Gita 17.24",
+      "Rig Veda 1.1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 91,
+    "query": "yaar bahut overwhelm ho raha hu kuch samajh nahi aa raha",
+    "language": "transliterated",
+    "category": "anxiety",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 6.35",
+      "Bhagavad Gita 2.66"
+    ],
+    "alternative_references": [
+      "Mahabharata",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 92,
+    "query": "mann mein bahut dar lag raha hai",
+    "language": "transliterated",
+    "category": "fear",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 18.30",
+      "Patanjali Yoga Sutras 2.3"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 93,
+    "query": "What is cryptocurrency? Is it good investment?",
+    "language": "en",
+    "category": "off_topic",
+    "relevant_references": [],
+    "expect_empty": true
+  },
+  {
+    "id": 94,
+    "query": "Can you tell me about Surya Namaskar steps?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Sanatan Scriptures"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 95,
+    "query": "What are doshas in Ayurveda?",
+    "language": "en",
+    "category": "ayurveda",
+    "relevant_references": [
+      "Charaka Samhita (Ayurveda)",
+      "Atharva Veda"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 96,
+    "query": "Tell me about Arjuna's dilemma on the battlefield",
+    "language": "en",
+    "category": "narrative",
+    "relevant_references": [
+      "Bhagavad Gita 1.28",
+      "Bhagavad Gita 1.46",
+      "Bhagavad Gita 2.4",
+      "Bhagavad Gita 2.6"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 1.26",
+      "Bhagavad Gita 1.29",
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 2.9",
+      "Mahabharata"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 97,
+    "query": "कैसे अपना आत्मविश्वास बढ़ाएं?",
+    "language": "hi",
+    "category": "self-worth",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.48"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Mahabharata",
+      "Meditation and Mindfulness"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 98,
+    "query": "How to do pranayama breathing exercise?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49",
+      "Bhagavad Gita 4.29",
+      "Sanatan Scriptures"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 99,
+    "query": "What temples should I visit near Varanasi?",
+    "language": "en",
+    "category": "temple",
+    "relevant_references": [
+      "Temple: Kashi Vishwanath (Uttar Pradesh)"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 100,
+    "query": "ओँ नमः शिवाय का जाप कैसे करें?",
+    "language": "hi",
+    "category": "mantra",
+    "relevant_references": [
+      "Rig Veda 7.59.12",
+      "Atharva Veda 11.2.1",
+      "Temple: Kashi Vishwanath (Uttar Pradesh)"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 1.27",
+      "Ramayana",
+      "Mahabharata",
+      "Sanatan Scriptures"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 101,
+    "query": "I feel deep shame about my past actions",
+    "language": "en",
+    "category": "shame",
+    "relevant_references": [
+      "Bhagavad Gita 4.36",
+      "Bhagavad Gita 9.30"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 102,
+    "query": "मुझे अपने पिछले कर्मों पर बहुत शर्म आती है",
+    "language": "hi",
+    "category": "shame",
+    "relevant_references": [
+      "Bhagavad Gita 4.36",
+      "Bhagavad Gita 9.30"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 103,
+    "query": "mujhe apne past actions pe bahut sharam aati hai",
+    "language": "transliterated",
+    "category": "shame",
+    "relevant_references": [
+      "Bhagavad Gita 4.36",
+      "Bhagavad Gita 9.30"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 104,
+    "query": "I am consumed by guilt and can't forgive myself",
+    "language": "en",
+    "category": "guilt",
+    "relevant_references": [
+      "Bhagavad Gita 9.30",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 105,
+    "query": "मुझे बहुत अपराधबोध है और मैं खुद को माफ नहीं कर पा रहा",
+    "language": "hi",
+    "category": "guilt",
+    "relevant_references": [
+      "Bhagavad Gita 9.30",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 106,
+    "query": "mujhe bahut guilt hai aur main khud ko maaf nahi kar pa raha",
+    "language": "transliterated",
+    "category": "guilt",
+    "relevant_references": [
+      "Bhagavad Gita 9.30",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 107,
+    "query": "I feel jealous of my friends who are more successful than me",
+    "language": "en",
+    "category": "jealousy",
+    "relevant_references": [
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 16.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 108,
+    "query": "मेरे दोस्तों की सफलता देखकर मुझे ईर्ष्या होती है",
+    "language": "hi",
+    "category": "jealousy",
+    "relevant_references": [
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 16.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 109,
+    "query": "mere doston ki success dekhkar mujhe jealousy hoti hai",
+    "language": "transliterated",
+    "category": "jealousy",
+    "relevant_references": [
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 16.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 110,
+    "query": "I feel completely alone and disconnected from everyone",
+    "language": "en",
+    "category": "loneliness",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 9.29"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 111,
+    "query": "मुझे बहुत अकेलापन लगता है, कोई मेरा नहीं है",
+    "language": "hi",
+    "category": "loneliness",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 9.29"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 112,
+    "query": "mujhe bahut akela feel hota hai koi mera nahi hai",
+    "language": "transliterated",
+    "category": "loneliness",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 9.29"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 113,
+    "query": "I am so frustrated with my life, nothing is going right",
+    "language": "en",
+    "category": "frustration",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 114,
+    "query": "मैं अपनी ज़िंदगी से बहुत निराश हूँ, कुछ भी सही नहीं हो रहा",
+    "language": "hi",
+    "category": "frustration",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 115,
+    "query": "main apni zindagi se bahut frustrated hoon kuch bhi sahi nahi ho raha",
+    "language": "transliterated",
+    "category": "frustration",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 116,
+    "query": "I am confused and don't know what to do with my life",
+    "language": "en",
+    "category": "confusion",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 117,
+    "query": "मुझे समझ नहीं आ रहा जीवन में क्या करूँ",
+    "language": "hi",
+    "category": "confusion",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 118,
+    "query": "samajh nahi aa raha life mein kya karu",
+    "language": "transliterated",
+    "category": "confusion",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 119,
+    "query": "I have lost all hope and feel like giving up",
+    "language": "en",
+    "category": "hopelessness",
+    "relevant_references": [
+      "Bhagavad Gita 4.39",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 120,
+    "query": "मैंने सब उम्मीद खो दी है, हार मान लेना चाहता हूँ",
+    "language": "hi",
+    "category": "hopelessness",
+    "relevant_references": [
+      "Bhagavad Gita 4.39",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 121,
+    "query": "maine sab ummeed kho di hai haar maan lena chahta hoon",
+    "language": "transliterated",
+    "category": "hopelessness",
+    "relevant_references": [
+      "Bhagavad Gita 4.39",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 122,
+    "query": "I am struggling with addiction and can't stop myself",
+    "language": "en",
+    "category": "addiction",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 123,
+    "query": "मैं नशे की लत से जूझ रहा हूँ और खुद को रोक नहीं पा रहा",
+    "language": "hi",
+    "category": "addiction",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 124,
+    "query": "main nashe ki lat se ladh raha hoon aur khud ko rok nahi paa raha",
+    "language": "transliterated",
+    "category": "addiction",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 125,
+    "query": "How does the Gita help someone overcome addiction and compulsive habits?",
+    "language": "en",
+    "category": "addiction",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 126,
+    "query": "We are trying to conceive and want spiritual guidance for pregnancy",
+    "language": "en",
+    "category": "pregnancy_fertility",
+    "relevant_references": [
+      "Bhagavad Gita 7.11",
+      "Atharva Veda 2.3.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 127,
+    "query": "हम संतान प्राप्ति के लिए भगवान से प्रार्थना कर रहे हैं",
+    "language": "hi",
+    "category": "pregnancy_fertility",
+    "relevant_references": [
+      "Bhagavad Gita 7.11",
+      "Atharva Veda 2.3.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 128,
+    "query": "hum santaan prapti ke liye bhagwan se prayer kar rahe hain",
+    "language": "transliterated",
+    "category": "pregnancy_fertility",
+    "relevant_references": [
+      "Bhagavad Gita 7.11",
+      "Atharva Veda 2.3.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 129,
+    "query": "I did something morally wrong and feel terrible about it",
+    "language": "en",
+    "category": "ethics_moral",
+    "relevant_references": [
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 130,
+    "query": "मैंने कुछ गलत किया है और बहुत बुरा लग रहा है",
+    "language": "hi",
+    "category": "ethics_moral",
+    "relevant_references": [
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 131,
+    "query": "maine kuch galat kiya hai aur bahut bura lag raha hai",
+    "language": "transliterated",
+    "category": "ethics_moral",
+    "relevant_references": [
+      "Bhagavad Gita 3.21",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 132,
+    "query": "I can't control my lustful desires and it's ruining my relationships",
+    "language": "en",
+    "category": "habits_lust",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 3.37"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 133,
+    "query": "मैं अपनी वासनाओं पर काबू नहीं पा रहा और इससे मेरे रिश्ते खराब हो रहे हैं",
+    "language": "hi",
+    "category": "habits_lust",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 3.37"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 134,
+    "query": "How to control desires and lust according to Gita?",
+    "language": "en",
+    "category": "habits_lust",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 3.37"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 135,
+    "query": "I spend too much time on my phone and social media",
+    "language": "en",
+    "category": "digital_life",
+    "relevant_references": [
+      "Bhagavad Gita 2.58",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 136,
+    "query": "मैं फोन और सोशल मीडिया पर बहुत ज़्यादा समय बिता रहा हूँ",
+    "language": "hi",
+    "category": "digital_life",
+    "relevant_references": [
+      "Bhagavad Gita 2.58",
+      "Bhagavad Gita 6.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 137,
+    "query": "I am struggling at my job and feel like I don't fit in at work",
+    "language": "en",
+    "category": "career_work",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 138,
+    "query": "मुझे अपनी नौकरी में बहुत परेशानी हो रही है",
+    "language": "hi",
+    "category": "career_work",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 139,
+    "query": "job mein bahut problem ho rahi hai aur samajh nahi aa raha kya karu",
+    "language": "transliterated",
+    "category": "career_work",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 140,
+    "query": "I have my exams coming and I am very anxious about failing",
+    "language": "en",
+    "category": "education_exam",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 18.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 141,
+    "query": "मेरे एग्जाम आ रहे हैं और मुझे फेल होने का बहुत डर है",
+    "language": "hi",
+    "category": "education_exam",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 18.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 142,
+    "query": "exam ke results ka bahut dar hai aur focus nahi ho raha",
+    "language": "transliterated",
+    "category": "education_exam",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 18.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 143,
+    "query": "I am under severe financial stress and don't know how to manage",
+    "language": "en",
+    "category": "financial_stress",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 12.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 144,
+    "query": "पैसों की बहुत तंगी है और समझ नहीं आ रहा क्या करूँ",
+    "language": "hi",
+    "category": "financial_stress",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 12.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 145,
+    "query": "paison ki bahut tangi hai kya karu",
+    "language": "transliterated",
+    "category": "financial_stress",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 12.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 146,
+    "query": "How do Patanjali Yoga Sutras and Bhagavad Gita differ on meditation?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 147,
+    "query": "What does Ramayana teach about duty compared to the Gita?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Ramayana Ayodhya Kanda 2.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 148,
+    "query": "Compare Ayurveda and Yoga approaches to health",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Patanjali Yoga Sutras 2.46"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 149,
+    "query": "योग सूत्र और गीता में ध्यान की शिक्षा में क्या अंतर है?",
+    "language": "hi",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 150,
+    "query": "What common teachings exist across the Vedas and the Gita?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Rig Veda 10.90.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 151,
+    "query": "gita aur ramayana dono mein kartavya ke baare mein kya kaha gaya hai?",
+    "language": "transliterated",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Ramayana Ayodhya Kanda 2.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 152,
+    "query": "How do the Vedas and Charaka Samhita complement each other on healing?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Atharva Veda 2.3.1",
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 153,
+    "query": "What is the concept of dharma across Gita, Ramayana and Mahabharata?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Ramayana Ayodhya Kanda 2.12",
+      "Mahabharata 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 154,
+    "query": "How does the Gita's karma yoga relate to yoga sutras' kriya yoga?",
+    "language": "en",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 3.19",
+      "Patanjali Yoga Sutras 2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 155,
+    "query": "vedas aur gita mein atman ka concept kaise explain hua hai?",
+    "language": "transliterated",
+    "category": "cross_scripture",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Rig Veda 10.90.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 156,
+    "query": "How to perform Surya Namaskar step by step?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.46"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Sanatan Scriptures"
+    ]
+  },
+  {
+    "id": 157,
+    "query": "What is the correct way to do pranayama breathing exercises?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49",
+      "Patanjali Yoga Sutras 2.50"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 158,
+    "query": "How to perform daily puja at home?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 9.26"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 159,
+    "query": "सूर्य नमस्कार कैसे करें?",
+    "language": "hi",
+    "category": "procedural",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.46"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Sanatan Scriptures"
+    ]
+  },
+  {
+    "id": 160,
+    "query": "pranayama kaise kare step by step",
+    "language": "transliterated",
+    "category": "procedural",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49",
+      "Patanjali Yoga Sutras 2.50"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 161,
+    "query": "What are the steps for performing a havan at home?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 4.24",
+      "Rig Veda 1.1"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Sanatan Scriptures"
+    ]
+  },
+  {
+    "id": 162,
+    "query": "How to chant Om correctly?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 8.13",
+      "Patanjali Yoga Sutras 1.27"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 163,
+    "query": "om ka sahi tarika kya hai chanting ke liye?",
+    "language": "transliterated",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 8.13",
+      "Patanjali Yoga Sutras 1.27"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 164,
+    "query": "How to start a daily spiritual practice as a beginner?",
+    "language": "en",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Patanjali Yoga Sutras 1.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 165,
+    "query": "शुरुआत में ध्यान कैसे करें?",
+    "language": "hi",
+    "category": "procedural",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Patanjali Yoga Sutras 1.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 166,
+    "query": "bhagwad geeta on peacee of mind",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Bhagavad Gita 2.66",
+      "Bhagavad Gita 2.71"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 167,
+    "query": "meditaiton techniques in hinduism",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 168,
+    "query": "patnjali yog sutras on brething",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 169,
+    "query": "hanumn chalisa benefits",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Ramayana sundarakanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 170,
+    "query": "how to controll angr according to geeta",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 171,
+    "query": "karm yog meaning explaination",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.19"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 172,
+    "query": "pranayam benifits in ayurved",
+    "language": "en",
+    "category": "edge_typo",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 173,
+    "query": "Krishna ne Arjuna ko kya kaha about duty?",
+    "language": "en",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 174,
+    "query": "meditation ke benefits hindi mein batao",
+    "language": "transliterated",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Patanjali Yoga Sutras 1.2"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 175,
+    "query": "mujhe anger management chahiye from Gita",
+    "language": "transliterated",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 176,
+    "query": "कृष्ण said what about karma in chapter 3?",
+    "language": "hi",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 3.19",
+      "Bhagavad Gita 3.35"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 177,
+    "query": "Ram ki katha sunao about vanvas",
+    "language": "transliterated",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 2.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 178,
+    "query": "yoga aur meditation ka difference kya hai in scriptures?",
+    "language": "transliterated",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 179,
+    "query": "Gita mein peace of mind ke liye kya guidance hai?",
+    "language": "transliterated",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 2.66",
+      "Bhagavad Gita 2.71"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 180,
+    "query": "मैं stressed हूँ office problems से, Gita क्या कहती है?",
+    "language": "hi",
+    "category": "edge_codeswitching",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 181,
+    "query": "karma",
+    "language": "en",
+    "category": "edge_short",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.19"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 182,
+    "query": "peace",
+    "language": "en",
+    "category": "edge_short",
+    "relevant_references": [
+      "Bhagavad Gita 2.66",
+      "Bhagavad Gita 2.71"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 183,
+    "query": "anger",
+    "language": "en",
+    "category": "edge_short",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 184,
+    "query": "moksha",
+    "language": "en",
+    "category": "edge_short",
+    "relevant_references": [
+      "Bhagavad Gita 4.9",
+      "Bhagavad Gita 18.55"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 185,
+    "query": "grief",
+    "language": "en",
+    "category": "edge_short",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 186,
+    "query": "I have been going through a very difficult phase in my life where I lost my father recently and I am also facing problems at work and my relationship with my wife is not good and I don't know what to do and sometimes I feel like giving up on everything because nothing seems to be working out in my favor",
+    "language": "en",
+    "category": "edge_long",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 187,
+    "query": "मैं एक बहुत कठिन दौर से गुज़र रहा हूँ जहाँ मेरे पिताजी का हाल ही में निधन हो गया है और मेरी नौकरी में भी समस्याएं हैं और मेरा परिवार भी बिखर रहा है और मुझे कोई रास्ता नहीं सूझ रहा कि मैं क्या करूँ क्योंकि सब कुछ गलत हो रहा है",
+    "language": "hi",
+    "category": "edge_long",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 188,
+    "query": "I want to understand the deep philosophical meaning behind all the major concepts in Hinduism including karma dharma moksha samsara maya atman brahman and how they all connect together to form a complete spiritual worldview that can guide my life decisions",
+    "language": "en",
+    "category": "edge_long",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 4.9"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 189,
+    "query": "What is the stock market prediction for tomorrow?",
+    "language": "en",
+    "category": "edge_adversarial",
+    "relevant_references": [],
+    "match_mode": "exact",
+    "expect_empty": true
+  },
+  {
+    "id": 190,
+    "query": "How to write Python code for a web scraper?",
+    "language": "en",
+    "category": "edge_adversarial",
+    "relevant_references": [],
+    "match_mode": "exact",
+    "expect_empty": true
+  },
+  {
+    "id": 191,
+    "query": "Who won the cricket match yesterday?",
+    "language": "en",
+    "category": "edge_adversarial",
+    "relevant_references": [],
+    "match_mode": "exact",
+    "expect_empty": true
+  },
+  {
+    "id": 192,
+    "query": "Give me a chicken biryani recipe",
+    "language": "en",
+    "category": "edge_adversarial",
+    "relevant_references": [],
+    "match_mode": "exact",
+    "expect_empty": true
+  },
+  {
+    "id": 193,
+    "query": "Tell me about Taylor Swift latest album",
+    "language": "en",
+    "category": "edge_adversarial",
+    "relevant_references": [],
+    "match_mode": "exact",
+    "expect_empty": true
+  },
+  {
+    "id": 194,
+    "query": "🙏 PLEASE HELP ME I AM IN SO MUCH PAIN 😢",
+    "language": "en",
+    "category": "edge_emoji_caps",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 195,
+    "query": "OM NAMAH SHIVAYA 🙏🙏🙏 WHAT IS THE MEANING???",
+    "language": "en",
+    "category": "edge_emoji_caps",
+    "relevant_references": [
+      "Bhagavad Gita 8.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 196,
+    "query": "What does Ayurveda say about digestive health?",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Atharva Veda 10.2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 197,
+    "query": "How to balance the three doshas according to Ayurveda?",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 198,
+    "query": "Ayurvedic remedies for stress and anxiety",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Atharva Veda 2.3.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 199,
+    "query": "आयुर्वेद में पाचन स्वास्थ्य के बारे में क्या कहा गया है?",
+    "language": "hi",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Atharva Veda 10.2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 200,
+    "query": "ayurveda mein dosha balance kaise kare?",
+    "language": "transliterated",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 201,
+    "query": "What herbs does Ayurveda recommend for immunity?",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Atharva Veda 10.2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 202,
+    "query": "Ayurvedic daily routine for good health",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 203,
+    "query": "What is Dinacharya in Ayurveda?",
+    "language": "en",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 204,
+    "query": "आयुर्वेद में रोग प्रतिरोधक शक्ति कैसे बढ़ाएं?",
+    "language": "hi",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1",
+      "Atharva Veda 10.2.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 205,
+    "query": "ayurveda ke according neend aur sleep cycle kaise theek kare?",
+    "language": "transliterated",
+    "category": "ayurveda_specific",
+    "relevant_references": [
+      "Charaka Samhita 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 206,
+    "query": "कर्म योग का अर्थ क्या है?",
+    "language": "hi",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.19"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 207,
+    "query": "moksha kaise prapt kare?",
+    "language": "transliterated",
+    "category": "liberation/moksha",
+    "relevant_references": [
+      "Bhagavad Gita 4.9",
+      "Bhagavad Gita 18.55"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 208,
+    "query": "भक्ति मार्ग क्या है और कैसे अपनाएं?",
+    "language": "hi",
+    "category": "devotion",
+    "relevant_references": [
+      "Bhagavad Gita 9.22",
+      "Bhagavad Gita 9.26",
+      "Bhagavad Gita 12.8"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 209,
+    "query": "aatma kya hai gita ke anusaar?",
+    "language": "transliterated",
+    "category": "soul/atman",
+    "relevant_references": [
+      "Bhagavad Gita 2.17",
+      "Bhagavad Gita 2.20"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 210,
+    "query": "मृत्यु के बाद क्या होता है?",
+    "language": "hi",
+    "category": "death",
+    "relevant_references": [
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22",
+      "Bhagavad Gita 8.5"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 211,
+    "query": "dar aur bhay se kaise mukti mile?",
+    "language": "transliterated",
+    "category": "fear",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 11.50"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 212,
+    "query": "स्वास्थ्य के लिए वेदों में क्या कहा गया है?",
+    "language": "hi",
+    "category": "health",
+    "relevant_references": [
+      "Atharva Veda 10.2.1",
+      "Rig Veda 10.97.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 213,
+    "query": "rishton mein problem hai kya karu?",
+    "language": "transliterated",
+    "category": "relationships",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 12.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 214,
+    "query": "आत्मविश्वास कैसे बढ़ाएं गीता के अनुसार?",
+    "language": "hi",
+    "category": "self-worth",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 3.35"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 215,
+    "query": "chinta aur anxiety se kaise mukti mile?",
+    "language": "transliterated",
+    "category": "anxiety",
+    "relevant_references": [
+      "Bhagavad Gita 2.66",
+      "Bhagavad Gita 2.71"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 216,
+    "query": "प्यार और संबंधों पर गीता क्या कहती है?",
+    "language": "hi",
+    "category": "love",
+    "relevant_references": [
+      "Bhagavad Gita 12.13",
+      "Bhagavad Gita 12.14"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 217,
+    "query": "bacchon ki parvarish mein dharm ka kya role hai?",
+    "language": "transliterated",
+    "category": "parenting",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 2.12",
+      "Bhagavad Gita 3.35"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 218,
+    "query": "कर्तव्य का मार्ग क्या है?",
+    "language": "hi",
+    "category": "duty",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 219,
+    "query": "yog aur dhyan mein kya antar hai?",
+    "language": "transliterated",
+    "category": "yoga",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 220,
+    "query": "आध्यात्मिक साधना कैसे शुरू करें?",
+    "language": "hi",
+    "category": "spiritual_practice",
+    "relevant_references": [
+      "Bhagavad Gita 6.10",
+      "Patanjali Yoga Sutras 1.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 221,
+    "query": "vishwas aur shraddha ka mahatva kya hai?",
+    "language": "transliterated",
+    "category": "faith",
+    "relevant_references": [
+      "Bhagavad Gita 4.39",
+      "Bhagavad Gita 17.3"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 222,
+    "query": "क्रोध पर नियंत्रण कैसे करें गीता के अनुसार?",
+    "language": "hi",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 16.21"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 223,
+    "query": "shok mein kya kare gita ke anusaar?",
+    "language": "transliterated",
+    "category": "grief",
+    "relevant_references": [
+      "Bhagavad Gita 2.11",
+      "Bhagavad Gita 2.13",
+      "Bhagavad Gita 2.22"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 224,
+    "query": "ध्यान और प्रणायाम कैसे करें?",
+    "language": "hi",
+    "category": "meditation",
+    "relevant_references": [
+      "Patanjali Yoga Sutras 2.49",
+      "Bhagavad Gita 6.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 225,
+    "query": "dharma ka arth kya hai aur iska paalan kaise kare?",
+    "language": "transliterated",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 4.7",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 226,
+    "query": "Tell me the story of Lord Rama's exile to the forest",
+    "language": "en",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 2.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 227,
+    "query": "What happened when Hanuman found Sita in Lanka?",
+    "language": "en",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 228,
+    "query": "Tell me about the Kurukshetra war",
+    "language": "en",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Bhagavad Gita 1.1",
+      "Mahabharata 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 229,
+    "query": "राम के वनवास की कहानी सुनाओ",
+    "language": "hi",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Ayodhya Kanda 2.12"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 230,
+    "query": "हनुमान ने लंका में क्या किया?",
+    "language": "hi",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Sundara Kanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 231,
+    "query": "sita haran ki katha batao",
+    "language": "transliterated",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Aranya Kanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 232,
+    "query": "What lesson does the story of Draupadi's vastraharan teach?",
+    "language": "en",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Mahabharata 1.1",
+      "Bhagavad Gita 4.7"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 233,
+    "query": "How did Arjuna overcome his doubt before the war?",
+    "language": "en",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 18.73"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 234,
+    "query": "भगवान कृष्ण ने अर्जुन को क्या उपदेश दिया?",
+    "language": "hi",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 18.63"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 235,
+    "query": "lakshman rekha ki story kya hai?",
+    "language": "transliterated",
+    "category": "story_narrative",
+    "relevant_references": [
+      "Ramayana Aranya Kanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 236,
+    "query": "What is the meaning of dharma?",
+    "language": "en",
+    "category": "dharma",
+    "relevant_references": [
+      "Bhagavad Gita 2.7",
+      "Bhagavad Gita 4.7",
+      "Bhagavad Gita 18.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 237,
+    "query": "What does Krishna say about performing your duty without attachment to results?",
+    "language": "en",
+    "category": "karma",
+    "relevant_references": [
+      "Bhagavad Gita 2.47",
+      "Bhagavad Gita 2.48",
+      "Bhagavad Gita 3.19",
+      "Bhagavad Gita 5.10"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 18.9",
+      "Bhagavad Gita 18.11",
+      "Concept — Karma Yoga Explained"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 238,
+    "query": "How to control anger according to the Gita?",
+    "language": "en",
+    "category": "anger",
+    "relevant_references": [
+      "Bhagavad Gita 2.62",
+      "Bhagavad Gita 2.63",
+      "Bhagavad Gita 16.21"
+    ],
+    "alternative_references": [
+      "Bhagavad Gita 5.26",
+      "Bhagavad Gita 3.37",
+      "Concept — Anger Control in Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 239,
+    "query": "How should I fulfill my family responsibilities?",
+    "language": "en",
+    "category": "family",
+    "relevant_references": [
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.47",
+      "Ramayana Ayodhya Kanda 2.12",
+      "Ramayana Ayodhya Kanda 109.10"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 240,
+    "query": "कैसे अपना आत्मविश्वास बढ़ाएं?",
+    "language": "hi",
+    "category": "self-worth",
+    "relevant_references": [
+      "Bhagavad Gita 6.5",
+      "Bhagavad Gita 3.35",
+      "Bhagavad Gita 18.48"
+    ],
+    "alternative_references": [
+      "Patanjali Yoga Sutras 1.2",
+      "Mahabharata",
+      "Meditation and Mindfulness"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 241,
+    "query": "What is the Gayatri Mantra and its significance?",
+    "language": "en",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Rig Veda 3.62"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 242,
+    "query": "गायत्री मंत्र का क्या अर्थ और महत्व है?",
+    "language": "hi",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Rig Veda 3.62"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 243,
+    "query": "gayatri mantra ka arth aur mahatva kya hai?",
+    "language": "transliterated",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Rig Veda 3.62"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 244,
+    "query": "What mantra should I chant for peace of mind?",
+    "language": "en",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Bhagavad Gita 8.13",
+      "Bhagavad Gita 2.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 245,
+    "query": "Which mantra is best for removing fear?",
+    "language": "en",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Bhagavad Gita 4.10",
+      "Bhagavad Gita 8.13"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 246,
+    "query": "Om Namah Shivaya ka kya mahatva hai?",
+    "language": "transliterated",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Bhagavad Gita 8.13"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Rig Veda"
+    ]
+  },
+  {
+    "id": 247,
+    "query": "मन की शांति के लिए कौन सा मंत्र जपें?",
+    "language": "hi",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Bhagavad Gita 8.13",
+      "Bhagavad Gita 2.66"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 248,
+    "query": "What is the Mahamrityunjaya Mantra and when to chant it?",
+    "language": "en",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Rig Veda 7.59"
+    ],
+    "match_mode": "scripture_level"
+  },
+  {
+    "id": 249,
+    "query": "महामृत्युंजय मंत्र कब और कैसे जपें?",
+    "language": "hi",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Rig Veda 7.59"
+    ],
+    "match_mode": "scripture_level",
+    "alternative_references": [
+      "Bhagavad Gita"
+    ]
+  },
+  {
+    "id": 250,
+    "query": "hanuman chalisa padhne ke kya fayde hain?",
+    "language": "transliterated",
+    "category": "mantra_specific",
+    "relevant_references": [
+      "Ramayana sundarakanda 1.1"
+    ],
+    "match_mode": "scripture_level"
+  }
+]

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import json
 from typing import Dict, Any
@@ -35,13 +36,14 @@ class IntentAgent:
        NEVER return "neutral" when the user describes a painful situation. Choose from: grief, anxiety, loneliness, frustration, anger, despair, hopelessness, shame, confusion, joy, gratitude, hope, curiosity, neutral.
 
     3. "life_domain": Primary area of concern. Choose from:
-       [career, family, relationships, health, spiritual, finance]
+       [career, family, relationships, health, spiritual, finance, education]
        - career: job, boss, business, workplace, work-life balance
        - family: parents, children, siblings, elders
        - relationships: spouse, partner, dating, social isolation, loneliness
        - health: illness, fatigue, sleep, Ayurveda, diet, yoga, body
        - spiritual: deity, mantra, puja ritual, scripture, meditation, soul, karma (pure practice queries)
        - finance: money, investment, savings
+       - education: studies, exams, school, college, learning, academic, board exams, grades, students
 
     4. "entities": Dict of extracted nouns e.g. {{"deity": "Shiva", "ritual": "Abhishekam", "item": "mala"}}
 
@@ -68,6 +70,17 @@ class IntentAgent:
        Use context to resolve references (e.g., "essentials" + context "Satyanarayan Puja" → ["Satyanarayan", "puja samagri", "ghee"])
        Leave empty [] if recommend_products is False.
 
+    10. "product_rejection": boolean — True ONLY when the user explicitly rejects or dismisses product suggestions.
+        Examples: "stop suggesting products", "I don't want to buy anything", "no products please",
+        "not interested in shopping", "don't recommend products"
+        False for all other messages.
+
+    11. "query_variants": List of 2 alternative search phrasings for the user's spiritual question.
+        - Generate ONLY for spiritual/guidance queries (not greetings, closures, product searches).
+        - For emotional queries, include comfort/healing oriented terms.
+        - For informational queries, include specific Sanskrit/English teaching terms.
+        - Return empty list [] for GREETING, CLOSURE, PRODUCT_SEARCH, or trivial messages.
+
     Respond ONLY with the valid JSON object.
     """
 
@@ -86,7 +99,8 @@ class IntentAgent:
                 "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown",
                 "entities": {}, "urgency": "low", "summary": message,
                 "needs_direct_answer": False, "recommend_products": False,
-                "product_search_keywords": []
+                "product_search_keywords": [], "product_rejection": False,
+                "query_variants": [],
             }
 
         if not self.available:
@@ -95,15 +109,13 @@ class IntentAgent:
         prompt = self.INTENT_PROMPT.format(message=message, context=context_summary)
 
         try:
-            import asyncio
-
             # Use fast model for classification (gemini-2.0-flash: ~1s vs 2.5-pro: ~7s)
             def _sync_call():
                 return self.llm.client.models.generate_content(
                     model=settings.GEMINI_FAST_MODEL,
                     contents=prompt,
                     config={
-                        "temperature": 0.1,
+                        "temperature": settings.INTENT_TEMPERATURE,
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},
                     }
@@ -140,6 +152,13 @@ class IntentAgent:
         elif any(w in message_lower for w in ["bye", "thanks", "thank you", "ok", "no", "nothing"]):
             intent = IntentType.CLOSURE
 
+        product_rejection_phrases = [
+            "stop suggesting products", "don't want products", "no products",
+            "not interested in shopping", "don't recommend", "stop recommending",
+            "no recommendations", "don't show products", "stop showing products",
+        ]
+        is_product_rejection = any(phrase in message_lower for phrase in product_rejection_phrases)
+
         return {
             "intent": intent,
             "emotion": "neutral",
@@ -148,8 +167,10 @@ class IntentAgent:
             "urgency": "normal",
             "summary": message[:100],
             "needs_direct_answer": "?" in message or any(w in message_lower for w in ["how", "what", "where", "why"]),
-            "recommend_products": any(w in message_lower for w in ["buy", "price", "shop", "product", "astro", "consult", "astrologer"]),
-            "product_search_keywords": []
+            "recommend_products": any(w in message_lower for w in ["buy", "price", "shop", "product", "recommend", "suggest"]),
+            "product_search_keywords": [],
+            "product_rejection": is_product_rejection,
+            "query_variants": [],
         }
 
 _intent_agent = None
