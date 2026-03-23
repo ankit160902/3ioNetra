@@ -77,6 +77,10 @@ class CacheService:
         except Exception as e:
             logger.warning(f"CacheService disabled: Redis not available ({e})")
 
+    @property
+    def available(self) -> bool:
+        return self._enabled
+
     def _generate_key(self, prefix: str, **kwargs) -> str:
         """Generate a deterministic cache key from input parameters."""
         # Sort keys to ensure deterministic ordering

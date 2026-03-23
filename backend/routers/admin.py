@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException
@@ -7,6 +8,8 @@ from config import settings
 from services.panchang_service import get_panchang_service
 from services.tts_service import get_tts_service
 from services.context_validator import get_context_validator
+from services.auth_service import get_mongo_client
+from services.cache_service import get_cache_service
 from pydantic import BaseModel
 from routers.dependencies import get_rag_pipeline
 
@@ -25,17 +28,40 @@ class TTSRequest(BaseModel):
 @router.get("/health")
 async def health_check():
     """System health check endpoint."""
+    mongo_ok = False
+    try:
+        db = get_mongo_client()
+        if db is not None:
+            await asyncio.to_thread(db.command, "ping")
+            mongo_ok = True
+    except Exception as e:
+        logger.warning(f"Health check: MongoDB unavailable: {e}")
+
+    redis_ok = False
+    try:
+        cache = get_cache_service()
+        redis_ok = cache.available
+    except Exception as e:
+        logger.warning(f"Health check: Redis unavailable: {e}")
+
+    rag = get_rag_pipeline()
+    rag_ok = rag.available if rag else False
+    all_healthy = mongo_ok and redis_ok and rag_ok
+
     return {
-        "status": "healthy",
+        "status": "healthy" if all_healthy else "degraded",
         "timestamp": datetime.now().isoformat(),
         "version": settings.API_VERSION,
-        "rag_available": get_rag_pipeline().available if get_rag_pipeline() else False
+        "rag_available": rag_ok,
+        "mongodb_available": mongo_ok,
+        "redis_available": redis_ok,
     }
 
 @router.get("/ready")
 async def readiness_check():
     """System readiness check endpoint."""
-    if not get_rag_pipeline() or not get_rag_pipeline().available:
+    rag = get_rag_pipeline()
+    if not rag or not rag.available:
         raise HTTPException(status_code=503, detail="RAG pipeline not ready")
     return {"status": "ready"}
 

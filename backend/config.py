@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     API_VERSION: str = "1.1.3"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
-    DEBUG: bool = True
+    DEBUG: bool = False
 
     # ------------------------------------------------------------------
     # LLM Settings
@@ -78,8 +78,8 @@ class Settings(BaseSettings):
     CURATED_FLOOR: float = 0.35
     CURATED_RATIO: float = 0.6
     TRADITION_BONUS: float = 0.05
-    SECTION_CHUNKS_ENABLED: bool = Field(default=True, env="SECTION_CHUNKS_ENABLED")
-    SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
+    SECTION_CHUNKS_ENABLED: bool = Field(default=False, env="SECTION_CHUNKS_ENABLED")
+    SPLADE_ENABLED: bool = Field(default=False, env="SPLADE_ENABLED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
@@ -175,10 +175,13 @@ class Settings(BaseSettings):
     MONGODB_URI: str = Field(default="", env="MONGODB_URI")
     DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
     DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
-    MONGO_MAX_POOL_SIZE: int = Field(default=50, env="MONGO_MAX_POOL_SIZE")
-    MONGO_MIN_POOL_SIZE: int = Field(default=5, env="MONGO_MIN_POOL_SIZE")
+    MONGO_MAX_POOL_SIZE: int = Field(default=10, env="MONGO_MAX_POOL_SIZE")
+    MONGO_MIN_POOL_SIZE: int = Field(default=1, env="MONGO_MIN_POOL_SIZE")
     MONGO_MAX_IDLE_TIME_MS: int = Field(default=30000, env="MONGO_MAX_IDLE_TIME_MS")
     MONGO_READ_PREFERENCE: str = Field(default="primaryPreferred", env="MONGO_READ_PREFERENCE")
+    MONGO_SERVER_SELECTION_TIMEOUT_MS: int = Field(default=30000, env="MONGO_SERVER_SELECTION_TIMEOUT_MS")
+    MONGO_CONNECT_TIMEOUT_MS: int = Field(default=20000, env="MONGO_CONNECT_TIMEOUT_MS")
+    MONGO_SOCKET_TIMEOUT_MS: int = Field(default=20000, env="MONGO_SOCKET_TIMEOUT_MS")
     ENABLE_AUTO_MIGRATIONS: bool = Field(default=True, env="ENABLE_AUTO_MIGRATIONS")
     MAX_CONVERSATIONS_PER_USER: int = Field(default=100, env="MAX_CONVERSATIONS_PER_USER")
 
@@ -188,7 +191,7 @@ class Settings(BaseSettings):
     REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
     REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
     REDIS_DB: int = Field(default=0, env="REDIS_DB")
-    CACHE_REDIS_DB: int = Field(default=0, env="CACHE_REDIS_DB")
+    CACHE_REDIS_DB: int = Field(default=1, env="CACHE_REDIS_DB")
     REDIS_PASSWORD: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
 
     # ------------------------------------------------------------------

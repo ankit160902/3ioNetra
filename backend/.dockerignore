@@ -60,8 +60,13 @@ logs/
 ml_models/
 data/
 !data/processed/
-!data/processed/*.json
-!data/processed/*.npy
+!data/processed/verses.json
+!data/processed/embeddings.npy
+!data/processed/sections.json
+!data/processed/sections_embeddings.npy
+!data/processed/cross_refs.json
+!data/processed/corpus_manifest.json
+!data/processed/sco_graph.json
 !data/panchang_reference.json
 *.pth
 *.bin

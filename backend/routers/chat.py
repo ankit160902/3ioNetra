@@ -187,7 +187,7 @@ async def text_query(query: TextQuery):
         return TextResponse(**result)
     except Exception as e:
         logger.error(f"Error in text query: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Text query failed. Please try again later.")
 
 # ----------------------------------------------------------------------------
 # CONVERSATION SESSION ENDPOINTS
@@ -213,7 +213,7 @@ async def create_session():
         )
     except Exception as e:
         logger.error(f"Error creating session: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create session. Please try again later.")
 
 @router.get("/session/{session_id}", response_model=SessionStateResponse)
 async def get_session_state(session_id: str):
@@ -234,7 +234,8 @@ async def get_session_state(session_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error fetching session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch session. Please try again later.")
 
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
@@ -547,7 +548,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
 
         except Exception as e:
             logger.exception(f"Error in SSE stream: {e}")
-            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': 'Something went wrong. Please try again.'})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -595,7 +596,7 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
         raise
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to save feedback. Please try again later.")
 
 # ----------------------------------------------------------------------------
 # USER HISTORY ENDPOINTS
@@ -705,4 +706,4 @@ async def delete_conversation(conversation_id: str, user: dict = Depends(get_cur
         raise
     except Exception as e:
         logger.error(f"Error deleting conversation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete conversation. Please try again later.")
