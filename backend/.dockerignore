@@ -62,6 +62,7 @@ data/
 !data/processed/
 !data/processed/*.json
 !data/processed/*.npy
+!data/panchang_reference.json
 *.pth
 *.bin
 *.h5

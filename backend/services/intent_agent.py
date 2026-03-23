@@ -1,9 +1,10 @@
 import asyncio
 import logging
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from config import settings
 from models.session import IntentType
+from services.cache_service import _LRUCache
 
 logger = logging.getLogger(__name__)
 
@@ -75,11 +76,12 @@ class IntentAgent:
         "not interested in shopping", "don't recommend products"
         False for all other messages.
 
-    11. "query_variants": List of 2 alternative search phrasings for the user's spiritual question.
-        - Generate ONLY for spiritual/guidance queries (not greetings, closures, product searches).
-        - For emotional queries, include comfort/healing oriented terms.
-        - For informational queries, include specific Sanskrit/English teaching terms.
-        - Return empty list [] for GREETING, CLOSURE, PRODUCT_SEARCH, or trivial messages.
+    11. "query_variants": List of EXACTLY 2 alternative search phrasings for the user's spiritual question.
+        - You MUST generate 2 variants for ALL intents EXCEPT GREETING, CLOSURE, PRODUCT_SEARCH, and trivial/single-word messages.
+        - For EXPRESSING_EMOTION: include comfort/healing oriented terms (e.g. "finding peace in grief", "overcoming anxiety through dharma").
+        - For SEEKING_GUIDANCE / ASKING_INFO: include specific Sanskrit/English teaching terms.
+        - Each variant should capture a different semantic angle of the user's concern.
+        - Return empty list [] ONLY for GREETING, CLOSURE, PRODUCT_SEARCH, or trivial messages.
 
     Respond ONLY with the valid JSON object.
     """
@@ -88,20 +90,93 @@ class IntentAgent:
         from llm.service import get_llm_service
         self.llm = get_llm_service()
         self.available = self.llm.available
+        self._cache = _LRUCache(max_size=100)  # 5-min default TTL
+
+    # ── Fast-path constants ──
+    _GREETING_SET = frozenset({
+        "hi", "hey", "hello", "namaste", "pranam", "hii", "hiii",
+    })
+    _CLOSURE_SET = frozenset({
+        "thank you", "thanks", "bye", "goodbye", "ok bye", "dhanyavaad", "shukriya",
+        "alvida", "ok thanks", "thanks bye", "good bye", "ok thank you",
+    })
+    _PANCHANG_KEYWORDS = ("panchang", "tithi", "nakshatra", "muhurat")
+    _INFO_PREFIXES = ("what is ", "what are ", "tell me about ", "who is ", "explain ")
+    _EMOTION_MAP = {
+        "sad": "grief", "unhappy": "grief", "crying": "grief",
+        "anxious": "anxiety", "worried": "anxiety", "nervous": "anxiety",
+        "stressed": "frustration", "frustrated": "frustration", "overwhelmed": "frustration",
+        "lonely": "loneliness", "alone": "loneliness", "isolated": "loneliness",
+        "angry": "anger", "furious": "anger", "irritated": "anger",
+        "lost": "confusion", "confused": "confusion",
+        "depressed": "hopelessness", "hopeless": "hopelessness",
+        "scared": "anxiety", "afraid": "anxiety", "fearful": "anxiety",
+    }
+    _EMOTION_PATTERNS = (
+        "i feel ", "i'm feeling ", "im feeling ", "i am feeling ",
+        "feeling ", "i'm so ", "im so ", "i am so ",
+        "i feel so ", "i'm ", "im ", "i am ",
+    )
+
+    def _fast_path(self, msg_lower: str) -> Optional[Dict[str, Any]]:
+        """Return a fast-path result dict if the message matches a known pattern, else None."""
+        _base = {
+            "entities": {}, "urgency": "low", "summary": "",
+            "needs_direct_answer": False, "recommend_products": False,
+            "product_search_keywords": [], "product_rejection": False,
+            "query_variants": [],
+        }
+
+        # (a) GREETING
+        if msg_lower in self._GREETING_SET:
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown"}
+
+        # (b) CLOSURE
+        if msg_lower in self._CLOSURE_SET:
+            return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude", "life_domain": "unknown"}
+
+        # (c) ASKING_PANCHANG — substring check
+        if any(kw in msg_lower for kw in self._PANCHANG_KEYWORDS):
+            return {**_base, "intent": IntentType.ASKING_PANCHANG, "emotion": "neutral",
+                    "life_domain": "spiritual", "needs_direct_answer": True}
+
+        # (d) EXPRESSING_EMOTION — short messages with emotion keywords
+        words = msg_lower.split()
+        if len(words) <= 8:
+            for pattern in self._EMOTION_PATTERNS:
+                if msg_lower.startswith(pattern):
+                    remainder = msg_lower[len(pattern):].strip().rstrip(".")
+                    for keyword, emotion in self._EMOTION_MAP.items():
+                        if keyword in remainder:
+                            return {**_base, "intent": IntentType.EXPRESSING_EMOTION,
+                                    "emotion": emotion, "life_domain": "unknown",
+                                    "summary": msg_lower}
+                    break  # matched a pattern prefix but no emotion keyword — fall through
+
+        # (e) ASKING_INFO — starts with question prefix
+        for prefix in self._INFO_PREFIXES:
+            if msg_lower.startswith(prefix):
+                return {**_base, "intent": IntentType.ASKING_INFO, "emotion": "curiosity",
+                        "life_domain": "unknown", "needs_direct_answer": True,
+                        "summary": msg_lower}
+
+        return None  # no fast-path match
 
     async def analyze_intent(self, message: str, context_summary: str = "") -> Dict[str, Any]:
         """Analyze intent using LLM (fast model for low latency)."""
-        # Fast-path: skip LLM for obvious greetings
         msg_lower = message.strip().lower()
-        if msg_lower in ("hi", "hey", "hello", "namaste", "pranam", "hii", "hiii"):
-            logger.info(f"Fast-path intent: GREETING for '{message[:30]}'")
-            return {
-                "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown",
-                "entities": {}, "urgency": "low", "summary": message,
-                "needs_direct_answer": False, "recommend_products": False,
-                "product_search_keywords": [], "product_rejection": False,
-                "query_variants": [],
-            }
+
+        # Fast-path: skip LLM for obvious intents (saves 800ms-2s)
+        fast = self._fast_path(msg_lower)
+        if fast is not None:
+            logger.info(f"Fast-path intent: {fast['intent']} for '{message[:30]}'")
+            return fast
+
+        # LRU cache: return cached result for identical messages (saves 800ms-2s on repeats)
+        cached = self._cache.get(msg_lower)
+        if cached is not None:
+            logger.info(f"Intent cache HIT for '{message[:30]}'")
+            return cached
 
         if not self.available:
             return self._fallback_analysis(message)
@@ -132,6 +207,8 @@ class IntentAgent:
             data = json.loads(raw_text)
             data["intent"] = IntentType(data.get("intent", "OTHER"))
             logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
+            # Cache successful LLM result for repeat messages
+            self._cache.set(msg_lower, data, 300)
             return data
 
         except Exception as e:

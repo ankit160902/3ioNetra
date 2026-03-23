@@ -182,7 +182,11 @@ class RedisSessionManager(SessionManager):
             port=settings.REDIS_PORT,
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
-            decode_responses=True
+            decode_responses=True,
+            max_connections=20,
+            socket_connect_timeout=3,
+            socket_timeout=5,
+            retry_on_timeout=True,
         )
         logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m)")
         

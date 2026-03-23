@@ -94,6 +94,10 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
             session.memory.story.preferred_deity = user.get('preferred_deity', '')
         if not session.memory.story.location:
             session.memory.story.location = user.get('location', '')
+        if not session.memory.story.temple_visits:
+            session.memory.story.temple_visits = user.get('temple_visits', [])
+        if not session.memory.story.purchase_history:
+            session.memory.story.purchase_history = user.get('purchase_history', [])
         
     if user_profile:
         # Override with explicit frontend-provided profile if available
@@ -109,6 +113,12 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
             session.memory.story.location = user_profile.location
         if hasattr(user_profile, 'spiritual_interests') and user_profile.spiritual_interests:
             session.memory.story.spiritual_interests = user_profile.spiritual_interests
+        if hasattr(user_profile, 'rashi') and user_profile.rashi:
+            session.memory.story.rashi = user_profile.rashi
+        if hasattr(user_profile, 'gotra') and user_profile.gotra:
+            session.memory.story.gotra = user_profile.gotra
+        if hasattr(user_profile, 'nakshatra') and user_profile.nakshatra:
+            session.memory.story.nakshatra = user_profile.nakshatra
 
 async def _get_or_create_session(
     query: ConversationalQuery,

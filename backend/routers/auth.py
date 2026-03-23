@@ -48,6 +48,11 @@ async def register_user(request: UserRegisterRequest):
             dob=request.dob,
             profession=request.profession,
             preferred_deity=request.preferred_deity,
+            rashi=request.rashi,
+            gotra=request.gotra,
+            nakshatra=request.nakshatra,
+            temple_visits=request.favorite_temples,
+            purchase_history=request.past_purchases,
         )
         if not result:
             raise ValueError("Email already registered or database unavailable")
@@ -115,3 +120,16 @@ async def logout_user(authorization: Optional[str] = Header(None)):
     auth_service = get_auth_service()
     auth_service.logout_user(token)
     return {"message": "Successfully logged out"}
+
+@router.get("/product-names")
+async def get_product_names():
+    """Return list of product names for registration form dropdown."""
+    try:
+        from services.product_service import get_product_service
+        svc = get_product_service()
+        products = await svc.get_all_products()
+        # Deduplicate and sort product names
+        names = sorted(set(p.get("name", "") for p in products if p.get("name")))
+        return names
+    except Exception:
+        return []

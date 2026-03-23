@@ -17,6 +17,12 @@ export interface User {
   age: number;
   age_group: string;
   profession: string;
+  preferred_deity: string;
+  rashi: string;
+  gotra: string;
+  nakshatra: string;
+  temple_visits: string[];
+  purchase_history: string[];
   created_at: string;
 }
 
@@ -123,7 +129,12 @@ export function useAuth() {
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.detail || 'Login failed');
+        const detail = data.detail;
+        setError(
+          typeof detail === 'string' ? detail
+          : Array.isArray(detail) ? detail.map((e: any) => e.msg).join(', ')
+          : 'Login failed'
+        );
         setAuthState(prev => ({ ...prev, isLoading: false }));
         return false;
       }
@@ -164,13 +175,24 @@ export function useAuth() {
           gender: profile.gender,
           dob: profile.dob,
           profession: profile.profession,
+          preferred_deity: profile.preferred_deity,
+          rashi: profile.rashi,
+          gotra: profile.gotra,
+          nakshatra: profile.nakshatra,
+          favorite_temples: profile.favorite_temples,
+          past_purchases: profile.past_purchases,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.detail || 'Registration failed');
+        const detail = data.detail;
+        setError(
+          typeof detail === 'string' ? detail
+          : Array.isArray(detail) ? detail.map((e: any) => e.msg).join(', ')
+          : 'Registration failed'
+        );
         setAuthState(prev => ({ ...prev, isLoading: false }));
         return false;
       }

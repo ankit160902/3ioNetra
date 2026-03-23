@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     EMBEDDING_MODEL: str = "intfloat/multilingual-e5-large"  # benchmark-validated: instruct variant scored lower (0.784 vs 0.840)
     EMBEDDING_DIM: int = 1024
+    EMBEDDING_ONNX_ENABLED: bool = Field(default=False, env="EMBEDDING_ONNX_ENABLED")  # ONNX INT8 for ~30-50ms faster embedding
+    EMBEDDING_ONNX_PATH: str = Field(default="./models/e5-large-onnx", env="EMBEDDING_ONNX_PATH")  # exported ONNX model path
     CHUNK_SIZE: int = 512
     CHUNK_OVERLAP: int = 50
 
@@ -80,6 +82,10 @@ class Settings(BaseSettings):
     SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
 
+    # Reranker skip — when top candidate is decisive, skip neural reranking
+    SKIP_RERANK_THRESHOLD: float = Field(default=0.75, env="SKIP_RERANK_THRESHOLD")
+    SKIP_RERANK_GAP: float = Field(default=0.15, env="SKIP_RERANK_GAP")
+
     # Content validation
     DYNAMIC_RELEVANCE_RATIO: float = 0.5   # top_score * this = dynamic floor
     MIN_CONTENT_LENGTH: int = 10           # min chars for content gate
@@ -92,6 +98,11 @@ class Settings(BaseSettings):
     MEMORY_MAX_RESULTS: int = 5
     MAX_DOCS_PER_TRADITION: int = 3
     MEMORY_SIMILARITY_THRESHOLD: float = 0.35  # min cosine sim for memory recall
+
+    # Semantic Response Cache (saves 5-15s on repeat patterns)
+    RESPONSE_CACHE_ENABLED: bool = Field(default=True, env="RESPONSE_CACHE_ENABLED")
+    RESPONSE_CACHE_TTL: int = Field(default=21600, env="RESPONSE_CACHE_TTL")  # 6 hours
+    RESPONSE_CACHE_SIMILARITY_THRESHOLD: float = Field(default=0.92, env="RESPONSE_CACHE_SIMILARITY_THRESHOLD")
 
     # HyDE (Hypothetical Document Embedding)
     HYDE_ENABLED: bool = Field(default=True, env="HYDE_ENABLED")
@@ -201,13 +212,15 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Reranker Settings
     # ------------------------------------------------------------------
-    RERANKER_MODEL: str = "BAAI/bge-reranker-v2-m3"
+    # bge-reranker-v2-m3: multilingual, accurate but heavier (~200ms)
+    # BAAI/bge-reranker-base: English-focused, lighter (~50ms) — use if most queries are English/Hindi
+    RERANKER_MODEL: str = Field(default="BAAI/bge-reranker-v2-m3", env="RERANKER_MODEL")
     RERANKER_TYPE: str = "cross-encoder"  # "cross-encoder" or "api"
 
     # ------------------------------------------------------------------
     # Model Routing Settings
     # ------------------------------------------------------------------
-    MODEL_ROUTING_ENABLED: bool = Field(default=False, env="MODEL_ROUTING_ENABLED")
+    MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
     MODEL_ECONOMY: str = "gemini-2.0-flash"
     MODEL_STANDARD: str = "gemini-2.5-pro"
     MODEL_PREMIUM: str = "gemini-2.5-pro"

@@ -504,14 +504,26 @@ class LLMService:
         memory_context: Optional[Any] = None,
     ) -> str:
         """Build context-aware prompt for Gemini with user profile personalization"""
-        
+
+        # Determine if conversation topic is spiritual (controls panchang/astro inclusion)
+        life_area = (user_profile or {}).get('life_area', '')
+        query_lower = query.lower()
+        _spiritual_keywords = {"puja", "mantra", "temple", "vrat", "ritual", "meditation",
+                               "dhyana", "prayer", "havan", "kirtan", "sadhana", "japa",
+                               "panchang", "tithi", "nakshatra", "muhurat", "deity", "god"}
+        is_spiritual_topic = (
+            life_area == 'spiritual'
+            or any(kw in query_lower for kw in _spiritual_keywords)
+        )
+        is_guidance_phase = phase in (ConversationPhase.GUIDANCE, ConversationPhase.SYNTHESIS)
+
         # Format user profile if available
         profile_text = ""
         if user_profile:
             logger.info(f"Building prompt with user_profile: {user_profile}")
             has_data = False
             profile_parts = []
-            
+
             if user_profile.get('name'):
                 profile_parts.append(f"   • Their name is: {user_profile.get('name')}")
                 has_data = True
@@ -527,11 +539,8 @@ class LLMService:
             if user_profile.get('gender'):
                 profile_parts.append(f"   • Gender: {user_profile.get('gender')}")
                 has_data = True
-            if user_profile.get('phone'):
-                profile_parts.append(f"   • Phone: {user_profile.get('phone')}")
-                has_data = True
-            
-            # Add context for conversation
+
+            # Conversation context
             if user_profile.get('primary_concern'):
                 profile_parts.append(f"   • What they've shared: {user_profile.get('primary_concern')}")
                 has_data = True
@@ -550,23 +559,24 @@ class LLMService:
             if user_profile.get('spiritual_interests'):
                 profile_parts.append(f"   • Spiritual interests: {', '.join(user_profile.get('spiritual_interests', []))}")
                 has_data = True
-            
-            # 🔥 Extended Spiritual Profile
-            if user_profile.get('rashi'):
-                profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
-                has_data = True
-            if user_profile.get('gotra'):
-                profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
-                has_data = True
-            if user_profile.get('nakshatra'):
-                profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
-                has_data = True
+
+            # Extended spiritual profile — only include when topic is spiritual or in guidance
+            if is_spiritual_topic or is_guidance_phase:
+                if user_profile.get('rashi'):
+                    profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
+                    has_data = True
+                if user_profile.get('gotra'):
+                    profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
+                    has_data = True
+                if user_profile.get('nakshatra'):
+                    profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
+                    has_data = True
             if user_profile.get('temple_visits'):
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
                 has_data = True
-            
-            # 🗓️ Current Panchang Context
-            if user_profile.get('current_panchang'):
+
+            # Current Panchang — only include when topic is spiritual or in guidance phase
+            if user_profile.get('current_panchang') and (is_spiritual_topic or is_guidance_phase):
                 p = user_profile['current_panchang']
                 panchang_lines = ["   • CURRENT PANCHANG (Today):"]
 
@@ -716,7 +726,7 @@ class LLMService:
         # Allow verses in both phases so the bot can choose the right moment
         if context_docs and len(context_docs) > 0:
             scripture_context = "\n═══════════════════════════════════════════════════════════\n"
-            scripture_context += "RESOURCES AVAILABLE (Use ONLY if they naturally fit the conversation):\n"
+            scripture_context += "RESOURCES AVAILABLE (OPTIONAL — use ONLY if one genuinely fits this moment. It is completely fine to ignore ALL of these.):\n"
             scripture_context += "═══════════════════════════════════════════════════════════\n\n"
             
             # Fix 5: Compute relative baseline for quality labels
@@ -862,13 +872,18 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 
 {scripture_context}
 
+CRITICAL — READ THIS BEFORE RESPONDING:
+You do NOT need to use every piece of data above. The profile, panchang, and scripture resources are REFERENCE material — use ONLY what naturally fits THIS specific moment. If the user sent a casual message, respond casually as a friend. Do NOT force panchang references, verses, deity names, or practices into every response. A warm, natural 2-3 sentence reply is almost always better than a response that tries to mention the user's name, today's tithi, a verse, and a practice all at once. That pattern is EXACTLY what you must avoid.
+
+RESPOND TO WHAT THEY ACTUALLY SAID — not to what your context data contains.
+
 BEFORE YOU RESPOND — CHECK THESE (violations = failure):
 1. SCAN your first 5 words. If they contain "I hear you", "I understand", or "It sounds like" — DELETE and rewrite. Start with something specific: "That is a lot to carry", "Twelve years is a lifetime of love", "Of course you are angry."
 2. SCAN for echoed dismissive words. If the user complained about "adjust", "get over it", "move on", or "just a [thing]" — make sure NONE of those words or substrings appear in your response. Rephrase completely.
 3. NO numbered lists (1. 2. 3.), NO bullet points (- or *), NO bold (**text**), NO headers (#). Even for ritual how-to — use flowing prose.
 4. Don't end with "How does that sound?", "Would you like to hear more?", or "Does this resonate?" — just end.
-5. One verse maximum, only if it truly fits.
-6. You are a companion, not a therapist running an assessment.
+5. One verse maximum, only if it truly fits. If no verse naturally fits, DO NOT include one.
+6. You are a companion, not a checklist machine. Do NOT try to mention panchang + verse + practice + deity in every response.
 7. When discussing a specific deity, always use their NAME at least once (Shiva, Krishna, Hanuman, Durga) — never just "He" or "His".
 8. RETURNING USER CHECK: If the RETURNING USER section exists above, re-read it now. Your response MUST include one specific detail from their journey.
 9. REPETITION CHECK: Read your last 2 responses in the conversation. If you already gave a mantra/practice/Gita reference and the user is STILL processing the same emotion — do NOT give another mantra/practice/Gita reference. Ask a deeper question instead. Break the pattern.
@@ -1266,9 +1281,12 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
     async def generate_quick_response(self, prompt: str) -> str:
         """Quick generation using the flash model for internal tasks (summaries, etc.)."""
         try:
-            import google.generativeai as genai
-            model = genai.GenerativeModel("gemini-2.0-flash")
-            response = await model.generate_content_async(prompt)
+            from google import genai
+            client = genai.Client()
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
             return response.text.strip() if response.text else ""
         except Exception as e:
             logger.error(f"Quick generation failed: {e}")

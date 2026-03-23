@@ -160,6 +160,10 @@ export default function Home() {
     gender: user.gender || '',
     profession: user.profession || '',
     name: user.name || '',
+    preferred_deity: user.preferred_deity || '',
+    rashi: user.rashi || '',
+    gotra: user.gotra || '',
+    nakshatra: user.nakshatra || '',
   } : undefined;
 
   const {

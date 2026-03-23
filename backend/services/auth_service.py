@@ -228,6 +228,30 @@ class AuthService:
                 "nakshatra": nakshatra,
                 "kundli": None
             },
+            "temples": [
+                {
+                    "temple_id": t,
+                    "visits": [{
+                        "date": datetime.utcnow().isoformat(),
+                        "purpose": "Historical Visit",
+                        "event": "",
+                        "sevas": [],
+                        "activity": []
+                    }]
+                }
+                for t in (temple_visits or [])
+            ],
+            "purchases": [
+                {
+                    "type": "Historical",
+                    "datetime": datetime.utcnow().isoformat(),
+                    "product_id": "",
+                    "name": p,
+                    "category": "Spiritual Item",
+                    "amount": 0
+                }
+                for p in (purchase_history or [])
+            ],
             "is_active": True,
             "deleted_at": None
         }
@@ -585,7 +609,7 @@ class ConversationStorage:
 
     async def get_recent_conversation_summaries(self, user_id: str, limit: int = 5) -> list:
         """Fetch memory snapshots from last N conversations (lightweight projection)."""
-        if not self.db:
+        if self.db is None:
             return []
         try:
             def _fetch():
@@ -601,7 +625,7 @@ class ConversationStorage:
 
     async def update_conversation_field(self, user_id: str, conversation_id: str, field: str, value):
         """Update a single field on a saved conversation."""
-        if not self.db:
+        if self.db is None:
             return
         await asyncio.to_thread(
             self.db.conversations.update_one,

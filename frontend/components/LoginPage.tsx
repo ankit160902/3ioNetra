@@ -1,8 +1,12 @@
 /**
  * Login/Register Page Component with Extended Profile Collection
  */
-import { useState } from 'react';
-import { Loader2, Eye, EyeOff, ChevronRight, ChevronLeft } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Loader2, Eye, EyeOff } from 'lucide-react';
+import SearchableMultiSelect from './SearchableMultiSelect';
+
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const LOGIN_API_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
 
 export interface UserProfile {
   name: string;
@@ -12,6 +16,12 @@ export interface UserProfile {
   gender: string;
   dob: string;
   profession: string;
+  preferred_deity: string;
+  rashi: string;
+  gotra: string;
+  nakshatra: string;
+  favorite_temples: string[];
+  past_purchases: string[];
 }
 
 interface LoginPageProps {
@@ -38,9 +48,59 @@ const genderOptions = [
   { value: 'prefer_not_to_say', label: 'Prefer not to say' },
 ];
 
+const deityOptions = [
+  'Shiva', 'Vishnu', 'Brahma', 'Krishna', 'Rama', 'Hanuman', 'Ganesha',
+  'Durga', 'Lakshmi', 'Saraswati', 'Parvati', 'Kali', 'Kartikeya',
+  'Radha', 'Sita', 'Surya', 'Shani', 'Jagannath', 'Venkateswara',
+  'Narasimha', 'Ayyappa', 'Dattatreya', 'Santoshi Mata', 'Nandi',
+];
+
+const rashiOptions = [
+  { value: 'Mesh', label: 'Mesh (Aries)' },
+  { value: 'Vrishabh', label: 'Vrishabh (Taurus)' },
+  { value: 'Mithun', label: 'Mithun (Gemini)' },
+  { value: 'Kark', label: 'Kark (Cancer)' },
+  { value: 'Simha', label: 'Simha (Leo)' },
+  { value: 'Kanya', label: 'Kanya (Virgo)' },
+  { value: 'Tula', label: 'Tula (Libra)' },
+  { value: 'Vrishchik', label: 'Vrishchik (Scorpio)' },
+  { value: 'Dhanu', label: 'Dhanu (Sagittarius)' },
+  { value: 'Makar', label: 'Makar (Capricorn)' },
+  { value: 'Kumbh', label: 'Kumbh (Aquarius)' },
+  { value: 'Meen', label: 'Meen (Pisces)' },
+];
+
+const gotraOptions = [
+  'Bharadwaj', 'Kashyap', 'Vashishtha', 'Vishwamitra', 'Gautam',
+  'Jamadagni', 'Atri', 'Agastya', 'Kaushik', 'Sandilya',
+  'Parashar', 'Mudgal', 'Garg', 'Katyayan', 'Shandilya', 'Bhrigu',
+];
+
+const nakshatraOptions = [
+  'Ashwini', 'Bharani', 'Krittika', 'Rohini', 'Mrigashira', 'Ardra',
+  'Punarvasu', 'Pushya', 'Ashlesha', 'Magha', 'Purva Phalguni',
+  'Uttara Phalguni', 'Hasta', 'Chitra', 'Swati', 'Vishakha',
+  'Anuradha', 'Jyeshtha', 'Moola', 'Purva Ashadha', 'Uttara Ashadha',
+  'Shravana', 'Dhanishta', 'Shatabhisha', 'Purva Bhadrapada',
+  'Uttara Bhadrapada', 'Revati',
+];
+
+const templeOptions = [
+  'Kashi Vishwanath', 'Tirupati Balaji', 'Vaishno Devi', 'Kedarnath',
+  'Badrinath', 'Somnath', 'Rameshwaram', 'Jagannath Puri', 'Dwarkadhish',
+  'Golden Temple', 'Shirdi Sai Baba', 'Siddhivinayak', 'Mahakaleshwar',
+  'Meenakshi Temple', 'ISKCON Vrindavan', 'Akshardham', 'Lingaraj',
+  'Brihadeeswara', 'Padmanabhaswamy', 'Konark Sun Temple', 'Kamakhya',
+  'Trimbakeshwar', 'Ujjain Mahakal', 'Amarnath',
+];
+
+const selectClass = 'w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none appearance-none cursor-pointer';
+const inputClass = 'w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none';
+const labelClass = 'block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1';
+
 export default function LoginPage({ onLogin, onRegister, isLoading, error }: LoginPageProps) {
   const [isRegisterMode, setIsRegisterMode] = useState(false);
-  const [registrationStep, setRegistrationStep] = useState(1); // 1: basic info, 2: profile details
+  const [registrationStep, setRegistrationStep] = useState(1); // 1: basic info, 2: profile details, 3: spiritual profile
 
   // Basic info
   const [name, setName] = useState('');
@@ -55,7 +115,26 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
   const [dob, setDob] = useState('');
   const [profession, setProfession] = useState('');
 
+  // Spiritual profile
+  const [preferredDeity, setPreferredDeity] = useState<string[]>([]);
+  const [rashi, setRashi] = useState('');
+  const [gotra, setGotra] = useState('');
+  const [nakshatra, setNakshatra] = useState('');
+  const [favoriteTemples, setFavoriteTemples] = useState<string[]>([]);
+  const [pastPurchases, setPastPurchases] = useState<string[]>([]);
+
+  // Product options fetched from backend
+  const [productOptions, setProductOptions] = useState<string[]>([]);
+
   const [localError, setLocalError] = useState<string | null>(null);
+
+  // Fetch product names from backend
+  useEffect(() => {
+    fetch(`${LOGIN_API_URL}/api/auth/product-names`)
+      .then(res => res.json())
+      .then((data: string[]) => setProductOptions(data))
+      .catch(() => setProductOptions([]));
+  }, []);
 
   const validateStep1 = (): boolean => {
     if (!name.trim()) {
@@ -66,8 +145,16 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
       setLocalError('Please enter a valid email address');
       return false;
     }
-    if (password.length < 6) {
-      setLocalError('Password must be at least 6 characters');
+    if (password.length < 8) {
+      setLocalError('Password must be at least 8 characters');
+      return false;
+    }
+    if (!/[a-zA-Z]/.test(password)) {
+      setLocalError('Password must contain at least one letter');
+      return false;
+    }
+    if (!/\d/.test(password)) {
+      setLocalError('Password must contain at least one number');
       return false;
     }
     if (password !== confirmPassword) {
@@ -97,16 +184,46 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     return true;
   };
 
+  const validateStep3 = (): boolean => {
+    if (preferredDeity.length === 0) {
+      setLocalError('Please select at least one preferred deity');
+      return false;
+    }
+    if (!rashi) {
+      setLocalError('Please select your rashi');
+      return false;
+    }
+    if (!gotra) {
+      setLocalError('Please select your gotra');
+      return false;
+    }
+    if (!nakshatra) {
+      setLocalError('Please select your nakshatra');
+      return false;
+    }
+    if (favoriteTemples.length === 0) {
+      setLocalError('Please select at least one temple');
+      return false;
+    }
+    if (pastPurchases.length === 0) {
+      setLocalError('Please select at least one past purchase');
+      return false;
+    }
+    return true;
+  };
+
   const handleNextStep = () => {
     setLocalError(null);
-    if (validateStep1()) {
+    if (registrationStep === 1 && validateStep1()) {
       setRegistrationStep(2);
+    } else if (registrationStep === 2 && validateStep2()) {
+      setRegistrationStep(3);
     }
   };
 
   const handlePrevStep = () => {
     setLocalError(null);
-    setRegistrationStep(1);
+    setRegistrationStep(registrationStep - 1);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,13 +231,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     setLocalError(null);
 
     if (isRegisterMode) {
-      if (registrationStep === 1) {
+      if (registrationStep < 3) {
         handleNextStep();
         return;
       }
 
-      // Step 2 - Final registration
-      if (!validateStep2()) {
+      // Step 3 - Final registration
+      if (!validateStep3()) {
         return;
       }
 
@@ -132,6 +249,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         gender,
         dob,
         profession,
+        preferred_deity: preferredDeity.join(', '),
+        rashi,
+        gotra,
+        nakshatra,
+        favorite_temples: favoriteTemples,
+        past_purchases: pastPurchases,
       });
     } else {
       await onLogin(email, password);
@@ -150,6 +273,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     setGender('');
     setDob('');
     setProfession('');
+    setPreferredDeity([]);
+    setRashi('');
+    setGotra('');
+    setNakshatra('');
+    setFavoriteTemples([]);
+    setPastPurchases([]);
   };
 
   // Calculate max date for DOB (user should be at least 13 years old)
@@ -172,7 +301,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         <div data-testid="auth-form" className="bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 p-7 md:p-8 border border-orange-100/50">
           <h2 data-testid="auth-heading" className="text-base font-black text-gray-900 mb-6 text-center uppercase tracking-widest opacity-80">
             {isRegisterMode
-              ? (registrationStep === 1 ? 'Create Account' : 'Complete Profile')
+              ? (registrationStep === 1 ? 'Create Account' : registrationStep === 2 ? 'Complete Profile' : 'Spiritual Profile')
               : 'Welcome Back'}
           </h2>
 
@@ -181,6 +310,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
             <div data-testid="step-indicators" className="flex items-center justify-center gap-2 mb-6">
               <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 1 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
               <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 2 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
+              <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 3 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
             </div>
           )}
 
@@ -190,9 +320,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
               <>
                 {isRegisterMode && (
                   <div>
-                    <label htmlFor="name" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                      Full Name
-                    </label>
+                    <label htmlFor="name" className={labelClass}>Full Name</label>
                     <input
                       id="name"
                       type="text"
@@ -200,15 +328,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Your Name"
                       required={isRegisterMode}
-                      className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none"
+                      className={inputClass}
                     />
                   </div>
                 )}
 
                 <div>
-                  <label htmlFor="email" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Email
-                  </label>
+                  <label htmlFor="email" className={labelClass}>Email</label>
                   <input
                     id="email"
                     type="email"
@@ -216,14 +342,12 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@nexus.com"
                     required
-                    className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none"
+                    className={inputClass}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="password" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Password
-                  </label>
+                  <label htmlFor="password" className={labelClass}>Password</label>
                   <div className="relative">
                     <input
                       id="password"
@@ -232,7 +356,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
-                      className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none pr-14"
+                      className={`${inputClass} pr-14`}
                     />
                     <button
                       type="button"
@@ -246,9 +370,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
                 {isRegisterMode && (
                   <div>
-                    <label htmlFor="confirmPassword" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                      Confirm
-                    </label>
+                    <label htmlFor="confirmPassword" className={labelClass}>Confirm</label>
                     <input
                       id="confirmPassword"
                       type={showPassword ? 'text' : 'password'}
@@ -256,7 +378,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
                       required={isRegisterMode}
-                      className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none"
+                      className={inputClass}
                     />
                   </div>
                 )}
@@ -267,9 +389,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
             {isRegisterMode && registrationStep === 2 && (
               <>
                 <div>
-                  <label htmlFor="phone" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Phone
-                  </label>
+                  <label htmlFor="phone" className={labelClass}>Phone</label>
                   <input
                     id="phone"
                     type="tel"
@@ -277,66 +397,91 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                     onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 15))}
                     placeholder="Your Phone Number"
                     required
-                    className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none"
+                    className={inputClass}
                   />
                 </div>
 
                 <div>
-                  <label htmlFor="gender" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Gender
-                  </label>
-                  <select
-                    id="gender"
-                    value={gender}
-                    onChange={(e) => setGender(e.target.value)}
-                    required
-                    className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none appearance-none cursor-pointer"
-                  >
+                  <label htmlFor="gender" className={labelClass}>Gender</label>
+                  <select id="gender" value={gender} onChange={(e) => setGender(e.target.value)} required className={selectClass}>
                     <option value="">Select Gender</option>
-                    {genderOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
+                    {genderOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
 
                 <div>
-                  <label htmlFor="dob" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Date of Birth
-                  </label>
-                  <input
-                    id="dob"
-                    type="date"
-                    value={dob}
-                    onChange={(e) => setDob(e.target.value)}
-                    max={maxDate}
-                    min={minDate}
-                    required
-                    className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none cursor-pointer"
-                  />
+                  <label htmlFor="dob" className={labelClass}>Date of Birth</label>
+                  <input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} max={maxDate} min={minDate} required className={`${inputClass} cursor-pointer`} />
                 </div>
 
                 <div>
-                  <label htmlFor="profession" className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
-                    Profession
-                  </label>
-                  <select
-                    id="profession"
-                    value={profession}
-                    onChange={(e) => setProfession(e.target.value)}
-                    required
-                    className="w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none appearance-none cursor-pointer"
-                  >
+                  <label htmlFor="profession" className={labelClass}>Profession</label>
+                  <select id="profession" value={profession} onChange={(e) => setProfession(e.target.value)} required className={selectClass}>
                     <option value="">Select Profession</option>
-                    {professionOptions.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
+                    {professionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
                 </div>
               </>
+            )}
+
+            {/* Step 3: Spiritual Profile */}
+            {isRegisterMode && registrationStep === 3 && (
+              <div className="space-y-4 max-h-[55vh] overflow-y-auto pr-1">
+                {/* Preferred Deity - searchable multi-select */}
+                <SearchableMultiSelect
+                  label="Preferred Deity"
+                  options={deityOptions}
+                  selected={preferredDeity}
+                  onChange={setPreferredDeity}
+                  placeholder="Search deities..."
+                />
+
+                {/* Rashi - single dropdown */}
+                <div>
+                  <label htmlFor="rashi" className={labelClass}>Rashi (Zodiac)</label>
+                  <select id="rashi" value={rashi} onChange={(e) => setRashi(e.target.value)} required className={selectClass}>
+                    <option value="">Select Rashi</option>
+                    {rashiOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+
+                {/* Gotra - single dropdown */}
+                <div>
+                  <label htmlFor="gotra" className={labelClass}>Gotra</label>
+                  <select id="gotra" value={gotra} onChange={(e) => setGotra(e.target.value)} required className={selectClass}>
+                    <option value="">Select Gotra</option>
+                    {gotraOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                </div>
+
+                {/* Nakshatra - single dropdown */}
+                <div>
+                  <label htmlFor="nakshatra" className={labelClass}>Nakshatra</label>
+                  <select id="nakshatra" value={nakshatra} onChange={(e) => setNakshatra(e.target.value)} required className={selectClass}>
+                    <option value="">Select Nakshatra</option>
+                    {nakshatraOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </div>
+
+                {/* Temples - searchable multi-select */}
+                <SearchableMultiSelect
+                  label="Temples Visited"
+                  options={templeOptions}
+                  selected={favoriteTemples}
+                  onChange={setFavoriteTemples}
+                  placeholder="Search temples..."
+                />
+
+                {/* Past Purchases - searchable multi-select from DB */}
+                <SearchableMultiSelect
+                  label="Past Spiritual Purchases"
+                  options={productOptions}
+                  selected={pastPurchases}
+                  onChange={setPastPurchases}
+                  placeholder="Search products..."
+                  loading={productOptions.length === 0}
+                />
+              </div>
             )}
 
             {/* Error Display */}
@@ -348,7 +493,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
             {/* Buttons */}
             <div className="flex gap-3 pt-4">
-              {isRegisterMode && registrationStep === 2 && (
+              {isRegisterMode && registrationStep > 1 && (
                 <button
                   type="button"
                   onClick={handlePrevStep}
@@ -366,7 +511,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                 {isLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : isRegisterMode ? (
-                  registrationStep === 1 ? 'Next Step' : 'Create Account'
+                  registrationStep < 3 ? 'Next Step' : 'Create Account'
                 ) : (
                   'Sign In'
                 )}

@@ -36,6 +36,7 @@ TIER_MODELS = {
 TIER_CONFIGS = {
     ModelTier.ECONOMY: {
         "max_output_tokens": 512,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -162,15 +163,15 @@ def route(
 
     # 2. Crisis / high urgency → PREMIUM
     if urgency in ("high", "crisis"):
-        return _make_decision(ModelTier.PREMIUM, "crisis_or_high_urgency")
+        return _make_decision(ModelTier.PREMIUM, "crisis_or_high_urgency", phase)
 
     # 3. GREETING → ECONOMY
     if intent == IntentType.GREETING:
-        return _make_decision(ModelTier.ECONOMY, "greeting")
+        return _make_decision(ModelTier.ECONOMY, "greeting", phase)
 
     # 4. CLOSURE → ECONOMY
     if intent == IntentType.CLOSURE:
-        return _make_decision(ModelTier.ECONOMY, "closure")
+        return _make_decision(ModelTier.ECONOMY, "closure", phase)
 
     # 5. LISTENING phase + short message → ECONOMY
     if phase == ConversationPhase.LISTENING:
@@ -179,49 +180,67 @@ def route(
             user_msgs = [m for m in session.conversation_history if m.get("role") == "user"]
             if user_msgs:
                 last_msg = user_msgs[-1].get("content", "")
-        if len(last_msg.split()) < 8:
-            return _make_decision(ModelTier.ECONOMY, "listening_short_message")
+        if len(last_msg.split()) < 12:
+            return _make_decision(ModelTier.ECONOMY, "listening_short_message", phase)
 
     # 6. ASKING_INFO + direct answer → STANDARD
     if intent == IntentType.ASKING_INFO and needs_direct:
-        return _make_decision(ModelTier.STANDARD, "asking_info_direct")
+        return _make_decision(ModelTier.STANDARD, "asking_info_direct", phase)
 
     # 7. EXPRESSING_EMOTION → STANDARD
     if intent == IntentType.EXPRESSING_EMOTION:
-        return _make_decision(ModelTier.STANDARD, "expressing_emotion")
+        return _make_decision(ModelTier.STANDARD, "expressing_emotion", phase)
+
+    # 7b. ASKING_INFO without needs_direct_answer → ECONOMY (simple info queries)
+    if intent == IntentType.ASKING_INFO and not needs_direct:
+        return _make_decision(ModelTier.ECONOMY, "asking_info_simple", phase)
 
     # 8. ASKING_PANCHANG → ECONOMY
     if intent == IntentType.ASKING_PANCHANG:
-        return _make_decision(ModelTier.ECONOMY, "asking_panchang")
+        return _make_decision(ModelTier.ECONOMY, "asking_panchang", phase)
 
     # 9. PRODUCT_SEARCH → ECONOMY
     if intent == IntentType.PRODUCT_SEARCH:
-        return _make_decision(ModelTier.ECONOMY, "product_search")
+        return _make_decision(ModelTier.ECONOMY, "product_search", phase)
 
     # 10-11. GUIDANCE phase with RAG context
     if phase == ConversationPhase.GUIDANCE and has_rag_context:
         complexity = _compute_complexity_score(intent_analysis, session, has_rag_context)
         signals = session.signals_collected if hasattr(session, "signals_collected") else {}
         if len(signals) >= 3 or complexity >= 4:
-            return _make_decision(ModelTier.PREMIUM, f"guidance_rag_complex(score={complexity})")
-        return _make_decision(ModelTier.STANDARD, "guidance_rag_standard")
+            return _make_decision(ModelTier.PREMIUM, f"guidance_rag_complex(score={complexity})", phase)
+        if complexity < 3:
+            return _make_decision(ModelTier.ECONOMY, f"guidance_rag_simple(score={complexity})", phase)
+        return _make_decision(ModelTier.STANDARD, "guidance_rag_standard", phase)
 
     # 12-13. SEEKING_GUIDANCE
     if intent == IntentType.SEEKING_GUIDANCE:
         complexity = _compute_complexity_score(intent_analysis, session, has_rag_context)
         if complexity >= 4:
-            return _make_decision(ModelTier.PREMIUM, f"seeking_guidance_complex(score={complexity})")
-        return _make_decision(ModelTier.STANDARD, "seeking_guidance_standard")
+            return _make_decision(ModelTier.PREMIUM, f"seeking_guidance_complex(score={complexity})", phase)
+        return _make_decision(ModelTier.STANDARD, "seeking_guidance_standard", phase)
 
     # 14. Default
-    return _make_decision(ModelTier.STANDARD, "default")
+    return _make_decision(ModelTier.STANDARD, "default", phase)
 
 
-def _make_decision(tier: ModelTier, reason: str) -> RoutingDecision:
-    """Helper to build a RoutingDecision."""
+def _make_decision(tier: ModelTier, reason: str, phase: Optional[ConversationPhase] = None) -> RoutingDecision:
+    """Helper to build a RoutingDecision.
+
+    When *phase* is LISTENING, cap max_output_tokens to keep responses concise
+    and reduce generation latency (saves 100-300ms).
+    """
     model = TIER_MODELS[tier]
     config = TIER_CONFIGS[tier].copy()
-    logger.info(f"MODEL_ROUTE | tier={tier.value} model={model} reason={reason}")
+
+    # Reduce token budget for listening phase — only ~150 tokens typically used
+    if phase == ConversationPhase.LISTENING:
+        if tier == ModelTier.ECONOMY:
+            config["max_output_tokens"] = 256   # was 512
+        elif tier == ModelTier.STANDARD:
+            config["max_output_tokens"] = 512   # was 768
+
+    logger.info(f"MODEL_ROUTE | tier={tier.value} model={model} reason={reason} max_tokens={config.get('max_output_tokens')}")
     return RoutingDecision(
         tier=tier,
         model_name=model,
