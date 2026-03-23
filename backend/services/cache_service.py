@@ -49,31 +49,10 @@ class CacheService:
         self._enabled = False
         self._l1 = _LRUCache(max_size=200)
         try:
-            import redis.asyncio as aioredis
-            import redis as sync_redis
-            self._redis = aioredis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.CACHE_REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-                max_connections=20,
-                socket_connect_timeout=3,
-                socket_timeout=5,
-                retry_on_timeout=True,
-            )
-            # Verify connection with a sync ping (same pattern as RedisSessionManager)
-            test_client = sync_redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.CACHE_REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                socket_connect_timeout=3,
-            )
-            test_client.ping()
-            test_client.close()
+            from services.redis_pool import get_redis_client
+            self._redis = get_redis_client()
             self._enabled = True
-            logger.info(f"CacheService initialized (Redis DB {settings.CACHE_REDIS_DB} + L1 LRU)")
+            logger.info("CacheService initialized (shared Redis pool + L1 LRU)")
         except Exception as e:
             logger.warning(f"CacheService disabled: Redis not available ({e})")
 
@@ -132,10 +111,9 @@ class CacheService:
             logger.error(f"Cache set error: {e}")
 
     async def close(self) -> None:
-        """Close Redis connection."""
+        """Mark cache as disabled. Pool cleanup is handled centrally."""
         if self._enabled:
-            logger.info("Closing CacheService Redis connection...")
-            await self._redis.close()
+            logger.info("CacheService disabled.")
             self._enabled = False
 
 _cache_service: Optional[CacheService] = None

@@ -213,9 +213,12 @@ class ResponseComposer:
             ):
                 full_response_parts.append(chunk)
                 yield chunk
-            # Cache the full response after streaming completes
+            # Cache the full response after streaming completes (non-fatal)
             full_response = "".join(full_response_parts)
-            await self._store_response_cache(llm_query, phase, memory, full_response)
+            try:
+                await self._store_response_cache(llm_query, phase, memory, full_response)
+            except Exception as e:
+                logger.warning(f"Response cache store failed (non-fatal): {e}")
         else:
             yield self._compose_fallback(dharmic_query)
 

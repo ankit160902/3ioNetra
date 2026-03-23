@@ -438,14 +438,8 @@ class ConversationStorage:
 
     def __init__(self):
         self.db = get_mongo_client()
-        import redis.asyncio as aioredis
-        self._redis = aioredis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD,
-            decode_responses=True
-        )
+        from services.redis_pool import get_redis_client
+        self._redis = get_redis_client()
 
     async def save_conversation(
         self,

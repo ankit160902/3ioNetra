@@ -129,7 +129,7 @@ def call_llm_judge(
     """
     try:
         result = genai_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
             config={"temperature": 0.1},
         )

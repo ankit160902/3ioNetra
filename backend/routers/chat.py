@@ -532,10 +532,20 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     yield f"event: token\ndata: {json.dumps({'text': fallback_text})}\n\n"
 
             full_text = "".join(full_text_parts)
-            cleaned_text = clean_response(full_text)
-            final_text = await _postprocess_and_save(
-                cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
-            )
+
+            try:
+                cleaned_text = clean_response(full_text)
+            except Exception as e:
+                logger.warning(f"clean_response failed, using raw text: {e}")
+                cleaned_text = full_text
+
+            try:
+                final_text = await _postprocess_and_save(
+                    cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+                )
+            except Exception as e:
+                logger.exception(f"_postprocess_and_save failed: {e}")
+                final_text = cleaned_text
 
             flow_meta = {
                 "detected_domain": session.memory.story.life_area,
@@ -549,6 +559,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
         except Exception as e:
             logger.exception(f"Error in SSE stream: {e}")
             yield f"event: error\ndata: {json.dumps({'message': 'Something went wrong. Please try again.'})}\n\n"
+            yield f"event: done\ndata: {json.dumps({'full_response': 'Something went wrong. Please try again.', 'recommended_products': [], 'flow_metadata': {}})}\n\n"
 
     return StreamingResponse(
         event_generator(),

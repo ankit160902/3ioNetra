@@ -53,12 +53,11 @@ async def lifespan(app: FastAPI):
     
     # Shutdown logic
     logger.info("Shutting down 3ioNetra Spiritual Companion API...")
-    
-    # 1. Close Cache Connections
-    from services.cache_service import get_cache_service
-    cache_service = get_cache_service()
-    await cache_service.close()
-    
+
+    # 1. Close shared Redis connection pool (covers CacheService, SessionManager, ConversationStorage)
+    from services.redis_pool import close_redis_pool
+    await close_redis_pool()
+
     # 2. Close MongoDB Connections
     from services.auth_service import close_mongo_client
     close_mongo_client()

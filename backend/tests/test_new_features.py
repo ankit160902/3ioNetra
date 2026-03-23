@@ -74,7 +74,7 @@ class TestModelRouter:
 
         with patch("services.model_router.settings") as mock_settings:
             mock_settings.MODEL_ROUTING_ENABLED = True
-            mock_settings.MODEL_ECONOMY = "gemini-2.0-flash"
+            mock_settings.MODEL_ECONOMY = "gemini-2.5-flash"
 
             session = self._make_session()
             result = route(
@@ -92,7 +92,7 @@ class TestModelRouter:
 
         with patch("services.model_router.settings") as mock_settings:
             mock_settings.MODEL_ROUTING_ENABLED = True
-            mock_settings.MODEL_ECONOMY = "gemini-2.0-flash"
+            mock_settings.MODEL_ECONOMY = "gemini-2.5-flash"
 
             session = self._make_session()
             result = route(
@@ -110,7 +110,7 @@ class TestModelRouter:
 
         with patch("services.model_router.settings") as mock_settings:
             mock_settings.MODEL_ROUTING_ENABLED = True
-            mock_settings.MODEL_ECONOMY = "gemini-2.0-flash"
+            mock_settings.MODEL_ECONOMY = "gemini-2.5-flash"
 
             session = self._make_session(
                 history=[{"role": "user", "content": "hello how are you"}]
@@ -170,7 +170,7 @@ class TestModelRouter:
 
         with patch("services.model_router.settings") as mock_settings:
             mock_settings.MODEL_ROUTING_ENABLED = True
-            mock_settings.MODEL_ECONOMY = "gemini-2.0-flash"
+            mock_settings.MODEL_ECONOMY = "gemini-2.5-flash"
 
             session = self._make_session(
                 history=[{"role": "user", "content": "what is today's panchang and tithi and nakshatra info please"}]
@@ -190,7 +190,7 @@ class TestModelRouter:
 
         with patch("services.model_router.settings") as mock_settings:
             mock_settings.MODEL_ROUTING_ENABLED = True
-            mock_settings.MODEL_ECONOMY = "gemini-2.0-flash"
+            mock_settings.MODEL_ECONOMY = "gemini-2.5-flash"
 
             session = self._make_session(
                 history=[{"role": "user", "content": "show me some rudraksha mala products from the store please"}]
@@ -387,7 +387,7 @@ class TestCostTracker:
             # Should not raise
             tracker.log(
                 session_id="test-123",
-                model_name="gemini-2.0-flash",
+                model_name="gemini-2.5-flash",
                 tier="economy",
                 input_tokens=100,
                 output_tokens=50,
@@ -463,7 +463,7 @@ class TestProviderAbstractions:
         # Success case
         resp_ok = IntentResponse(
             raw_json={"intent": "GREETING"},
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             provider="gemini",
             latency_ms=50.0,
             input_tokens=80,
@@ -476,7 +476,7 @@ class TestProviderAbstractions:
         # Failure case
         resp_fail = IntentResponse(
             raw_json={},
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             provider="gemini",
             latency_ms=50.0,
             input_tokens=80,
