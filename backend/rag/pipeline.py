@@ -21,6 +21,25 @@ from services.cache_service import get_cache_service
 
 logger = logging.getLogger(__name__)
 
+# Semaphore to throttle concurrent Gemini calls from RAG (prevents 429 bursts)
+_gemini_semaphore = asyncio.Semaphore(2)
+
+async def _gemini_call_with_retry(sync_fn, max_retries: int = 3):
+    """Run a synchronous Gemini API call with semaphore throttling and exponential backoff on 429."""
+    for attempt in range(max_retries + 1):
+        async with _gemini_semaphore:
+            try:
+                return await asyncio.to_thread(sync_fn)
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < max_retries:
+                        wait = (2 ** attempt) + 0.5  # 1.5s, 2.5s, 4.5s
+                        logger.warning(f"Gemini 429, retry {attempt+1}/{max_retries} after {wait:.1f}s")
+                        await asyncio.sleep(wait)
+                        continue
+                raise
+
 
 def _sanitize_for_prompt(text: str, max_len: int = 500) -> str:
     """Sanitize user input before interpolation into LLM prompts.
@@ -826,7 +845,7 @@ class RAGPipeline:
                     model=settings.GEMINI_FAST_MODEL, contents=prompt,
                     config={"temperature": settings.QUERY_TRANSLATE_TEMPERATURE, "max_output_tokens": 100,
                             "automatic_function_calling": {"disable": True}})
-            response = await asyncio.to_thread(_sync)
+            response = await _gemini_call_with_retry(_sync)
             translation = (response.text or "").strip()
             if translation:
                 logger.info(f"Query translated: '{query[:40]}' -> '{translation[:60]}'")
@@ -881,7 +900,7 @@ Respond ONLY with 2 terms, separated by a newline."""
                     config={"temperature": settings.QUERY_EXPAND_TEMPERATURE, "max_output_tokens": 100, "automatic_function_calling": {"disable": True}}
                 )
 
-            response = await asyncio.to_thread(_sync_expand)
+            response = await _gemini_call_with_retry(_sync_expand)
             expansion = response.text if response.text else ""
             expanded_terms = [t.strip() for t in expansion.split("\n") if t.strip()]
             result = [query] + expanded_terms[:2]
@@ -921,7 +940,7 @@ Respond ONLY with 2 terms, separated by a newline."""
                     model=settings.GEMINI_FAST_MODEL, contents=prompt,
                     config={"temperature": settings.QUERY_SUMMARIZE_TEMPERATURE, "max_output_tokens": 50,
                             "automatic_function_calling": {"disable": True}})
-            response = await asyncio.to_thread(_sync)
+            response = await _gemini_call_with_retry(_sync)
             summary = (response.text or "").strip()
             if summary and len(summary.split()) <= 20:
                 await cache.set("query_summarize", summary, ttl=86400, query=cache_key)
@@ -980,7 +999,7 @@ Respond ONLY with 2 terms, separated by a newline."""
                         model=settings.GEMINI_FAST_MODEL, contents=prompt,
                         config={"temperature": settings.HYDE_TEMPERATURE, "max_output_tokens": 500,
                                 "automatic_function_calling": {"disable": True}})
-                response = await asyncio.to_thread(_sync)
+                response = await _gemini_call_with_retry(_sync)
                 raw = (response.text or "").strip()
                 passages = [p.strip() for p in raw.split("---") if p.strip()]
                 passages = passages[:settings.HYDE_COUNT]
