@@ -361,8 +361,10 @@ class CompanionEngine:
             if user_id:
                 logger.info(f"💾 Preserving semantic memory anchor for user {user_id} (Reason: significant update)")
                 mem_anchor = analysis.get("summary", message)
-                # Fire-and-forget: don't block the response path
-                asyncio.create_task(self.memory_service.store_memory(user_id, mem_anchor))
+                try:
+                    await self.memory_service.store_memory(user_id, mem_anchor)
+                except Exception as e:
+                    logger.warning(f"Memory storage failed (non-fatal): {e}")
 
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
@@ -408,14 +410,12 @@ class CompanionEngine:
                 ]
 
             # 📚 SCRIPTURE RETRIEVAL
-            # NOTE: Speculative RAG already runs in parallel from chat.py.
-            # Skip duplicate RAG here — speculative docs will be used in _build_guidance_context.
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
+            should_get_verses = is_verse_request or (is_ready and not is_product_request)
 
-            # Only run RAG here for explicit verse requests (not covered by speculative RAG)
-            if is_verse_request and self.rag_pipeline and self.rag_pipeline.available:
+            if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
                 try:
                     context_docs, _top_score = await self._retrieve_and_validate(
                         session, message, analysis, intent, "guidance",

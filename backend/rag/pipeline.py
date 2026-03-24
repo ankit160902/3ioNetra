@@ -1622,19 +1622,10 @@ Respond ONLY with 2 terms, separated by a newline."""
         if 'hyde' in _result_map and not isinstance(_result_map['hyde'], Exception):
             hyde_embeddings = _result_map['hyde'] or []
 
-        # Batch Execution: All query embeddings in single model.encode() call
+        # Parallel Execution: Embeddings for all expansions + HyDE
         async def get_all_semantic_scores():
-            if expanded_queries:
-                self._ensure_embedding_model()
-                prefix = "query: " if self._needs_instruction_prefix() else ""
-                texts = [prefix + q.strip().replace("\n", " ") for q in expanded_queries]
-                all_vecs = await asyncio.to_thread(
-                    self._embedding_model.encode, texts,
-                    convert_to_tensor=False, show_progress_bar=False, batch_size=len(texts)
-                )
-                vecs = [np.asarray(v, dtype="float32") for v in all_vecs]
-            else:
-                vecs = []
+            tasks = [self.generate_embeddings(q) for q in expanded_queries]
+            vecs = await asyncio.gather(*tasks)
             all_scores = [self._cosine_similarities(v) for v in vecs]
             # Add HyDE pseudo-doc embeddings to MAX-pool
             for hyde_vec in hyde_embeddings:

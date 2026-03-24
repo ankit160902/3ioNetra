@@ -286,7 +286,7 @@ async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, s
     session.turn_count += 1
 
     msg_lower = query.message.strip().lower()
-    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 3
+    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 2
 
     if streaming:
         engine_fn = companion_engine.process_message_preamble(session, query.message)

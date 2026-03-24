@@ -235,8 +235,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Circuit Breaker Settings
     # ------------------------------------------------------------------
-    CIRCUIT_BREAKER_THRESHOLD: int = 5
-    CIRCUIT_BREAKER_TIMEOUT: int = 60
+    CIRCUIT_BREAKER_THRESHOLD: int = 10
+    CIRCUIT_BREAKER_TIMEOUT: int = 30
 
     # ------------------------------------------------------------------
     # Logging

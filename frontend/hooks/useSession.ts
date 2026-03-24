@@ -269,6 +269,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         let buffer = '';
         let currentEvent = '';
         let doneReceived = false;
+        let errorReceived = false;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -297,7 +298,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
                 }
                 else if (currentEvent === 'token') onToken(data.text);
                 else if (currentEvent === 'done') { doneReceived = true; onDone(data); }
-                else if (currentEvent === 'error') { /* logged; event: done follows with fallback text */ }
+                else if (currentEvent === 'error') { errorReceived = true; }
               } catch {
                 // skip malformed JSON lines
               }
@@ -306,9 +307,9 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
           }
         }
 
-        // Safety net: stream closed without done event
+        // Safety net: stream closed without done event — trigger fallback
         if (!doneReceived) {
-          onError(new Error('Stream ended unexpectedly'));
+          onError(new Error(errorReceived ? 'Server error occurred' : 'Stream ended unexpectedly'));
         }
       } catch (e: any) {
         setError(e.message || 'Stream failed');
