@@ -139,6 +139,9 @@ export function useAuth() {
         return false;
       }
 
+      // Clear stale session from previous user before storing new auth
+      localStorage.removeItem('spiritual_session_id');
+
       // Store auth data
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
