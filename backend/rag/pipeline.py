@@ -584,23 +584,16 @@ class RAGPipeline:
     # ------------------------------------------------------------------
 
     def _load_ml_models(self) -> None:
-        """Load embedding and reranker models once at startup.
+        """Load embedding model at startup. Reranker is lazy-loaded on first use
+        to reduce startup memory (~2.2GB saved until first reranking call).
         Also pre-computes BM25 statistics and sets HuggingFace Hub to offline
         mode to prevent HTTP requests during request handling.
         """
         self._ensure_embedding_model()
-        self._ensure_reranker_model()
+        # Reranker loaded lazily via _ensure_reranker_model() on first search
 
         # Pre-compute BM25 doc stats so first search is instant
         self._precompute_bm25_stats()
-
-        # Pre-warm models with dummy inference to trigger JIT compilation
-        if self._reranker_model is not None:
-            try:
-                self._reranker_model.predict([["warmup query", "warmup passage"]])
-                logger.info("RAGPipeline: reranker pre-warmed")
-            except Exception as e:
-                logger.warning(f"Reranker warmup failed (non-fatal): {e}")
 
         if self._embedding_model is not None:
             try:
