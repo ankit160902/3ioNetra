@@ -81,25 +81,17 @@ import json
 from pymongo import MongoClient
 from datetime import datetime, timezone
 
-# MongoDB Connection — uses environment config, never hardcode credentials
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import settings
-
-def _build_mongo_uri():
-    uri = settings.MONGODB_URI
-    if settings.DATABASE_PASSWORD:
-        uri = uri.replace("<db_password>", settings.DATABASE_PASSWORD)
-    return uri
+# MongoDB Connection
+MONGO_URI = "mongodb+srv://ankit:ozHqxvsmsM5MLFpq@cluster0.zmoledd.mongodb.net/"
+DB_NAME = "spiritual_voice_bot"
 
 def get_db():
     import time
-    mongo_uri = _build_mongo_uri()
     for i in range(3):
         try:
-            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS)
+            client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
             client.admin.command('ping')
-            return client[settings.DATABASE_NAME]
+            return client[DB_NAME]
         except Exception as e:
             print(f"Connection attempt {i+1} failed: {e}")
             if i < 2:

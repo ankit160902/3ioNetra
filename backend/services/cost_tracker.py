@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MODEL_PRICING = {
     # Gemini
     "gemini-2.5-pro": {"input": 0.00125, "output": 0.01},
-    "gemini-2.5-flash": {"input": 0.0001, "output": 0.0004},
+    "gemini-2.0-flash": {"input": 0.0001, "output": 0.0004},
     # Claude
     "claude-sonnet-4-20250514": {"input": 0.003, "output": 0.015},
     "claude-haiku-4-5-20251001": {"input": 0.001, "output": 0.005},

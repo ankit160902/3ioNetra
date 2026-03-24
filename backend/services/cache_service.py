@@ -49,16 +49,33 @@ class CacheService:
         self._enabled = False
         self._l1 = _LRUCache(max_size=200)
         try:
-            from services.redis_pool import get_redis_client
-            self._redis = get_redis_client()
+            import redis.asyncio as aioredis
+            import redis as sync_redis
+            self._redis = aioredis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=1,  # Use DB 1 for cache to separate from sessions
+                password=settings.REDIS_PASSWORD,
+                decode_responses=True,
+                max_connections=20,
+                socket_connect_timeout=3,
+                socket_timeout=5,
+                retry_on_timeout=True,
+            )
+            # Verify connection with a sync ping (same pattern as RedisSessionManager)
+            test_client = sync_redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=1,
+                password=settings.REDIS_PASSWORD,
+                socket_connect_timeout=3,
+            )
+            test_client.ping()
+            test_client.close()
             self._enabled = True
-            logger.info("CacheService initialized (shared Redis pool + L1 LRU)")
+            logger.info("CacheService initialized (Redis DB 1 + L1 LRU)")
         except Exception as e:
             logger.warning(f"CacheService disabled: Redis not available ({e})")
-
-    @property
-    def available(self) -> bool:
-        return self._enabled
 
     def _generate_key(self, prefix: str, **kwargs) -> str:
         """Generate a deterministic cache key from input parameters."""
@@ -111,9 +128,10 @@ class CacheService:
             logger.error(f"Cache set error: {e}")
 
     async def close(self) -> None:
-        """Mark cache as disabled. Pool cleanup is handled centrally."""
+        """Close Redis connection."""
         if self._enabled:
-            logger.info("CacheService disabled.")
+            logger.info("Closing CacheService Redis connection...")
+            await self._redis.close()
             self._enabled = False
 
 _cache_service: Optional[CacheService] = None

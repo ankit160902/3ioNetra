@@ -139,9 +139,6 @@ export function useAuth() {
         return false;
       }
 
-      // Clear stale session from previous user before storing new auth
-      localStorage.removeItem('spiritual_session_id');
-
       // Store auth data
       localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
@@ -223,7 +220,6 @@ export function useAuth() {
   const logout = useCallback(() => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
-    localStorage.removeItem('spiritual_session_id');
     setAuthState({
       user: null,
       token: null,

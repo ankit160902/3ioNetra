@@ -174,11 +174,37 @@ class MongoSessionManager(SessionManager):
 
 class RedisSessionManager(SessionManager):
     def __init__(self, ttl_minutes: int):
-        from services.redis_pool import get_redis_client
-
+        import redis.asyncio as redis
+        
         self._ttl_seconds = ttl_minutes * 60
-        self._redis = get_redis_client()
-        logger.info(f"RedisSessionManager initialized (shared Redis pool, TTL={ttl_minutes}m)")
+        self._redis = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True,
+            max_connections=20,
+            socket_connect_timeout=3,
+            socket_timeout=5,
+            retry_on_timeout=True,
+        )
+        logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m)")
+        
+        # Test connection (sync ping to validate at init time)
+        try:
+            import redis as sync_redis
+            test_client = sync_redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB,
+                password=settings.REDIS_PASSWORD,
+                socket_connect_timeout=3,
+            )
+            test_client.ping()
+            test_client.close()
+        except Exception as e:
+            logger.error(f"❌ Redis connection failed: {e}")
+            raise e
 
     async def create_session(self, min_signals=4, min_turns=3, max_turns=6) -> SessionState:
         session = SessionState(
@@ -243,7 +269,7 @@ def get_session_manager() -> SessionManager:
         ttl = settings.SESSION_TTL_MINUTES
 
         # 1. Try Redis first (High Performance)
-        if settings.REDIS_URL or settings.REDIS_HOST:
+        if settings.REDIS_HOST:
             try:
                 _session_manager = RedisSessionManager(ttl)
                 logger.info("🚀 Using Redis session storage")

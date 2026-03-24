@@ -42,7 +42,7 @@ REPORT_FILE = os.path.join(OUTPUT_DIR, "ab_test_report.md")
 
 DELAY_BETWEEN_CALLS = 2.0  # seconds between Gemini generation calls
 JUDGE_DELAY = 1.0  # seconds between judge calls
-JUDGE_MODEL = "gemini-2.5-flash"
+JUDGE_MODEL = "gemini-2.0-flash"
 
 SCORE_KEYS = [
     "tone_match", "dharmic_integration", "practice_specificity",

@@ -361,34 +361,27 @@ class CompanionEngine:
             if user_id:
                 logger.info(f"💾 Preserving semantic memory anchor for user {user_id} (Reason: significant update)")
                 mem_anchor = analysis.get("summary", message)
-                try:
-                    await self.memory_service.store_memory(user_id, mem_anchor)
-                except Exception as e:
-                    logger.warning(f"Memory storage failed (non-fatal): {e}")
+                await self.memory_service.store_memory(user_id, mem_anchor)
 
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
 
-        # Hard closure detection — takes absolute priority over readiness
-        from llm.service import is_closure_signal
-        _is_closure = intent == IntentType.CLOSURE or is_closure_signal(message)
+        is_direct_ask = analysis.get("needs_direct_answer", False) or \
+                        analysis.get("recommend_products", False) or \
+                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
+                        "Verse Request" in turn_topics or \
+                        "Product Inquiry" in turn_topics or \
+                        "Routine Request" in turn_topics or \
+                        "Puja Guidance" in turn_topics or \
+                        "Diet Plan" in turn_topics
 
-        is_direct_ask = not _is_closure and (
-                        analysis.get("needs_direct_answer", False) or
-                        analysis.get("recommend_products", False) or
-                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or
-                        "Verse Request" in turn_topics or
-                        "Product Inquiry" in turn_topics or
-                        "Routine Request" in turn_topics or
-                        "Puja Guidance" in turn_topics or
-                        "Diet Plan" in turn_topics)
-
-        if _is_closure:
+        current_phase = ConversationPhase.CLARIFICATION
+        if intent == IntentType.CLOSURE:
             current_phase = ConversationPhase.CLOSURE
+
+        if intent == IntentType.CLOSURE:
             is_ready = False
-            logger.info(f"Session {session.session_id}: CLOSURE detected — skipping readiness")
         else:
-            current_phase = ConversationPhase.CLARIFICATION
             is_ready = self._assess_readiness(session) or is_direct_ask
 
         # ------------------------------------------------------------------

@@ -21,12 +21,7 @@ def get_db():
     mongo_uri = _build_mongo_uri()
     for i in range(3):
         try:
-            client = MongoClient(
-                mongo_uri,
-                serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
-                connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
-                socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
-            )
+            client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
             client.admin.command('ping')
             return client[settings.DATABASE_NAME]
         except Exception as e:

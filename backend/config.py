@@ -17,13 +17,13 @@ class Settings(BaseSettings):
     API_VERSION: str = "1.1.3"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
-    DEBUG: bool = False
+    DEBUG: bool = True
 
     # ------------------------------------------------------------------
     # LLM Settings
     # ------------------------------------------------------------------
     GEMINI_MODEL: str = "gemini-2.5-pro"
-    GEMINI_FAST_MODEL: str = "gemini-2.5-flash"  # lightweight model for intent/query expansion
+    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # lightweight model for intent/query expansion
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
@@ -78,8 +78,8 @@ class Settings(BaseSettings):
     CURATED_FLOOR: float = 0.35
     CURATED_RATIO: float = 0.6
     TRADITION_BONUS: float = 0.05
-    SECTION_CHUNKS_ENABLED: bool = Field(default=False, env="SECTION_CHUNKS_ENABLED")
-    SPLADE_ENABLED: bool = Field(default=False, env="SPLADE_ENABLED")
+    SECTION_CHUNKS_ENABLED: bool = Field(default=True, env="SECTION_CHUNKS_ENABLED")
+    SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
@@ -106,7 +106,7 @@ class Settings(BaseSettings):
 
     # HyDE (Hypothetical Document Embedding)
     HYDE_ENABLED: bool = Field(default=True, env="HYDE_ENABLED")
-    HYDE_COUNT: int = Field(default=1, env="HYDE_COUNT")
+    HYDE_COUNT: int = Field(default=2, env="HYDE_COUNT")
     HYDE_CACHE_TTL: int = Field(default=86400, env="HYDE_CACHE_TTL")
 
     # Adaptive Fusion Logging
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
 
     # Long Query Summarization
     LONG_QUERY_SUMMARIZATION_ENABLED: bool = Field(default=True, env="LONG_QUERY_SUMMARIZATION_ENABLED")
-    LONG_QUERY_THRESHOLD: int = Field(default=25, env="LONG_QUERY_THRESHOLD")
+    LONG_QUERY_THRESHOLD: int = Field(default=15, env="LONG_QUERY_THRESHOLD")
 
     # DharmicQueryObject → RAG pre-filtering
     DHARMIC_QUERY_RAG_ENABLED: bool = Field(default=True, env="DHARMIC_QUERY_RAG_ENABLED")
@@ -175,26 +175,20 @@ class Settings(BaseSettings):
     MONGODB_URI: str = Field(default="", env="MONGODB_URI")
     DATABASE_NAME: str = Field(default="", env="DATABASE_NAME")
     DATABASE_PASSWORD: str = Field(default="", env="DATABASE_PASSWORD")
-    MONGO_MAX_POOL_SIZE: int = Field(default=10, env="MONGO_MAX_POOL_SIZE")
-    MONGO_MIN_POOL_SIZE: int = Field(default=1, env="MONGO_MIN_POOL_SIZE")
+    MONGO_MAX_POOL_SIZE: int = Field(default=50, env="MONGO_MAX_POOL_SIZE")
+    MONGO_MIN_POOL_SIZE: int = Field(default=5, env="MONGO_MIN_POOL_SIZE")
     MONGO_MAX_IDLE_TIME_MS: int = Field(default=30000, env="MONGO_MAX_IDLE_TIME_MS")
     MONGO_READ_PREFERENCE: str = Field(default="primaryPreferred", env="MONGO_READ_PREFERENCE")
-    MONGO_SERVER_SELECTION_TIMEOUT_MS: int = Field(default=30000, env="MONGO_SERVER_SELECTION_TIMEOUT_MS")
-    MONGO_CONNECT_TIMEOUT_MS: int = Field(default=20000, env="MONGO_CONNECT_TIMEOUT_MS")
-    MONGO_SOCKET_TIMEOUT_MS: int = Field(default=20000, env="MONGO_SOCKET_TIMEOUT_MS")
     ENABLE_AUTO_MIGRATIONS: bool = Field(default=True, env="ENABLE_AUTO_MIGRATIONS")
     MAX_CONVERSATIONS_PER_USER: int = Field(default=100, env="MAX_CONVERSATIONS_PER_USER")
 
     # ------------------------------------------------------------------
     # Redis Settings
     # ------------------------------------------------------------------
-    REDIS_URL: Optional[str] = Field(default=None, env="REDIS_URL")
     REDIS_HOST: str = Field(default="localhost", env="REDIS_HOST")
     REDIS_PORT: int = Field(default=6379, env="REDIS_PORT")
     REDIS_DB: int = Field(default=0, env="REDIS_DB")
-    CACHE_REDIS_DB: int = Field(default=0, env="CACHE_REDIS_DB")
     REDIS_PASSWORD: Optional[str] = Field(default=None, env="REDIS_PASSWORD")
-    REDIS_MAX_CONNECTIONS: int = Field(default=15, env="REDIS_MAX_CONNECTIONS")
 
     # ------------------------------------------------------------------
     # External API Keys
@@ -211,7 +205,7 @@ class Settings(BaseSettings):
     EVAL_GEMINI_MODEL: str = "gemini-2.5-pro"
     EVAL_CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
     EVAL_OPENAI_MODEL: str = "gpt-4o"
-    EVAL_GEMINI_FAST_MODEL: str = "gemini-2.5-flash"
+    EVAL_GEMINI_FAST_MODEL: str = "gemini-2.0-flash"
     EVAL_CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
     EVAL_OPENAI_MINI_MODEL: str = "gpt-4o-mini"
 
@@ -227,7 +221,7 @@ class Settings(BaseSettings):
     # Model Routing Settings
     # ------------------------------------------------------------------
     MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
-    MODEL_ECONOMY: str = "gemini-2.5-flash"
+    MODEL_ECONOMY: str = "gemini-2.0-flash"
     MODEL_STANDARD: str = "gemini-2.5-pro"
     MODEL_PREMIUM: str = "gemini-2.5-pro"
     MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")
@@ -235,8 +229,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Circuit Breaker Settings
     # ------------------------------------------------------------------
-    CIRCUIT_BREAKER_THRESHOLD: int = 10
-    CIRCUIT_BREAKER_TIMEOUT: int = 30
+    CIRCUIT_BREAKER_THRESHOLD: int = 5
+    CIRCUIT_BREAKER_TIMEOUT: int = 60
 
     # ------------------------------------------------------------------
     # Logging

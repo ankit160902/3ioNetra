@@ -560,22 +560,23 @@ class LLMService:
                 profile_parts.append(f"   • Spiritual interests: {', '.join(user_profile.get('spiritual_interests', []))}")
                 has_data = True
 
-            # Extended spiritual profile — always include for personalization
-            if user_profile.get('rashi'):
-                profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
-                has_data = True
-            if user_profile.get('gotra'):
-                profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
-                has_data = True
-            if user_profile.get('nakshatra'):
-                profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
-                has_data = True
+            # Extended spiritual profile — only include when topic is spiritual or in guidance
+            if is_spiritual_topic or is_guidance_phase:
+                if user_profile.get('rashi'):
+                    profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
+                    has_data = True
+                if user_profile.get('gotra'):
+                    profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
+                    has_data = True
+                if user_profile.get('nakshatra'):
+                    profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
+                    has_data = True
             if user_profile.get('temple_visits'):
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
                 has_data = True
 
-            # Current Panchang — always include so companion can weave naturally
-            if user_profile.get('current_panchang'):
+            # Current Panchang — only include when topic is spiritual or in guidance phase
+            if user_profile.get('current_panchang') and (is_spiritual_topic or is_guidance_phase):
                 p = user_profile['current_panchang']
                 panchang_lines = ["   • CURRENT PANCHANG (Today):"]
 
@@ -719,20 +720,6 @@ class LLMService:
         
         # Phase-specific instructions
         phase_instructions = self._get_phase_instructions(phase)
-
-        # Build anti-repetition context from previous assistant responses
-        previous_suggestions_text = ""
-        if phase in (ConversationPhase.GUIDANCE,) and conversation_history:
-            prev_assistant_msgs = [
-                m["content"][:150] for m in conversation_history
-                if m.get("role") == "assistant" and len(m.get("content", "")) > 30
-            ]
-            if prev_assistant_msgs:
-                lines = [f"--- YOU ALREADY SAID THESE (DO NOT REPEAT THE SAME PRACTICE/MANTRA/VERSE) ---"]
-                for i, s in enumerate(prev_assistant_msgs[-3:], 1):
-                    lines.append(f"{i}. \"{s}...\"")
-                lines.append("VARY your approach: different practice, different timing, different scripture, or ask a question instead.")
-                previous_suggestions_text = "\n".join(lines)
         
         # Format scripture context from RAG if available
         scripture_context = ""
@@ -882,8 +869,6 @@ User's CURRENT message:
 YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 ═══════════════════════════════════════════════════════════
 {phase_instructions}
-
-{previous_suggestions_text}
 
 {scripture_context}
 
@@ -1297,9 +1282,9 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
         """Quick generation using the flash model for internal tasks (summaries, etc.)."""
         try:
             from google import genai
-            client = genai.Client(api_key=self.api_key)
+            client = genai.Client()
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt,
             )
             return response.text.strip() if response.text else ""

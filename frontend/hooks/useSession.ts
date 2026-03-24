@@ -230,9 +230,6 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setIsLoading(true);
       setError(null);
 
-      const controller = new AbortController();
-      let timeout: ReturnType<typeof setTimeout> | null = null;
-
       try {
         let sessionId = session.sessionId;
         if (!sessionId) {
@@ -249,17 +246,13 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
           ...authHeader,
         };
 
-        timeout = setTimeout(() => controller.abort(), 180000);
-
         const res = await fetch(`${API_URL}/api/conversation/stream`, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
-          signal: controller.signal,
         });
 
         if (!res.ok) {
-          clearTimeout(timeout);
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || 'Stream request failed');
         }
@@ -268,14 +261,10 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         const decoder = new TextDecoder();
         let buffer = '';
         let currentEvent = '';
-        let doneReceived = false;
-        let errorReceived = false;
 
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          clearTimeout(timeout);
-          timeout = setTimeout(() => controller.abort(), 120000);
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split('\n');
           buffer = lines.pop() || '';
@@ -286,19 +275,10 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
             } else if (line.startsWith('data: ') && currentEvent) {
               try {
                 const data = JSON.parse(line.slice(6));
-                if (currentEvent === 'metadata') {
-                  setSession(prev => ({
-                    ...prev,
-                    sessionId: data.session_id || prev.sessionId,
-                    phase: data.phase || prev.phase,
-                    turnCount: data.turn_count ?? prev.turnCount,
-                    signalsCollected: data.signals_collected || prev.signalsCollected,
-                  }));
-                  onMetadata(data);
-                }
+                if (currentEvent === 'metadata') onMetadata(data);
                 else if (currentEvent === 'token') onToken(data.text);
-                else if (currentEvent === 'done') { doneReceived = true; onDone(data); }
-                else if (currentEvent === 'error') { errorReceived = true; }
+                else if (currentEvent === 'done') onDone(data);
+                else if (currentEvent === 'error') onError(new Error(data.message));
               } catch {
                 // skip malformed JSON lines
               }
@@ -306,16 +286,10 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
             }
           }
         }
-
-        // Safety net: stream closed without done event — trigger fallback
-        if (!doneReceived) {
-          onError(new Error(errorReceived ? 'Server error occurred' : 'Stream ended unexpectedly'));
-        }
       } catch (e: any) {
         setError(e.message || 'Stream failed');
         onError(e);
       } finally {
-        if (timeout) clearTimeout(timeout);
         setIsLoading(false);
       }
     },

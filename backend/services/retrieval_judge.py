@@ -233,23 +233,18 @@ class RetrievalJudge:
         if emotion in self._COMPLEX_EMOTIONS:
             return "complex"
 
-        # Positive emotions don't need decomposed retrieval
-        _SIMPLE_EMOTIONS = {"joy", "gratitude", "hope", "contentment", "peace", "happiness", "calm", "love"}
-        if emotion in _SIMPLE_EMOTIONS:
-            return "simple"
-
         query_lower = query.lower()
         words = query_lower.split()
         word_count = len(words)
 
-        # Long queries (>30 words) are always complex — catches emotional dumps
+        # Long queries (>20 words) are always complex — catches emotional dumps
         # that embed multiple concepts the embedding model can't handle in one shot.
-        # Enriched queries (with | separators) are long but NOT complex.
-        if word_count > 30 and ' | ' not in query:
+        # Must be checked BEFORE needs_direct_answer to catch verbose emotional venting.
+        if word_count > 20:
             return "complex"
 
-        # Medium-length queries (25-30 words) with emotional or guidance intent — complex
-        if word_count > 25 and ' | ' not in query and intent_str in {"SEEKING_GUIDANCE", "ASKING_INFO", "EXPRESSING_EMOTION"}:
+        # Medium-length queries (15-20 words) with emotional or guidance intent — complex
+        if word_count > 15 and intent_str in {"SEEKING_GUIDANCE", "ASKING_INFO", "EXPRESSING_EMOTION"}:
             return "complex"
 
         # Emotional sharing without needing direct answer — simple

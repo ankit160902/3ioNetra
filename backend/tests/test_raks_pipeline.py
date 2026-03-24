@@ -479,7 +479,7 @@ class TestPhase2SectionChunks:
     """Item 2.6: L1 Section Chunks"""
 
     def test_config_setting(self):
-        assert hasattr(settings, 'SECTION_CHUNKS_ENABLED')
+        assert settings.SECTION_CHUNKS_ENABLED is True
 
     def test_script_exists(self):
         assert (Path(__file__).parent.parent / 'scripts' / 'generate_section_chunks.py').exists()
@@ -515,7 +515,7 @@ class TestPhase3SPLADE:
 
     def test_config_settings(self):
         assert hasattr(settings, 'SPLADE_ENABLED')
-        assert isinstance(settings.SPLADE_ENABLED, bool)
+        assert settings.SPLADE_ENABLED is True  # Enabled (index built)
         assert settings.SPLADE_MODEL == "naver/splade-cocondenser-ensembledistil"
 
     def test_script_exists(self):

@@ -1,9 +1,6 @@
 import asyncio
-import logging
 
 from fastapi import APIRouter, HTTPException, Header, Depends, status
-
-logger = logging.getLogger(__name__)
 from typing import Optional, Dict
 from models.api_schemas import UserRegisterRequest, UserLoginRequest, AuthResponse, UserResponse
 from services.auth_service import get_auth_service
@@ -69,10 +66,9 @@ async def register_user(request: UserRegisterRequest):
             detail=str(e)
         )
     except Exception as e:
-        logger.error(f"Registration failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed. Please try again later."
+            detail=f"Registration failed: {str(e)}"
         )
 
 @router.post("/login", response_model=AuthResponse)
@@ -95,10 +91,9 @@ async def login_user(request: UserLoginRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Login failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Login failed. Please try again later."
+            detail=f"Login failed: {str(e)}"
         )
 
 @router.get("/verify", response_model=UserResponse)

@@ -54,11 +54,10 @@ def get_mongo_client():
         # Connection with explicit pool sizing for production workloads
         _mongo_client = MongoClient(
             mongo_uri,
-            serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,
-            connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,
-            socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
             retryWrites=True,
-            retryReads=True,
             maxPoolSize=settings.MONGO_MAX_POOL_SIZE,
             minPoolSize=settings.MONGO_MIN_POOL_SIZE,
             maxIdleTimeMS=settings.MONGO_MAX_IDLE_TIME_MS,
@@ -438,8 +437,14 @@ class ConversationStorage:
 
     def __init__(self):
         self.db = get_mongo_client()
-        from services.redis_pool import get_redis_client
-        self._redis = get_redis_client()
+        import redis.asyncio as aioredis
+        self._redis = aioredis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            db=settings.REDIS_DB,
+            password=settings.REDIS_PASSWORD,
+            decode_responses=True
+        )
 
     async def save_conversation(
         self,

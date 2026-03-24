@@ -38,10 +38,10 @@ class ResponseComposer:
                 pass
         return self._embedding_model
 
-    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str, user_id: str = "") -> str:
-        """Build a deterministic cache key from query semantics + context + user_id."""
+    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str) -> str:
+        """Build a deterministic cache key from query semantics + context."""
         phase_val = phase.value if phase else "unknown"
-        key_str = f"{user_id}|{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
+        key_str = f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
     async def _check_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory) -> Optional[str]:
@@ -51,10 +51,9 @@ class ResponseComposer:
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
-        user_id = getattr(memory, 'user_id', '') or ''
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain, user_id=user_id)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
         cached = await cache.get("response_semantic", key=cache_key)
         if cached and isinstance(cached, dict):
             logger.info(f"Response cache HIT for query='{query[:40]}' (exact key match)")
@@ -71,10 +70,9 @@ class ResponseComposer:
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
-        user_id = getattr(memory, 'user_id', '') or ''
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain, user_id=user_id)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
         await cache.set(
             "response_semantic",
             {"response": response, "query": query},
@@ -215,12 +213,9 @@ class ResponseComposer:
             ):
                 full_response_parts.append(chunk)
                 yield chunk
-            # Cache the full response after streaming completes (non-fatal)
+            # Cache the full response after streaming completes
             full_response = "".join(full_response_parts)
-            try:
-                await self._store_response_cache(llm_query, phase, memory, full_response)
-            except Exception as e:
-                logger.warning(f"Response cache store failed (non-fatal): {e}")
+            await self._store_response_cache(llm_query, phase, memory, full_response)
         else:
             yield self._compose_fallback(dharmic_query)
 

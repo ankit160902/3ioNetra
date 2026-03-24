@@ -95,15 +95,10 @@ class IntentAgent:
     # ── Fast-path constants ──
     _GREETING_SET = frozenset({
         "hi", "hey", "hello", "namaste", "pranam", "hii", "hiii",
-        "hi there", "hey there", "hello there", "good morning", "good evening",
-        "good afternoon", "sup", "yo", "hola", "jai shri ram", "jai shree ram",
-        "har har mahadev", "om namah shivaya", "radhe radhe", "hare krishna",
     })
     _CLOSURE_SET = frozenset({
-        "thank you", "thanks", "thanks ?", "thanks?", "thanks!", "thanks.",
-        "bye", "goodbye", "ok bye", "dhanyavaad", "shukriya",
+        "thank you", "thanks", "bye", "goodbye", "ok bye", "dhanyavaad", "shukriya",
         "alvida", "ok thanks", "thanks bye", "good bye", "ok thank you",
-        "that's it", "that is all", "nothing else", "i'm done", "im done",
     })
     _PANCHANG_KEYWORDS = ("panchang", "tithi", "nakshatra", "muhurat")
     _INFO_PREFIXES = ("what is ", "what are ", "tell me about ", "who is ", "explain ")
@@ -189,7 +184,7 @@ class IntentAgent:
         prompt = self.INTENT_PROMPT.format(message=message, context=context_summary)
 
         try:
-            # Use fast model for classification (~1s vs 2.5-pro: ~7s)
+            # Use fast model for classification (gemini-2.0-flash: ~1s vs 2.5-pro: ~7s)
             def _sync_call():
                 return self.llm.client.models.generate_content(
                     model=settings.GEMINI_FAST_MODEL,

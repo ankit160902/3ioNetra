@@ -471,17 +471,17 @@ async def test_code_config_inspection():
     t0 = time.time()
     try:
         from config import settings
-        assert settings.GEMINI_FAST_MODEL == "gemini-2.5-flash", (
-            f"Expected 'gemini-2.5-flash', got '{settings.GEMINI_FAST_MODEL}'"
+        assert settings.GEMINI_FAST_MODEL == "gemini-2.0-flash", (
+            f"Expected 'gemini-2.0-flash', got '{settings.GEMINI_FAST_MODEL}'"
         )
         intent_src = (BACKEND_ROOT / "services" / "intent_agent.py").read_text()
         assert "GEMINI_FAST_MODEL" in intent_src, "GEMINI_FAST_MODEL not found in intent_agent.py"
-        r("LLM-07", "GEMINI_FAST_MODEL config = 'gemini-2.5-flash' and used in intent_agent",
+        r("LLM-07", "GEMINI_FAST_MODEL config = 'gemini-2.0-flash' and used in intent_agent",
           "P1", "PASS",
-          f"settings.GEMINI_FAST_MODEL='gemini-2.5-flash', referenced in intent_agent.py",
+          f"settings.GEMINI_FAST_MODEL='gemini-2.0-flash', referenced in intent_agent.py",
           int((time.time() - t0) * 1000))
     except Exception as e:
-        r("LLM-07", "GEMINI_FAST_MODEL config = 'gemini-2.5-flash' and used in intent_agent",
+        r("LLM-07", "GEMINI_FAST_MODEL config = 'gemini-2.0-flash' and used in intent_agent",
           "P1", "FAIL", str(e), int((time.time() - t0) * 1000))
 
     # LLM-08: IntentAgent _fallback_analysis functional test

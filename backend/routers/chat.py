@@ -187,7 +187,7 @@ async def text_query(query: TextQuery):
         return TextResponse(**result)
     except Exception as e:
         logger.error(f"Error in text query: {e}")
-        raise HTTPException(status_code=500, detail="Text query failed. Please try again later.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ----------------------------------------------------------------------------
 # CONVERSATION SESSION ENDPOINTS
@@ -213,7 +213,7 @@ async def create_session():
         )
     except Exception as e:
         logger.error(f"Error creating session: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create session. Please try again later.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/session/{session_id}", response_model=SessionStateResponse)
 async def get_session_state(session_id: str):
@@ -234,8 +234,7 @@ async def get_session_state(session_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error fetching session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to fetch session. Please try again later.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.delete("/session/{session_id}")
 async def delete_session(session_id: str):
@@ -286,7 +285,7 @@ async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, s
     session.turn_count += 1
 
     msg_lower = query.message.strip().lower()
-    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 2
+    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 3
 
     if streaming:
         engine_fn = companion_engine.process_message_preamble(session, query.message)
@@ -532,29 +531,10 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     yield f"event: token\ndata: {json.dumps({'text': fallback_text})}\n\n"
 
             full_text = "".join(full_text_parts)
-            if not full_text.strip():
-                full_text = "I'm here with you. Could you share a little more about what's on your mind?"
-                logger.warning("Empty response from LLM — using fallback text")
-
-            try:
-                cleaned_text = clean_response(full_text)
-            except Exception as e:
-                logger.warning(f"clean_response failed, using raw text: {e}")
-                cleaned_text = full_text
-
-            try:
-                final_text = await asyncio.wait_for(
-                    _postprocess_and_save(
-                        cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
-                    ),
-                    timeout=10.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning("_postprocess_and_save timed out after 10s — using cleaned text")
-                final_text = cleaned_text
-            except Exception as e:
-                logger.exception(f"_postprocess_and_save failed: {e}")
-                final_text = cleaned_text
+            cleaned_text = clean_response(full_text)
+            final_text = await _postprocess_and_save(
+                cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+            )
 
             flow_meta = {
                 "detected_domain": session.memory.story.life_area,
@@ -567,8 +547,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
 
         except Exception as e:
             logger.exception(f"Error in SSE stream: {e}")
-            yield f"event: error\ndata: {json.dumps({'message': 'Something went wrong. Please try again.'})}\n\n"
-            yield f"event: done\ndata: {json.dumps({'full_response': 'Something went wrong. Please try again.', 'recommended_products': [], 'flow_metadata': {}})}\n\n"
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -616,7 +595,7 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
         raise
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save feedback. Please try again later.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ----------------------------------------------------------------------------
 # USER HISTORY ENDPOINTS
@@ -726,4 +705,4 @@ async def delete_conversation(conversation_id: str, user: dict = Depends(get_cur
         raise
     except Exception as e:
         logger.error(f"Error deleting conversation: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete conversation. Please try again later.")
+        raise HTTPException(status_code=500, detail=str(e))
