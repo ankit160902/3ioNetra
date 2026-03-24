@@ -532,6 +532,9 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     yield f"event: token\ndata: {json.dumps({'text': fallback_text})}\n\n"
 
             full_text = "".join(full_text_parts)
+            if not full_text.strip():
+                full_text = "I'm here with you. Could you share a little more about what's on your mind?"
+                logger.warning("Empty response from LLM — using fallback text")
 
             try:
                 cleaned_text = clean_response(full_text)
@@ -540,9 +543,15 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                 cleaned_text = full_text
 
             try:
-                final_text = await _postprocess_and_save(
-                    cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+                final_text = await asyncio.wait_for(
+                    _postprocess_and_save(
+                        cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+                    ),
+                    timeout=10.0
                 )
+            except asyncio.TimeoutError:
+                logger.warning("_postprocess_and_save timed out after 10s — using cleaned text")
+                final_text = cleaned_text
             except Exception as e:
                 logger.exception(f"_postprocess_and_save failed: {e}")
                 final_text = cleaned_text
