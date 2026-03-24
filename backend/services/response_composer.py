@@ -38,10 +38,10 @@ class ResponseComposer:
                 pass
         return self._embedding_model
 
-    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str) -> str:
-        """Build a deterministic cache key from query semantics + context."""
+    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str, user_id: str = "") -> str:
+        """Build a deterministic cache key from query semantics + context + user_id."""
         phase_val = phase.value if phase else "unknown"
-        key_str = f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
+        key_str = f"{user_id}|{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
     async def _check_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory) -> Optional[str]:
@@ -51,9 +51,10 @@ class ResponseComposer:
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
+        user_id = getattr(memory, 'user_id', '') or ''
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, user_id=user_id)
         cached = await cache.get("response_semantic", key=cache_key)
         if cached and isinstance(cached, dict):
             logger.info(f"Response cache HIT for query='{query[:40]}' (exact key match)")
@@ -70,9 +71,10 @@ class ResponseComposer:
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
+        user_id = getattr(memory, 'user_id', '') or ''
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, user_id=user_id)
         await cache.set(
             "response_semantic",
             {"response": response, "query": query},

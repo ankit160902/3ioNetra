@@ -220,6 +220,7 @@ export function useAuth() {
   const logout = useCallback(() => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
+    localStorage.removeItem('spiritual_session_id');
     setAuthState({
       user: null,
       token: null,
