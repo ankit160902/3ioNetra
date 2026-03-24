@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # LLM Settings
     # ------------------------------------------------------------------
     GEMINI_MODEL: str = "gemini-2.5-pro"
-    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # lightweight model for intent/query expansion
+    GEMINI_FAST_MODEL: str = "gemini-2.5-flash"  # lightweight model for intent/query expansion
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
@@ -205,7 +205,7 @@ class Settings(BaseSettings):
     EVAL_GEMINI_MODEL: str = "gemini-2.5-pro"
     EVAL_CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
     EVAL_OPENAI_MODEL: str = "gpt-4o"
-    EVAL_GEMINI_FAST_MODEL: str = "gemini-2.0-flash"
+    EVAL_GEMINI_FAST_MODEL: str = "gemini-2.5-flash"
     EVAL_CLAUDE_HAIKU_MODEL: str = "claude-haiku-4-5-20251001"
     EVAL_OPENAI_MINI_MODEL: str = "gpt-4o-mini"
 
@@ -221,7 +221,7 @@ class Settings(BaseSettings):
     # Model Routing Settings
     # ------------------------------------------------------------------
     MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
-    MODEL_ECONOMY: str = "gemini-2.0-flash"
+    MODEL_ECONOMY: str = "gemini-2.5-flash"
     MODEL_STANDARD: str = "gemini-2.5-pro"
     MODEL_PREMIUM: str = "gemini-2.5-pro"
     MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")

@@ -1282,9 +1282,9 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
         """Quick generation using the flash model for internal tasks (summaries, etc.)."""
         try:
             from google import genai
-            client = genai.Client()
+            client = genai.Client(api_key=self.api_key)
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
+                model=settings.GEMINI_FAST_MODEL,
                 contents=prompt,
             )
             return response.text.strip() if response.text else ""

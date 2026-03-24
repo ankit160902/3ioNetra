@@ -54,7 +54,7 @@ class CacheService:
             self._redis = aioredis.Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
-                db=1,  # Use DB 1 for cache to separate from sessions
+                db=settings.REDIS_DB,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
                 max_connections=20,
@@ -66,14 +66,14 @@ class CacheService:
             test_client = sync_redis.Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,
-                db=1,
+                db=settings.REDIS_DB,
                 password=settings.REDIS_PASSWORD,
                 socket_connect_timeout=3,
             )
             test_client.ping()
             test_client.close()
             self._enabled = True
-            logger.info("CacheService initialized (Redis DB 1 + L1 LRU)")
+            logger.info(f"CacheService initialized (Redis DB {settings.REDIS_DB} + L1 LRU)")
         except Exception as e:
             logger.warning(f"CacheService disabled: Redis not available ({e})")
 
