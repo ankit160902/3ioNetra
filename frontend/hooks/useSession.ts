@@ -249,7 +249,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
           ...authHeader,
         };
 
-        timeout = setTimeout(() => controller.abort(), 60000);
+        timeout = setTimeout(() => controller.abort(), 180000);
 
         const res = await fetch(`${API_URL}/api/conversation/stream`, {
           method: 'POST',
