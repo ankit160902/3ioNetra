@@ -95,6 +95,9 @@ class IntentAgent:
     # ── Fast-path constants ──
     _GREETING_SET = frozenset({
         "hi", "hey", "hello", "namaste", "pranam", "hii", "hiii",
+        "hi there", "hey there", "hello there", "good morning", "good evening",
+        "good afternoon", "sup", "yo", "hola", "jai shri ram", "jai shree ram",
+        "har har mahadev", "om namah shivaya", "radhe radhe", "hare krishna",
     })
     _CLOSURE_SET = frozenset({
         "thank you", "thanks", "thanks ?", "thanks?", "thanks!", "thanks.",

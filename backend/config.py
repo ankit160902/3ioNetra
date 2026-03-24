@@ -106,7 +106,7 @@ class Settings(BaseSettings):
 
     # HyDE (Hypothetical Document Embedding)
     HYDE_ENABLED: bool = Field(default=True, env="HYDE_ENABLED")
-    HYDE_COUNT: int = Field(default=2, env="HYDE_COUNT")
+    HYDE_COUNT: int = Field(default=1, env="HYDE_COUNT")
     HYDE_CACHE_TTL: int = Field(default=86400, env="HYDE_CACHE_TTL")
 
     # Adaptive Fusion Logging
@@ -118,7 +118,7 @@ class Settings(BaseSettings):
 
     # Long Query Summarization
     LONG_QUERY_SUMMARIZATION_ENABLED: bool = Field(default=True, env="LONG_QUERY_SUMMARIZATION_ENABLED")
-    LONG_QUERY_THRESHOLD: int = Field(default=15, env="LONG_QUERY_THRESHOLD")
+    LONG_QUERY_THRESHOLD: int = Field(default=25, env="LONG_QUERY_THRESHOLD")
 
     # DharmicQueryObject → RAG pre-filtering
     DHARMIC_QUERY_RAG_ENABLED: bool = Field(default=True, env="DHARMIC_QUERY_RAG_ENABLED")

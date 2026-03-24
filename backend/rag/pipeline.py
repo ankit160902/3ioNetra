@@ -961,7 +961,10 @@ Respond ONLY with 2 terms, separated by a newline."""
         if not self._llm.available:
             return False
         # Skip trivial/single-word queries
-        if query.strip().lower() in self._SKIP_EXPANSION or len(query.split()) < 2:
+        if query.strip().lower() in self._SKIP_EXPANSION or len(query.split()) <= 5:
+            return False
+        # Skip enriched queries (already contain memory context via pipe separators)
+        if ' | ' in query:
             return False
         # Skip intents where HyDE adds no value
         skip_intents = {
@@ -1540,6 +1543,7 @@ Respond ONLY with 2 terms, separated by a newline."""
         _has_precomputed_variants = bool(query_variants)
         needs_expansion = (
             not _has_precomputed_variants
+            and ' | ' not in query  # Skip for enriched queries (already multi-faceted)
             and (len(query.split()) < 4 or self._contains_sanskrit_term(query))
             and query.strip().lower() not in self._SKIP_EXPANSION
             and self._llm.available
@@ -1618,14 +1622,25 @@ Respond ONLY with 2 terms, separated by a newline."""
         if 'hyde' in _result_map and not isinstance(_result_map['hyde'], Exception):
             hyde_embeddings = _result_map['hyde'] or []
 
-        # Parallel Execution: Embeddings for all expansions + HyDE
+        # Batch Execution: All query embeddings in single model.encode() call
         async def get_all_semantic_scores():
-            tasks = [self.generate_embeddings(q) for q in expanded_queries]
-            vecs = await asyncio.gather(*tasks)
+            if expanded_queries:
+                self._ensure_embedding_model()
+                prefix = "query: " if self._needs_instruction_prefix() else ""
+                texts = [prefix + q.strip().replace("\n", " ") for q in expanded_queries]
+                all_vecs = await asyncio.to_thread(
+                    self._embedding_model.encode, texts,
+                    convert_to_tensor=False, show_progress_bar=False, batch_size=len(texts)
+                )
+                vecs = [np.asarray(v, dtype="float32") for v in all_vecs]
+            else:
+                vecs = []
             all_scores = [self._cosine_similarities(v) for v in vecs]
             # Add HyDE pseudo-doc embeddings to MAX-pool
             for hyde_vec in hyde_embeddings:
                 all_scores.append(self._cosine_similarities(hyde_vec))
+            if not all_scores:
+                return np.zeros(len(self._verse_metadata), dtype="float32")
             return np.max(np.array(all_scores), axis=0)
 
         # 3. Hybrid Search (Parallel EXECUTION)
