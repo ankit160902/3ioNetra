@@ -1,0 +1,92 @@
+# This file tells gcloud what to exclude when uploading source.
+# Without it, gcloud falls back to .gitignore which excludes models/ —
+# but models/ contains Python source files (session.py, api_schemas.py, etc.)
+# that are required at runtime.
+
+# Python bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+venv/
+env/
+ENV/
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Documentation
+*.md
+docs/
+
+# Tests
+tests/
+test_*.py
+*_test.py
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# Docker (keep Dockerfile for Cloud Build)
+docker-compose*.yml
+.dockerignore
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache
+.pytest_cache
+
+# ML model weights (downloaded at build time via scripts/download_models.py)
+# Do NOT exclude models/ itself — it contains Python source files
+models/embeddings/
+models/reranker/
+models/splade/
+models/cross-encoder/
+models/sentence-transformers/
+ml_models/
+*.pth
+*.bin
+*.h5
+*.pkl
+*.onnx
+
+# Data — include only processed
+data/raw/
+data/qdrant_storage/
+data/vector_db/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Playwright / E2E
+playwright-report/
+e2e/

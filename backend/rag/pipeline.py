@@ -719,6 +719,10 @@ class RAGPipeline:
         self._load_model("_embedding_model", SentenceTransformer, "embeddings", settings.EMBEDDING_MODEL, "embedding model")
 
     def _ensure_reranker_model(self) -> None:
+        # Skip reranker entirely when RERANKER_ENABLED=false (saves ~1.1 GB)
+        if os.environ.get("RERANKER_ENABLED", "true").lower() == "false":
+            self._reranker_model = None
+            return
         from sentence_transformers import CrossEncoder
         self._load_model("_reranker_model", CrossEncoder, "reranker", settings.RERANKER_MODEL, "re-ranker")
 
@@ -1513,7 +1517,8 @@ Respond ONLY with 2 terms, separated by a newline."""
         # Use pre-computed variants from IntentAgent if available (saves a Gemini Flash round-trip)
         _has_precomputed_variants = bool(query_variants)
         needs_expansion = (
-            not _has_precomputed_variants
+            settings.QUERY_EXPANSION_ENABLED
+            and not _has_precomputed_variants
             and (len(query.split()) < 4 or self._contains_sanskrit_term(query))
             and query.strip().lower() not in self._SKIP_EXPANSION
             and self._llm.available

@@ -285,7 +285,7 @@ async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, s
     session.turn_count += 1
 
     msg_lower = query.message.strip().lower()
-    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 3
+    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 10
 
     if streaming:
         engine_fn = companion_engine.process_message_preamble(session, query.message)
@@ -346,7 +346,7 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     companion_engine.record_suggestion(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
-    await session_manager.update_session(session)
+    asyncio.create_task(session_manager.update_session(session))  # Non-blocking — client gets response immediately
     return final_text
 
 

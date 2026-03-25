@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     GEMINI_MODEL: str = "gemini-2.5-pro"
     GEMINI_FAST_MODEL: str = "gemini-2.5-flash"  # lightweight model for intent/query expansion
+    GEMINI_CACHE_TTL: int = Field(default=21600, env="GEMINI_CACHE_TTL")  # 6 hours — context caching for system instruction
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
@@ -119,6 +120,9 @@ class Settings(BaseSettings):
     # Long Query Summarization
     LONG_QUERY_SUMMARIZATION_ENABLED: bool = Field(default=True, env="LONG_QUERY_SUMMARIZATION_ENABLED")
     LONG_QUERY_THRESHOLD: int = Field(default=15, env="LONG_QUERY_THRESHOLD")
+
+    # Query Expansion — LLM-based expansion for short queries (adds ~800ms latency)
+    QUERY_EXPANSION_ENABLED: bool = Field(default=True, env="QUERY_EXPANSION_ENABLED")
 
     # DharmicQueryObject → RAG pre-filtering
     DHARMIC_QUERY_RAG_ENABLED: bool = Field(default=True, env="DHARMIC_QUERY_RAG_ENABLED")

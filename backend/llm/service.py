@@ -236,7 +236,10 @@ class LLMService:
             'spiritual_mitra',
             'system_instruction'
         )
-        
+        # Compact version for listening phase — strips domain compass, practice details, examples
+        # to reduce token count (~3000 → ~1300) for faster Gemini responses
+        self._compact_system_instruction = self._build_compact_instruction(self.system_instruction)
+
         # Initialize Circuit Breaker for Gemini API
         self.circuit_breaker = CircuitBreaker(
             name="GeminiAPI",
@@ -257,11 +260,38 @@ class LLMService:
 
             self.client = genai.Client(api_key=self.api_key)
             self.available = True
+            self._gemini_caches = {}  # {cache_key: cache_name}
             logger.info("✅ LLM Service initialized with Gemini")
 
         except Exception:
             self.available = False
             logger.exception("❌ Failed to initialize Gemini")
+
+    # --------------------------------------------------
+    # Gemini Context Caching
+    # --------------------------------------------------
+
+    def _get_or_create_cache(self, model: str, system_instruction: str, phase_key: str) -> Optional[str]:
+        """Get or create a Gemini cached content for the system instruction.
+        Returns cache name string or None if caching fails."""
+        cache_key = f"{model}:{phase_key}"
+        if cache_key in self._gemini_caches:
+            return self._gemini_caches[cache_key]
+        try:
+            from google.genai import types
+            cache = self.client.caches.create(
+                model=model,
+                config=types.CreateCachedContentConfig(
+                    system_instruction=system_instruction,
+                    ttl=f"{settings.GEMINI_CACHE_TTL}s",
+                ),
+            )
+            self._gemini_caches[cache_key] = cache.name
+            logger.info(f"Gemini cache created: {cache_key} → {cache.name}")
+            return cache.name
+        except Exception as e:
+            logger.warning(f"Gemini cache creation failed (non-fatal, using inline): {e}")
+            return None
 
     # --------------------------------------------------
     # OCR & Multimodal
@@ -476,8 +506,8 @@ class LLMService:
         """Build the Gemini generation config dict."""
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
-            "thinking_config": {"thinking_budget": 256},
-            "max_output_tokens": settings.RESPONSE_MAX_TOKENS,
+            "thinking_config": {"thinking_budget": 0},
+            "max_output_tokens": 300,
             "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
@@ -486,12 +516,47 @@ class LLMService:
                 {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_ONLY_HIGH"},
             ],
         }
-        gen_config["system_instruction"] = self.system_instruction
+        phase = gen_config.pop("_phase", None)
+        model = gen_config.pop("_model", settings.GEMINI_MODEL)
+        sys_instruction = self._get_system_instruction(phase)
+        phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
+
+        # Try Gemini context caching — avoids re-processing system instruction each call
+        cache_name = self._get_or_create_cache(model, sys_instruction, phase_key) if hasattr(self, '_gemini_caches') else None
+        if cache_name:
+            gen_config["cached_content"] = cache_name
+            # Don't send system_instruction when using cache
+        else:
+            gen_config["system_instruction"] = sys_instruction
         return gen_config
 
     # --------------------------------------------------
     # Prompt Building
     # --------------------------------------------------
+
+    @staticmethod
+    def _build_compact_instruction(full_instruction: str) -> str:
+        """Strip domain compass & reference sections for listening phase (saves ~1700 tokens)."""
+        lines = full_instruction.split('\n')
+        compact, skip = [], False
+        for line in lines:
+            if any(marker in line for marker in [
+                'DOMAIN-SPECIFIC COMPASS', 'WHEN THEY REPORT BACK',
+                'WHEN THEY ACCEPT A SUGGESTION', 'WHEN THEY ARE ASKING FOR SOMEONE',
+                'WHEN THEY ARE FAR FROM HOME', 'SANATAN DHARMA BOUNDARY',
+            ]):
+                skip = True
+            elif skip and line.strip().startswith('====='):
+                skip = False
+            if not skip:
+                compact.append(line)
+        return '\n'.join(compact)
+
+    def _get_system_instruction(self, phase) -> str:
+        """Return compact instruction for listening, full instruction for guidance."""
+        if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION):
+            return self._compact_system_instruction
+        return self.system_instruction
 
     def _build_prompt(
         self,
@@ -667,11 +732,11 @@ class LLMService:
                 if msg.get("role") == "system"
             )
         
-        # Format conversation history (last 8 messages = 4 turns of context)
+        # Format conversation history (last 4 messages = 2 turns of context — reduced for latency)
         history_text = ""
         if conversation_history:
             # Exclude the very last message if it's the current query to avoid duplication
-            recent_history = conversation_history[-8:]
+            recent_history = conversation_history[-4:]
             if recent_history and recent_history[-1]["role"] == "user" and recent_history[-1]["content"] == query:
                 recent_history = recent_history[:-1]
                 
@@ -1081,7 +1146,8 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     "without specific citations."
                 )
 
-            gen_config = self._build_gen_config(effective_config or None)
+            _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
+            gen_config = self._build_gen_config(_cfg or None)
 
             # Generate response from Gemini with streaming via Circuit Breaker
 
@@ -1193,7 +1259,8 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     "without specific citations."
                 )
 
-            gen_config = self._build_gen_config(effective_config or None)
+            _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
+            gen_config = self._build_gen_config(_cfg or None)
 
             # Generate response from Gemini via Circuit Breaker
 

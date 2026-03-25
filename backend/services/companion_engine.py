@@ -248,10 +248,14 @@ class CompanionEngine:
 
         # 🚀 Decide phase
         intent = analysis.get("intent")
-        is_direct_ask = analysis.get("needs_direct_answer", False) or \
-                        analysis.get("recommend_products", False) or \
-                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
-                        "Verse Request" in turn_topics
+        # Explicit requests bypass readiness at any turn
+        is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
+                              "Verse Request" in turn_topics or \
+                              analysis.get("recommend_products", False)
+        # General guidance/info needs at least 2 turns of listening first
+        is_guidance_ask = (analysis.get("needs_direct_answer", False) or
+                           intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO))
+        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= 2)
 
         current_phase = ConversationPhase.CLARIFICATION
         if intent == IntentType.CLOSURE:
@@ -314,7 +318,10 @@ class CompanionEngine:
         ]
 
         user_id = getattr(session, 'user_id', None) or getattr(session.memory, 'user_id', None)
-        if user_id:
+        # Skip memory retrieval for trivial/greeting turns on first message (saves 500-800ms)
+        msg_words = len(message.strip().split())
+        should_retrieve_memory = user_id and (session.turn_count > 0 or msg_words > 3)
+        if should_retrieve_memory:
             tasks.append(self.memory_service.retrieve_relevant_memories(user_id, message))
         else:
             tasks.append(asyncio.sleep(0, result=[]))
@@ -366,14 +373,16 @@ class CompanionEngine:
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
 
-        is_direct_ask = analysis.get("needs_direct_answer", False) or \
-                        analysis.get("recommend_products", False) or \
-                        intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO, IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
-                        "Verse Request" in turn_topics or \
-                        "Product Inquiry" in turn_topics or \
-                        "Routine Request" in turn_topics or \
-                        "Puja Guidance" in turn_topics or \
-                        "Diet Plan" in turn_topics
+        # Explicit requests bypass readiness at any turn
+        is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
+                              "Verse Request" in turn_topics or "Product Inquiry" in turn_topics or \
+                              analysis.get("recommend_products", False)
+        # General guidance/info needs at least 2 turns of listening first
+        is_guidance_ask = (analysis.get("needs_direct_answer", False) or
+                           intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO) or
+                           "Routine Request" in turn_topics or "Puja Guidance" in turn_topics or
+                           "Diet Plan" in turn_topics)
+        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= 2)
 
         current_phase = ConversationPhase.CLARIFICATION
         if intent == IntentType.CLOSURE:
@@ -974,40 +983,48 @@ class CompanionEngine:
         """
         readiness = session.memory.readiness_for_wisdom
         emotional_state = session.memory.story.emotional_state
-        
+
         # High-intensity emotions require more listening before guidance
         high_intensity_emotions = ['sadness', 'anger', 'anxiety', 'hopelessness', 'grief', 'despair']
         requires_extra_listening = emotional_state in high_intensity_emotions
 
-        # check if it is a direct question (user seeking answers)
         last_msg = ""
         if session.conversation_history and session.conversation_history[-1]["role"] == "user":
             last_msg = session.conversation_history[-1]["content"]
-        
-        # Enhanced detection for explicit guidance requests
-        guidance_keywords = [
-            "how", "what", "guide", "help", "solution", "suggest", "action", 
-            "advice", "tell me", "recommend", "should i", "way out", "way to",
-            "what can i do", "what do i do", "give me", "show me"
-        ]
-        is_direct_question = "?" in last_msg or any(w in last_msg.lower() for w in guidance_keywords)
+        msg_lower = last_msg.lower()
 
-        if is_direct_question:
-             # Check if it's a substantive question (not just "what?")
-             is_detailed = len(last_msg.split()) > 4
-             
-             if is_detailed and not requires_extra_listening:
-                 logger.info(f"Session {session.session_id}: Direct detailed question detected, bypassing turn count.")
-                 return True
-             
-             min_turns_for_guidance = 3 if requires_extra_listening else 1
+        # EXPLICIT spiritual request — user clearly asks for mantra/practice/verse
+        explicit_spiritual_keywords = [
+            "mantra", "shloka", "verse", "prayer", "pooja", "puja", "vrat",
+            "chant", "suggest a practice", "spiritual help", "koi upay",
+            "mantra batao", "kuch batao", "what should i chant",
+            "give me a mantra", "suggest me", "guide me spiritually",
+        ]
+        is_explicit_spiritual = any(kw in msg_lower for kw in explicit_spiritual_keywords)
+
+        # General guidance request — "what should I do", "help me with this"
+        guidance_phrases = [
+            "what should i do", "what can i do", "how do i fix",
+            "help me with", "give me advice", "suggest a solution",
+            "way out", "way to deal", "how to overcome",
+        ]
+        is_guidance_request = any(phrase in msg_lower for phrase in guidance_phrases)
+
+        if is_explicit_spiritual:
+            # Explicit spiritual request — allow guidance from turn 2+
+            min_turns_for_guidance = 2 if requires_extra_listening else 1
+            logger.info(f"Session {session.session_id}: Explicit spiritual request detected.")
+        elif is_guidance_request:
+            # General guidance ask — need more listening first
+            min_turns_for_guidance = 4 if requires_extra_listening else 3
         else:
-             min_turns_for_guidance = 4 if requires_extra_listening else 2
+            # No explicit ask — require significant listening
+            min_turns_for_guidance = 5 if requires_extra_listening else 3
         
         # Log the assessment
         logger.info(
             f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}, "
-            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}, direct_q={is_direct_question}"
+            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}, explicit_spiritual={is_explicit_spiritual}, guidance_req={is_guidance_request}"
         )
         
         # STRICT RULE: Require minimum turn count even if signals are collected

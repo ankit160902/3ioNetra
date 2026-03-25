@@ -90,7 +90,7 @@ class IntentAgent:
         from llm.service import get_llm_service
         self.llm = get_llm_service()
         self.available = self.llm.available
-        self._cache = _LRUCache(max_size=100)  # 5-min default TTL
+        self._cache = _LRUCache(max_size=500)  # Expanded for better hit rate
 
     # ── Fast-path constants ──
     _GREETING_SET = frozenset({
@@ -208,7 +208,7 @@ class IntentAgent:
             data["intent"] = IntentType(data.get("intent", "OTHER"))
             logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
             # Cache successful LLM result for repeat messages
-            self._cache.set(msg_lower, data, 300)
+            self._cache.set(msg_lower, data, 1800)  # 30-min TTL
             return data
 
         except Exception as e:
