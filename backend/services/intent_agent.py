@@ -95,10 +95,19 @@ class IntentAgent:
     # ── Fast-path constants ──
     _GREETING_SET = frozenset({
         "hi", "hey", "hello", "namaste", "pranam", "hii", "hiii",
+        "hi mitra", "hey mitra", "hello mitra", "namaste mitra", "pranam mitra",
+        "namaskar", "namaskar mitra", "jai shree ram", "har har mahadev",
+        "jai shri ram", "ram ram", "radhe radhe", "hare krishna",
+        "good morning", "good evening", "good afternoon",
+        "good morning mitra", "good evening mitra",
+        "kaise ho", "kaise ho mitra", "kya haal hai",
     })
     _CLOSURE_SET = frozenset({
         "thank you", "thanks", "bye", "goodbye", "ok bye", "dhanyavaad", "shukriya",
         "alvida", "ok thanks", "thanks bye", "good bye", "ok thank you",
+        "thank you mitra", "thanks mitra", "bye mitra", "goodbye mitra",
+        "bye bye", "accha bye", "theek hai bye", "chalo bye",
+        "thank you so much", "thanks a lot", "bahut dhanyavaad",
     })
     _PANCHANG_KEYWORDS = ("panchang", "tithi", "nakshatra", "muhurat")
     _INFO_PREFIXES = ("what is ", "what are ", "tell me about ", "who is ", "explain ")
@@ -127,8 +136,12 @@ class IntentAgent:
             "query_variants": [],
         }
 
-        # (a) GREETING
+        # (a) GREETING — exact match or short greeting pattern
         if msg_lower in self._GREETING_SET:
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown"}
+        # Catch "Namaste ji", "Hello everyone", etc. (short messages starting with greeting word)
+        first_word = msg_lower.split()[0] if msg_lower else ""
+        if first_word in {"hi", "hey", "hello", "namaste", "namaskar", "pranam", "hii", "hiii"} and len(msg_lower.split()) <= 4:
             return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown"}
 
         # (b) CLOSURE

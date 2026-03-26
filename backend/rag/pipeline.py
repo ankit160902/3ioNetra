@@ -1518,7 +1518,7 @@ Respond ONLY with 2 terms, separated by a newline."""
         needs_expansion = (
             settings.QUERY_EXPANSION_ENABLED
             and not _has_precomputed_variants
-            and (len(query.split()) < 4 or self._contains_sanskrit_term(query))
+            and (len(query.split()) < 6 or self._contains_sanskrit_term(query))
             and query.strip().lower() not in self._SKIP_EXPANSION
             and self._llm.available
         )

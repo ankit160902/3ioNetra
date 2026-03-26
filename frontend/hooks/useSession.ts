@@ -225,8 +225,8 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       onToken: (text: string) => void,
       onMetadata: (meta: any) => void,
       onDone: (final: any) => void,
-      onStatus?: (status: { stage: string; message: string }) => void,
       onError: (error: Error) => void,
+      onStatus?: (status: { stage: string; message: string }) => void,
     ): Promise<void> => {
       setIsLoading(true);
       setError(null);

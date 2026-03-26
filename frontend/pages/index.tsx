@@ -185,10 +185,7 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
-  const rafIdRef = useRef<number | null>(null);
   const lastScrollRef = useRef<number>(0);
-  const targetTextRef = useRef<string>('');
-  const displayedLengthRef = useRef<number>(0);
   const isStreamingRef = useRef<boolean>(false);
 
   useEffect(() => {
@@ -198,14 +195,6 @@ export default function Home() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
 
-  useEffect(() => {
-    return () => {
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-        rafIdRef.current = null;
-      }
-    };
-  }, []);
 
   // Auto-save conversation whenever messages change
   useEffect(() => {
@@ -327,45 +316,28 @@ export default function Home() {
         setMessages((prev) => [...prev, placeholder]);
 
         let accumulatedText = '';
-        targetTextRef.current = '';
-        displayedLengthRef.current = 0;
-
-        const typewriterTick = () => {
-          const target = targetTextRef.current;
-          const displayed = displayedLengthRef.current;
-
-          if (displayed < target.length) {
-            const remaining = target.length - displayed;
-            const chars = remaining > 200 ? 30
-                        : remaining > 80  ? 15
-                        : remaining > 30  ? 6
-                        :                   2;
-            displayedLengthRef.current = Math.min(displayed + chars, target.length);
-            const snapshot = target.slice(0, displayedLengthRef.current);
-            setMessages((prev) => {
-              const updated = [...prev];
-              updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
-              return updated;
-            });
-          }
-
-          if (isStreamingRef.current || displayedLengthRef.current < targetTextRef.current.length) {
-            rafIdRef.current = requestAnimationFrame(typewriterTick);
-          } else {
-            rafIdRef.current = null;
-          }
-        };
+        isStreamingRef.current = true;
+        let renderScheduled = false;
 
         await sendMessageStream(
           currentInput,
           language,
-          // onToken — accumulate into ref, typewriter reveals progressively
+          // onToken — accumulate and flush to UI on next animation frame
+          // This batches multiple tokens arriving within the same 16ms frame
+          // into a single React re-render, avoiding 20-40 renders/sec overhead
           (text) => {
             accumulatedText += text;
-            targetTextRef.current = accumulatedText;
-            if (!rafIdRef.current) {
-              isStreamingRef.current = true;
-              typewriterTick();
+            if (!renderScheduled) {
+              renderScheduled = true;
+              requestAnimationFrame(() => {
+                renderScheduled = false;
+                const snapshot = accumulatedText;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
+                  return updated;
+                });
+              });
             }
           },
           // onMetadata — update session state
@@ -378,12 +350,6 @@ export default function Home() {
           (final) => {
             isStreamingRef.current = false;
             setLoadingStatus('');
-            if (rafIdRef.current) {
-              cancelAnimationFrame(rafIdRef.current);
-              rafIdRef.current = null;
-            }
-            targetTextRef.current = '';
-            displayedLengthRef.current = 0;
             const flowMetadata = final.flow_metadata || undefined;
             setMessages((prev) => {
               const updated = [...prev];
@@ -406,18 +372,10 @@ export default function Home() {
               return updated;
             });
           },
-          // onStatus — update loading indicator text
-          (status) => { setLoadingStatus(status.message); },
           // onError — fallback to non-streaming sendMessage()
           async (err) => {
             isStreamingRef.current = false;
             setLoadingStatus('');
-            if (rafIdRef.current) {
-              cancelAnimationFrame(rafIdRef.current);
-              rafIdRef.current = null;
-            }
-            targetTextRef.current = '';
-            displayedLengthRef.current = 0;
             console.warn('Stream failed, falling back:', err);
             // Remove placeholder
             setMessages((prev) => prev.slice(0, -1));
@@ -457,7 +415,9 @@ export default function Home() {
                 timestamp: new Date(),
               }]);
             }
-          }
+          },
+          // onStatus — update loading indicator text
+          (status) => { setLoadingStatus(status.message); },
         );
       }
     } catch (error) {
