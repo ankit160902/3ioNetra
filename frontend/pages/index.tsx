@@ -123,6 +123,7 @@ export default function Home() {
   const [input, setInput] = useState('');
   const language = 'en';
   const [isProcessing, setIsProcessing] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState<string>('');
   const [useConversationFlow, setUseConversationFlow] = useState(true);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [history, setHistory] = useState<ConversationSummary[]>([]);
@@ -376,6 +377,7 @@ export default function Home() {
           // onDone — finalize with clean text, products, citations
           (final) => {
             isStreamingRef.current = false;
+            setLoadingStatus('');
             if (rafIdRef.current) {
               cancelAnimationFrame(rafIdRef.current);
               rafIdRef.current = null;
@@ -404,9 +406,12 @@ export default function Home() {
               return updated;
             });
           },
+          // onStatus — update loading indicator text
+          (status) => { setLoadingStatus(status.message); },
           // onError — fallback to non-streaming sendMessage()
           async (err) => {
             isStreamingRef.current = false;
+            setLoadingStatus('');
             if (rafIdRef.current) {
               cancelAnimationFrame(rafIdRef.current);
               rafIdRef.current = null;
@@ -472,6 +477,7 @@ export default function Home() {
       setMessages((prev) => [...prev, errorMessage]);
     } finally {
       setIsProcessing(false);
+      setLoadingStatus('');
     }
   };
 
@@ -693,7 +699,7 @@ export default function Home() {
                             <div className="w-1 h-1 bg-orange-500 rounded-full animate-bounce [animation-delay:0.2s] [animation-duration:0.8s]"></div>
                             <div className="w-1 h-1 bg-orange-600 rounded-full animate-bounce [animation-delay:0.4s] [animation-duration:0.8s]"></div>
                           </div>
-                          <span className="text-[9px] font-black text-orange-900 uppercase tracking-widest">{session.phase === 'synthesis' ? 'Seeking Essence' : 'Listening'}</span>
+                          <span className="text-[9px] font-black text-orange-900 uppercase tracking-widest">{loadingStatus || (session.phase === 'synthesis' ? 'Seeking Essence' : 'Listening')}</span>
                         </div>
                       </div>
                     )}

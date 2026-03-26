@@ -499,11 +499,13 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             full_text_parts: list[str] = []
 
             if is_ready:
+                yield f"event: status\ndata: {json.dumps({'stage': 'searching', 'message': 'Searching scriptures...'})}\n\n"
                 dharmic_query, retrieved_docs = await _build_guidance_context(
                     session, query, speculative_docs, context_synthesizer, rag_pipeline
                 )
                 reduce_scripture = safety_validator.should_reduce_scripture_density(session)
 
+                yield f"event: status\ndata: {json.dumps({'stage': 'composing', 'message': 'Composing guidance...'})}\n\n"
                 async for token in response_composer.compose_stream(
                     dharmic_query=dharmic_query,
                     memory=session.memory,
@@ -520,6 +522,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     full_text_parts.append(token)
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
             else:
+                yield f"event: status\ndata: {json.dumps({'stage': 'listening', 'message': 'Mitra is listening...'})}\n\n"
                 if companion_engine.available:
                     async for token in companion_engine.llm.generate_response_stream(
                         query=query.message,
@@ -560,7 +563,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
 
 # ----------------------------------------------------------------------------

@@ -225,6 +225,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       onToken: (text: string) => void,
       onMetadata: (meta: any) => void,
       onDone: (final: any) => void,
+      onStatus?: (status: { stage: string; message: string }) => void,
       onError: (error: Error) => void,
     ): Promise<void> => {
       setIsLoading(true);
@@ -278,6 +279,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
                 if (currentEvent === 'metadata') onMetadata(data);
                 else if (currentEvent === 'token') onToken(data.text);
                 else if (currentEvent === 'done') onDone(data);
+                else if (currentEvent === 'status' && onStatus) onStatus(data);
                 else if (currentEvent === 'error') onError(new Error(data.message));
               } catch {
                 // skip malformed JSON lines
