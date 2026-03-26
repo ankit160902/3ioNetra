@@ -346,7 +346,15 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     companion_engine.record_suggestion(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
-    asyncio.create_task(session_manager.update_session(session))  # Non-blocking — client gets response immediately
+    def _on_save_done(t):
+        try:
+            exc = t.exception()
+        except asyncio.CancelledError:
+            return
+        if exc:
+            logger.error(f"Background session save failed: {exc}")
+    task = asyncio.create_task(session_manager.update_session(session))
+    task.add_done_callback(_on_save_done)
     return final_text
 
 

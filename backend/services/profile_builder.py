@@ -76,6 +76,10 @@ def build_user_profile(memory: ConversationMemory, session=None) -> Dict:
     elif hasattr(memory, "is_returning_user"):
         profile["is_returning_user"] = memory.is_returning_user
 
+    # Readiness trigger — why phase transitioned (injected into LLM phase prompt)
+    if session and getattr(session, "readiness_trigger", None):
+        profile["readiness_trigger"] = session.readiness_trigger
+
     # Demographics + story fields
     if story:
         for field in [

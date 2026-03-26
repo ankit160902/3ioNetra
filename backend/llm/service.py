@@ -7,6 +7,7 @@ import asyncio
 import logging
 import random
 import re
+import time as _time
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from config import settings
@@ -16,6 +17,8 @@ from models.session import ConversationPhase
 
 logger = logging.getLogger(__name__)
 
+# Refresh Gemini cached content this many seconds before its TTL expires
+_CACHE_REFRESH_BUFFER = 60
 
 # --------------------------------------------------
 # Enums & Data Models
@@ -273,10 +276,16 @@ class LLMService:
 
     def _get_or_create_cache(self, model: str, system_instruction: str, phase_key: str) -> Optional[str]:
         """Get or create a Gemini cached content for the system instruction.
-        Returns cache name string or None if caching fails."""
+        Returns cache name string or None if caching fails.
+        Tracks expiry to avoid using stale cache references."""
         cache_key = f"{model}:{phase_key}"
-        if cache_key in self._gemini_caches:
-            return self._gemini_caches[cache_key]
+        entry = self._gemini_caches.get(cache_key)
+        if entry:
+            name, expires_at = entry
+            if _time.monotonic() < expires_at:
+                return name
+            # Expired — remove and recreate
+            del self._gemini_caches[cache_key]
         try:
             from google.genai import types
             cache = self.client.caches.create(
@@ -286,8 +295,9 @@ class LLMService:
                     ttl=f"{settings.GEMINI_CACHE_TTL}s",
                 ),
             )
-            self._gemini_caches[cache_key] = cache.name
-            logger.info(f"Gemini cache created: {cache_key} → {cache.name}")
+            expires_at = _time.monotonic() + settings.GEMINI_CACHE_TTL - _CACHE_REFRESH_BUFFER
+            self._gemini_caches[cache_key] = (cache.name, expires_at)
+            logger.info(f"Gemini cache created: {cache_key} → {cache.name} (TTL {settings.GEMINI_CACHE_TTL}s)")
             return cache.name
         except Exception as e:
             logger.warning(f"Gemini cache creation failed (non-fatal, using inline): {e}")
@@ -507,7 +517,7 @@ class LLMService:
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
             "thinking_config": {"thinking_budget": 0},
-            "max_output_tokens": 300,
+            "max_output_tokens": 200,
             "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
@@ -521,8 +531,7 @@ class LLMService:
         sys_instruction = self._get_system_instruction(phase)
         phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
 
-        # Try Gemini context caching — avoids re-processing system instruction each call
-        cache_name = self._get_or_create_cache(model, sys_instruction, phase_key) if hasattr(self, '_gemini_caches') else None
+        cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)
         if cache_name:
             gen_config["cached_content"] = cache_name
             # Don't send system_instruction when using cache
@@ -534,17 +543,19 @@ class LLMService:
     # Prompt Building
     # --------------------------------------------------
 
+    _COMPACT_STRIP_MARKERS = (
+        'DOMAIN-SPECIFIC COMPASS', 'WHEN THEY REPORT BACK',
+        'WHEN THEY ACCEPT A SUGGESTION', 'WHEN THEY ARE ASKING FOR SOMEONE',
+        'WHEN THEY ARE FAR FROM HOME', 'SANATAN DHARMA BOUNDARY',
+    )
+
     @staticmethod
     def _build_compact_instruction(full_instruction: str) -> str:
         """Strip domain compass & reference sections for listening phase (saves ~1700 tokens)."""
         lines = full_instruction.split('\n')
         compact, skip = [], False
         for line in lines:
-            if any(marker in line for marker in [
-                'DOMAIN-SPECIFIC COMPASS', 'WHEN THEY REPORT BACK',
-                'WHEN THEY ACCEPT A SUGGESTION', 'WHEN THEY ARE ASKING FOR SOMEONE',
-                'WHEN THEY ARE FAR FROM HOME', 'SANATAN DHARMA BOUNDARY',
-            ]):
+            if any(marker in line for marker in LLMService._COMPACT_STRIP_MARKERS):
                 skip = True
             elif skip and line.strip().startswith('====='):
                 skip = False
@@ -575,7 +586,8 @@ class LLMService:
         query_lower = query.lower()
         _spiritual_keywords = {"puja", "mantra", "temple", "vrat", "ritual", "meditation",
                                "dhyana", "prayer", "havan", "kirtan", "sadhana", "japa",
-                               "panchang", "tithi", "nakshatra", "muhurat", "deity", "god"}
+                               "panchang", "tithi", "nakshatra", "muhurat", "deity", "god",
+                               "auspicious", "shubh", "muhurata", "aarti", "pooja", "bhajan"}
         is_spiritual_topic = (
             life_area == 'spiritual'
             or any(kw in query_lower for kw in _spiritual_keywords)
@@ -696,18 +708,26 @@ class LLMService:
                 profile_parts.append("\n".join(panchang_lines))
                 has_data = True
             
-            # 🧠 Semantic Long-Term Memories
+            # Semantic Long-Term Memories — deduplicated
             if user_profile.get('past_memories'):
-                profile_parts.append("\n   RELEVANT PAST CONTEXT (from your history):")
-                for i, mem in enumerate(user_profile.get('past_memories'), 1):
-                    profile_parts.append(f"   {i}. \"{mem}\"")
-                has_data = True
+                seen = set()
+                deduped = []
+                for mem in user_profile['past_memories']:
+                    key = mem.strip().lower()[:120]
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(mem)
+                if deduped:
+                    profile_parts.append("\n   RELEVANT PAST CONTEXT (from your history):")
+                    for i, mem in enumerate(deduped, 1):
+                        profile_parts.append(f"   {i}. \"{mem}\"")
+                    has_data = True
 
             # Previous suggestions context (so LLM can deepen on acceptance)
             if user_profile.get('last_suggestions'):
                 suggestions = user_profile['last_suggestions']
                 profile_parts.append("\n   YOUR RECENT SUGGESTIONS TO THIS USER:")
-                for s in suggestions[-2:]:
+                for s in suggestions[-3:]:
                     profile_parts.append(f"   • Turn {s['turn']}: You suggested {s['practice']}")
                 has_data = True
             
@@ -732,11 +752,11 @@ class LLMService:
                 if msg.get("role") == "system"
             )
         
-        # Format conversation history (last 4 messages = 2 turns of context — reduced for latency)
+        # Format conversation history (last 8 messages = 4 turns of context)
         history_text = ""
         if conversation_history:
             # Exclude the very last message if it's the current query to avoid duplication
-            recent_history = conversation_history[-4:]
+            recent_history = conversation_history[-8:]
             if recent_history and recent_history[-1]["role"] == "user" and recent_history[-1]["content"] == query:
                 recent_history = recent_history[:-1]
                 
@@ -751,40 +771,46 @@ class LLMService:
                 else:
                     history_text += f"{role}: {content}\n"
         
-        # Context summary
+        # Context summary — deduplicated (rashi/gotra/nakshatra already in profile)
         fact_text = ""
         if memory_context:
             context_summary = memory_context.get_memory_summary()
             story = memory_context.story
-            
-            # Extract specific facts from story
+
+            # Only include facts NOT already present in the profile section
             facts = []
-            if story.rashi:
-                facts.append(f"• Rashi: {story.rashi}")
-            if story.gotra:
-                facts.append(f"• Gotra: {story.gotra}")
-            if story.nakshatra:
-                facts.append(f"• Nakshatra: {story.nakshatra}")
-            if story.temple_visits:
-                facts.append(f"• Temple Visits: {', '.join(story.temple_visits)}")
             if story.purchase_history:
                 facts.append(f"• Purchase History: {', '.join(story.purchase_history)}")
             if story.detected_topics:
                 recent_topics = list(dict.fromkeys(story.detected_topics[-5:]))
                 facts.append(f"• Topic journey: {' → '.join(recent_topics)}")
 
-            # Also extract specific user quotes as "Facts"
+            # User quotes — deduplicate near-identical quotes
             if hasattr(memory_context, 'user_quotes'):
+                seen_quotes = set()
                 for quote in memory_context.user_quotes[-10:]:
-                    facts.append(f"• User shared: \"{quote['quote']}\"")
-            
-            fact_text = "\n".join(facts) if facts else "• No specific facts extracted yet"
+                    q = quote['quote'].strip().lower()
+                    if q not in seen_quotes:
+                        seen_quotes.add(q)
+                        facts.append(f"• User shared: \"{quote['quote']}\"")
+
+            fact_text = "\n".join(facts) if facts else ""
         else:
             context_summary = self._format_context(context)
-            fact_text = "• No memory context available"
+            fact_text = ""
         
-        # Phase-specific instructions
+        # Phase-specific instructions with readiness trigger context
         phase_instructions = self._get_phase_instructions(phase)
+        readiness_trigger = (user_profile or {}).get('readiness_trigger', '')
+        if readiness_trigger and phase == ConversationPhase.GUIDANCE:
+            trigger_labels = {
+                'explicit_request': 'The user explicitly asked for specific information (panchang, product, verse).',
+                'user_asked_for_guidance': 'The user asked for guidance or help directly.',
+                'signals_accumulated': 'You have gathered enough context over multiple turns to offer guidance now.',
+            }
+            trigger_note = trigger_labels.get(readiness_trigger, '')
+            if trigger_note:
+                phase_instructions += f"\nWHY GUIDANCE NOW: {trigger_note}\n"
         
         # Format scripture context from RAG if available
         scripture_context = ""
@@ -896,30 +922,34 @@ HOW TO USE THESE RESOURCES:
                 "\n═══════════════════════════════════════════════════════════\n"
                 "SCRIPTURE CONTEXT: NONE AVAILABLE\n"
                 "═══════════════════════════════════════════════════════════\n"
-                "No relevant scripture matches were found for this query. "
-                "Respond with general spiritual wisdom. "
-                "Do NOT cite any specific verse, chapter, or shloka number. "
-                "Use phrases like 'the Gita teaches us...' or 'as our scriptures remind us...' "
-                "instead of specific references like 'Bhagavad Gita 2.47'.\n"
+                "No scripture resources are available for this query. "
+                "Respond with general spiritual wisdom WITHOUT citing any specific "
+                "verse, chapter, or scripture reference. A warm, human response "
+                "without citations is always better than a vague or inaccurate one.\n"
             )
 
 
         # Build final prompt
         returning_user_section = self._build_returning_user_section(is_returning_user, memory_context)
 
-        prompt = f"""
-{profile_text}
-
+        # Build facts section only if there's content
+        facts_section = ""
+        if fact_text:
+            facts_section = f"""
 ═══════════════════════════════════════════════════════════
-EXTRACTED FACTS & PLANS:
+CONTEXT & JOURNEY:
 ═══════════════════════════════════════════════════════════
 {fact_text}
+"""
+
+        prompt = f"""
+{profile_text}
 
 ═══════════════════════════════════════════════════════════
 WHAT YOU KNOW SO FAR (EMOTIONAL CONTEXT):
 ═══════════════════════════════════════════════════════════
 {context_summary}
-
+{facts_section}
 {returning_user_section}
 
 ═══════════════════════════════════════════════════════════
@@ -935,26 +965,16 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 ═══════════════════════════════════════════════════════════
 {phase_instructions}
 
+BEHAVIORAL CHECKS (apply before writing your response):
+- REPETITION: If your last 2 responses already gave a mantra/practice/Gita reference and the user is STILL processing — ask a deeper question instead.
+- LISTENING PHASE: If phase is LISTENING and user is sharing pain — end with a QUESTION, not a practice.
+- "TONIGHT": If your previous response also said "Tonight" — use a different timing.
+- RETURNING USER: If RETURNING USER section exists above, try to reference one specific detail from their journey.
+
 {scripture_context}
 
-CRITICAL — READ THIS BEFORE RESPONDING:
-You do NOT need to use every piece of data above. The profile, panchang, and scripture resources are REFERENCE material — use ONLY what naturally fits THIS specific moment. If the user sent a casual message, respond casually as a friend. Do NOT force panchang references, verses, deity names, or practices into every response. A warm, natural 2-3 sentence reply is almost always better than a response that tries to mention the user's name, today's tithi, a verse, and a practice all at once. That pattern is EXACTLY what you must avoid.
-
 RESPOND TO WHAT THEY ACTUALLY SAID — not to what your context data contains.
-
-BEFORE YOU RESPOND — CHECK THESE (violations = failure):
-1. SCAN your first 5 words. If they contain "I hear you", "I understand", or "It sounds like" — DELETE and rewrite. Start with something specific: "That is a lot to carry", "Twelve years is a lifetime of love", "Of course you are angry."
-2. SCAN for echoed dismissive words. If the user complained about "adjust", "get over it", "move on", or "just a [thing]" — make sure NONE of those words or substrings appear in your response. Rephrase completely.
-3. NO numbered lists (1. 2. 3.), NO bullet points (- or *), NO bold (**text**), NO headers (#). Even for ritual how-to — use flowing prose.
-4. Don't end with "How does that sound?", "Would you like to hear more?", or "Does this resonate?" — just end.
-5. One verse maximum, only if it truly fits. If no verse naturally fits, DO NOT include one.
-6. You are a companion, not a checklist machine. Do NOT try to mention panchang + verse + practice + deity in every response.
-7. When discussing a specific deity, always use their NAME at least once (Shiva, Krishna, Hanuman, Durga) — never just "He" or "His".
-8. RETURNING USER CHECK: If the RETURNING USER section exists above, re-read it now. Your response MUST include one specific detail from their journey.
-9. REPETITION CHECK: Read your last 2 responses in the conversation. If you already gave a mantra/practice/Gita reference and the user is STILL processing the same emotion — do NOT give another mantra/practice/Gita reference. Ask a deeper question instead. Break the pattern.
-10. LISTENING PHASE CHECK: If the phase is LISTENING and the user is sharing pain — your response should end with a QUESTION, not a practice. "What part of this weighs heaviest?" is better than "Chant Om Shanti 11 times tonight."
-11. "TONIGHT" CHECK: Does your response contain "Tonight" as a practice timing? If your previous response ALSO said "Tonight" — REWRITE with a different timing: "tomorrow morning", "this week", "right now", "before your chai".
-12. DHARMA BOUNDARY CHECK: Is the user asking about another religion, coding, politics, or non-spiritual topics? Do NOT answer the question. Do NOT bridge it into spirituality. Just warmly redirect: "That is outside my world — I am here for your spiritual journey."
+Do NOT force panchang, verses, deity names, or practices into every response. A warm 2-3 sentence reply is almost always better than one that tries to include everything. No numbered lists, no bullet points, no bold, no headers — flowing prose only. One verse maximum. Use deity NAMES (Shiva, Krishna) not just "He".
 
 Your response:
 """
@@ -1014,13 +1034,13 @@ Your response:
         topic_list = ", ".join(key_topics) if key_topics else "their past experience"
 
         section = f"""{'═'*70}
-🔄 RETURNING USER — MANDATORY CONTEXT REFERENCE
+🔄 RETURNING USER — CONTEXT REFERENCE
 {'═'*70}
 THEIR JOURNEY SO FAR: {prev_summary}
 
 KEY TOPICS FROM THEIR JOURNEY: {topic_list}
 
-⚠️ CRITICAL RULE: This user is RETURNING. Your VERY FIRST response MUST use at least ONE word from the KEY TOPICS list above. A generic "good to see you again" without mentioning any topic is a FAILURE. This is NOT optional — it is a hard requirement.
+This user is RETURNING. Try to reference at least ONE detail from their KEY TOPICS above in your greeting — it shows you remember them. A generic "good to see you again" without any personal touch feels impersonal.
 """
         if is_sensitive:
             section += f"""SENSITIVE TOPIC DETECTED — reference gently but SPECIFICALLY:

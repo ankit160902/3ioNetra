@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     SECTION_CHUNKS_ENABLED: bool = Field(default=True, env="SECTION_CHUNKS_ENABLED")
     SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
+    RERANKER_ENABLED: bool = Field(default=True, env="RERANKER_ENABLED")
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
     SKIP_RERANK_THRESHOLD: float = Field(default=0.75, env="SKIP_RERANK_THRESHOLD")

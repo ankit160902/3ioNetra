@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Emotions requiring extra listening turns before guidance transition
+_DISTRESS_EMOTIONS = frozenset({"shame", "grief", "guilt", "fear", "humiliation", "trauma", "panic"})
+
 class CompanionEngine:
     """
     Empathetic front-line companion.
@@ -377,12 +380,14 @@ class CompanionEngine:
         is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
                               "Verse Request" in turn_topics or "Product Inquiry" in turn_topics or \
                               analysis.get("recommend_products", False)
-        # General guidance/info needs at least 2 turns of listening first
+        # General guidance/info needs enough listening turns first
         is_guidance_ask = (analysis.get("needs_direct_answer", False) or
                            intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO) or
                            "Routine Request" in turn_topics or "Puja Guidance" in turn_topics or
                            "Diet Plan" in turn_topics)
-        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= 2)
+        detected_emotion = (analysis.get("emotion") or "").lower()
+        min_turns = session.min_clarification_turns if detected_emotion in _DISTRESS_EMOTIONS else 2
+        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= min_turns)
 
         current_phase = ConversationPhase.CLARIFICATION
         if intent == IntentType.CLOSURE:
@@ -390,8 +395,20 @@ class CompanionEngine:
 
         if intent == IntentType.CLOSURE:
             is_ready = False
+            readiness_trigger = "closure"
+        elif is_explicit_request:
+            is_ready = True
+            readiness_trigger = "explicit_request"
+        elif is_guidance_ask and session.turn_count >= min_turns:
+            is_ready = True
+            readiness_trigger = "user_asked_for_guidance"
+        elif self._assess_readiness(session):
+            is_ready = True
+            readiness_trigger = "signals_accumulated"
         else:
-            is_ready = self._assess_readiness(session) or is_direct_ask
+            is_ready = False
+            readiness_trigger = "listening"
+        session.readiness_trigger = readiness_trigger
 
         # ------------------------------------------------------------------
         # Ready for wisdom → prepare acknowledgement + context docs + products
@@ -500,6 +517,7 @@ class CompanionEngine:
 
             return {
                 "is_ready_for_wisdom": True,
+                "readiness_trigger": readiness_trigger,
                 "context_docs": context_docs,
                 "turn_topics": turn_topics,
                 "recommended_products": products,
@@ -590,6 +608,7 @@ class CompanionEngine:
 
         return {
             "is_ready_for_wisdom": False,
+            "readiness_trigger": readiness_trigger,
             "context_docs": context_docs,
             "turn_topics": turn_topics,
             "recommended_products": products,

@@ -102,6 +102,9 @@ class SessionState:
     product_rejection_count: int = 0        # Total rejections
     user_dismissed_products: bool = False   # Hard kill: user said "stop products"
 
+    # Why the phase transition happened — injected into LLM phase prompt
+    readiness_trigger: str = "listening"
+
     # Track what practices Mitra suggested (for acceptance-based product inference)
     # Each entry: {"turn": int, "practice": str, "product_keywords": ["rudraksha mala", "japa mala"]}
     # FIFO capped at 3 entries
@@ -129,6 +132,7 @@ class SessionState:
             "product_rejection_count": self.product_rejection_count,
             "user_dismissed_products": self.user_dismissed_products,
             "last_suggestions": self.last_suggestions,
+            "readiness_trigger": self.readiness_trigger,
             "memory": self.memory.to_dict() if self.memory else None
         }
 
@@ -164,6 +168,7 @@ class SessionState:
             product_rejection_count=data.get("product_rejection_count", 0),
             user_dismissed_products=data.get("user_dismissed_products", False),
             last_suggestions=data.get("last_suggestions", []),
+            readiness_trigger=data.get("readiness_trigger", "listening"),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )
         return session

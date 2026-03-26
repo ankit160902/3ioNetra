@@ -719,8 +719,7 @@ class RAGPipeline:
         self._load_model("_embedding_model", SentenceTransformer, "embeddings", settings.EMBEDDING_MODEL, "embedding model")
 
     def _ensure_reranker_model(self) -> None:
-        # Skip reranker entirely when RERANKER_ENABLED=false (saves ~1.1 GB)
-        if os.environ.get("RERANKER_ENABLED", "true").lower() == "false":
+        if not settings.RERANKER_ENABLED:
             self._reranker_model = None
             return
         from sentence_transformers import CrossEncoder
