@@ -584,13 +584,12 @@ class RAGPipeline:
     # ------------------------------------------------------------------
 
     def _load_ml_models(self) -> None:
-        """Load embedding model at startup. Reranker is lazy-loaded on first use
-        to reduce startup memory (~2.2GB saved until first reranking call).
+        """Load embedding and reranker models at startup.
         Also pre-computes BM25 statistics and sets HuggingFace Hub to offline
         mode to prevent HTTP requests during request handling.
         """
         self._ensure_embedding_model()
-        # Reranker loaded lazily via _ensure_reranker_model() on first search
+        self._ensure_reranker_model()  # Eager: eliminates first-query cold start
 
         # Pre-compute BM25 doc stats so first search is instant
         self._precompute_bm25_stats()
@@ -601,6 +600,13 @@ class RAGPipeline:
                 logger.info("RAGPipeline: embedding model pre-warmed")
             except Exception as e:
                 logger.warning(f"Embedding warmup failed (non-fatal): {e}")
+
+        if self._reranker_model is not None:
+            try:
+                self._reranker_model.predict([("warmup query", "warmup document")])
+                logger.info("RAGPipeline: reranker model pre-warmed")
+            except Exception as e:
+                logger.warning(f"Reranker warmup failed (non-fatal): {e}")
 
         # Load SPLADE model if enabled and index exists (item 3.2)
         self._splade_model = None
@@ -629,7 +635,7 @@ class RAGPipeline:
         os.environ["HF_HUB_OFFLINE"] = "1"
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         logger.info(
-            "RAGPipeline: ML models loaded at startup — "
+            "RAGPipeline: ML models loaded at startup (embedding + reranker) — "
             "HuggingFace Hub set to offline mode for runtime"
         )
 
@@ -715,14 +721,32 @@ class RAGPipeline:
             setattr(self, attr_name, None)
 
     def _ensure_embedding_model(self) -> None:
+        if self._embedding_model is not None:
+            return
         from sentence_transformers import SentenceTransformer
+        if settings.EMBEDDING_ONNX_ENABLED:
+            try:
+                logger.info("RAGPipeline: loading embedding model with ONNX backend (2-4x faster)")
+                self._embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL, backend="onnx")
+                return
+            except Exception as e:
+                logger.warning(f"ONNX embedding load failed, falling back to PyTorch: {e}")
         self._load_model("_embedding_model", SentenceTransformer, "embeddings", settings.EMBEDDING_MODEL, "embedding model")
 
     def _ensure_reranker_model(self) -> None:
         if not settings.RERANKER_ENABLED:
             self._reranker_model = None
             return
+        if self._reranker_model is not None:
+            return
         from sentence_transformers import CrossEncoder
+        if settings.RERANKER_ONNX_ENABLED:
+            try:
+                logger.info("RAGPipeline: loading reranker with ONNX backend (2-4x faster)")
+                self._reranker_model = CrossEncoder(settings.RERANKER_MODEL, backend="onnx")
+                return
+            except Exception as e:
+                logger.warning(f"ONNX reranker load failed, falling back to PyTorch: {e}")
         self._load_model("_reranker_model", CrossEncoder, "reranker", settings.RERANKER_MODEL, "re-ranker")
 
     def _needs_instruction_prefix(self) -> bool:
@@ -932,7 +956,9 @@ Respond ONLY with 2 terms, separated by a newline."""
     # ------------------------------------------------------------------
 
     def _should_use_hyde(self, query: str, intent: Optional[IntentType] = None) -> bool:
-        """Decide whether to generate hypothetical document embeddings for this query."""
+        """Decide whether to generate hypothetical document embeddings for this query.
+        HyDE adds 4-6s latency (Gemini Flash API + embedding). Only use for
+        ambiguous or complex queries where the embedding model struggles."""
         if not settings.HYDE_ENABLED:
             return False
         if not self._llm.available:
@@ -949,6 +975,15 @@ Respond ONLY with 2 terms, separated by a newline."""
             return False
         # Skip specific verse reference requests (e.g. "2.47", "Gita 3.19")
         if re.search(r'\d+\.\d+', query):
+            return False
+        # Skip short, clear queries — HyDE helps ambiguous queries, not direct ones.
+        # Use raw message (before first | separator) for word count.
+        raw_part = query.split(" | ")[0] if " | " in query else query
+        raw_words = len(raw_part.strip().split())
+        _clear_intents = {IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO}
+        # Also skip when intent is None (speculative RAG) and query is short
+        if raw_words <= 12 and (intent in _clear_intents or intent is None):
+            logger.info(f"HyDE: skipped for short clear query ({raw_words} words, intent={intent})")
             return False
         return True
 
@@ -1332,6 +1367,10 @@ Respond ONLY with 2 terms, separated by a newline."""
 
         self._ensure_reranker_model()
 
+        # Cap candidates to reduce reranking time
+        if len(results) > settings.MAX_RERANK_CANDIDATES:
+            results = results[:settings.MAX_RERANK_CANDIDATES]
+
         # Pairs for cross-encoder
         # Include topic as semantic hint when meaning is absent (97% of verses)
         pairs = []
@@ -1530,7 +1569,9 @@ Respond ONLY with 2 terms, separated by a newline."""
             _async_tasks['translate'] = self._translate_query(query)
         if needs_expansion:
             _async_tasks['expand'] = self._expand_query(query, intent=intent.value if intent else None, life_domain=life_domain)
-        if settings.LONG_QUERY_SUMMARIZATION_ENABLED and len(query.split()) > settings.LONG_QUERY_THRESHOLD:
+        # Use raw message length (before | enrichment) to avoid inflated word count
+        _raw_query = query.split(" | ")[0] if " | " in query else query
+        if settings.LONG_QUERY_SUMMARIZATION_ENABLED and len(_raw_query.split()) > settings.LONG_QUERY_THRESHOLD:
             _async_tasks['summarize'] = self._summarize_long_query(query)
         if self._should_use_hyde(query, intent=intent):
             _async_tasks['hyde'] = self._generate_hyde(query, life_domain=life_domain)
@@ -1732,10 +1773,22 @@ Respond ONLY with 2 terms, separated by a newline."""
             if len(results) >= candidates_k:
                 break
 
-        # 5. Neural Re-ranking (Cross-Encoder)
-        # query is the original (never overwritten) so multilingual reranker gets native text
+        # 5. Neural Re-ranking (Cross-Encoder) — skip when top result is already decisive
         _t_rerank = time.perf_counter()
-        results = await self._rerank_results(query, results, intent=intent, life_domain=life_domain)
+        if results and len(results) >= 2:
+            top_score = results[0].get("score", 0)
+            second_score = results[1].get("score", 0)
+            gap = top_score - second_score
+            if top_score >= settings.SKIP_RERANK_THRESHOLD and gap >= settings.SKIP_RERANK_GAP:
+                logger.info(f"Skipping reranker: top={top_score:.3f} gap={gap:.3f} (threshold={settings.SKIP_RERANK_THRESHOLD})")
+                # Assign fused scores as final scores to maintain downstream compatibility
+                for r in results:
+                    r["rerank_score"] = r.get("score", 0)
+                    r["final_score"] = r.get("score", 0)
+            else:
+                results = await self._rerank_results(query, results, intent=intent, life_domain=life_domain)
+        elif results:
+            results = await self._rerank_results(query, results, intent=intent, life_domain=life_domain)
         _timings['rerank_ms'] = round((time.perf_counter() - _t_rerank) * 1000)
 
         # 5.5. Parent-child verse expansion (after reranking, before min_score gate)

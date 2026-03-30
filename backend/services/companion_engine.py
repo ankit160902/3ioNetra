@@ -246,7 +246,7 @@ class CompanionEngine:
         if entities.get("ritual"):
             session.memory.story.primary_concern = f"Performing {entities['ritual']}"
 
-        if len(session.memory.story.primary_concern) < 15 and analysis.get("summary"):
+        if analysis.get("summary"):
             session.memory.story.primary_concern = analysis["summary"]
 
         # 🚀 Decide phase
@@ -315,7 +315,7 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
-        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
+        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval + Speculative RAG
         tasks = [
             self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
         ]
@@ -329,7 +329,34 @@ class CompanionEngine:
         else:
             tasks.append(asyncio.sleep(0, result=[]))
 
-        analysis, past_memories = await asyncio.gather(*tasks)
+        # Speculative RAG: start search in parallel with intent for substantive messages.
+        # Pre-filter: skip for trivial messages, panchang keywords, and short positive phrases
+        # that will be discarded by skip-RAG logic anyway. Saves 2-6s of wasted compute.
+        _trivial = message.strip().lower() in TRIVIAL_MESSAGES
+        _panchang_kw = {"panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"}
+        _is_panchang_q = any(k in message.lower() for k in _panchang_kw)
+        _speculative_rag_eligible = (
+            session.turn_count > 2
+            and msg_words > 8
+            and not _trivial
+            and not _is_panchang_q
+            and self.rag_pipeline and self.rag_pipeline.available
+        )
+        if _speculative_rag_eligible:
+            _spec_query = self._build_listening_query(message, session.memory)
+            tasks.append(self.rag_pipeline.search(
+                query=_spec_query, language="en",
+                top_k=settings.RETRIEVAL_TOP_K,
+                min_score=settings.MIN_SIMILARITY_SCORE,
+            ))
+        else:
+            tasks.append(asyncio.sleep(0, result=[]))
+
+        _results = await asyncio.gather(*tasks, return_exceptions=True)
+        analysis, past_memories = _results[0], _results[1]
+        speculative_rag_docs = _results[2] if not isinstance(_results[2], Exception) else []
+        if isinstance(_results[2], Exception):
+            logger.warning(f"Speculative RAG failed (non-fatal): {_results[2]}")
 
         # 1. Update session signals from LLM analysis
         if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
@@ -355,7 +382,7 @@ class CompanionEngine:
         if entities.get("ritual"):
             session.memory.story.primary_concern = f"Performing {entities['ritual']}"
 
-        if len(session.memory.story.primary_concern) < 15 and analysis.get("summary"):
+        if analysis.get("summary"):
             session.memory.story.primary_concern = analysis["summary"]
 
         # 3. Store in Long-Term Memory if significant
@@ -376,13 +403,14 @@ class CompanionEngine:
         # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
         intent = analysis.get("intent")
 
-        # Explicit requests bypass readiness at any turn
+        # Direct questions and explicit requests bypass turn gate so users get
+        # immediate answers instead of being held in listening phase
         is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
                               "Verse Request" in turn_topics or "Product Inquiry" in turn_topics or \
-                              analysis.get("recommend_products", False)
+                              analysis.get("recommend_products", False) or \
+                              analysis.get("needs_direct_answer", False)
         # General guidance/info needs enough listening turns first
-        is_guidance_ask = (analysis.get("needs_direct_answer", False) or
-                           intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO) or
+        is_guidance_ask = (intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO) or
                            "Routine Request" in turn_topics or "Puja Guidance" in turn_topics or
                            "Diet Plan" in turn_topics)
         detected_emotion = (analysis.get("emotion") or "").lower()
@@ -428,19 +456,31 @@ class CompanionEngine:
                     "I see what you are seeking. Let me look that up for you."
                 ]
 
-            # 📚 SCRIPTURE RETRIEVAL
+            # 📚 SCRIPTURE RETRIEVAL — use speculative RAG if available (already ran in parallel with intent)
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
             should_get_verses = is_verse_request or (is_ready and not is_product_request)
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
-                try:
-                    context_docs, _top_score = await self._retrieve_and_validate(
-                        session, message, analysis, intent, "guidance",
+                if speculative_rag_docs:
+                    # Reuse docs from parallel RAG — skip the expensive _retrieve_and_validate call
+                    from services.context_validator import get_context_validator
+                    ctx_validator = get_context_validator()
+                    context_docs = ctx_validator.validate(
+                        docs=speculative_rag_docs, intent=intent,
+                        query=message, min_score=settings.MIN_SIMILARITY_SCORE,
+                        max_per_source=settings.MAX_DOCS_PER_SOURCE,
+                        max_docs=settings.RERANK_TOP_K,
                     )
-                except Exception as e:
-                    logger.warning(f"Guidance-phase RAG/validation failed: {e}")
+                    logger.info(f"Guidance: reused {len(context_docs)} speculative RAG docs (skipped redundant search)")
+                else:
+                    try:
+                        context_docs, _top_score = await self._retrieve_and_validate(
+                            session, message, analysis, intent, "guidance",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Guidance-phase RAG/validation failed: {e}")
 
             # 🛍️ PRODUCT RECOMMENDATION (with throttling)
             products = []
@@ -537,12 +577,30 @@ class CompanionEngine:
 
         if self.available and self.rag_pipeline and self.rag_pipeline.available:
             skip_rag_intents = {IntentType.GREETING, IntentType.CLOSURE}
+            # Skip RAG for emotional expressions in early turns — they need presence, not scripture
+            skip_rag_early = session.turn_count <= 2 and intent == IntentType.EXPRESSING_EMOTION
+            # Skip RAG for short acknowledgments (thanks, ok, got it) — no scripture needed
+            _msg_words = len(message.strip().split())
+            _positive_emotions = {"joy", "gratitude", "hope", "neutral"}
+            _detected_emotion = (analysis.get("emotion") or "").lower()
+            skip_rag_short = _msg_words <= 8 and _detected_emotion in _positive_emotions
             panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
             _is_panchang = any(k in message.lower() for k in panchang_keywords)
-            if intent in skip_rag_intents:
-                logger.info(f"Skipping RAG for {intent} intent in listening phase")
+            if intent in skip_rag_intents or skip_rag_early or skip_rag_short:
+                logger.info(f"Skipping RAG for {intent} intent in listening phase (turn={session.turn_count}, words={_msg_words}, emotion={_detected_emotion})")
             elif _is_panchang:
                 logger.info("Skipping RAG for Panchang-related query in listening phase")
+            elif speculative_rag_docs:
+                # Reuse docs from parallel RAG — skip redundant search
+                from services.context_validator import get_context_validator
+                ctx_validator = get_context_validator()
+                context_docs = ctx_validator.validate(
+                    docs=speculative_rag_docs, intent=intent,
+                    query=message, min_score=settings.MIN_SIMILARITY_SCORE,
+                    max_per_source=settings.MAX_DOCS_PER_SOURCE,
+                    max_docs=settings.RERANK_TOP_K,
+                )
+                logger.info(f"Listening: reused {len(context_docs)} speculative RAG docs")
             else:
                 try:
                     context_docs, _top_score = await self._retrieve_and_validate(
@@ -812,15 +870,18 @@ class CompanionEngine:
 
         return False
 
-    def _get_practice_from_history(self, session: SessionState) -> List[str]:
-        """Scan last 2 assistant messages for practice-related keywords."""
-        assistant_msgs = [
+    def _get_practice_from_history(self, session: SessionState, role: str = "assistant", lookback: int = 2) -> List[str]:
+        """Scan recent messages for practice-related keywords that map to products.
+        Args:
+            role: 'assistant' for practice suggestions, 'user' for item mentions
+            lookback: number of recent messages to scan
+        """
+        msgs = [
             m["content"].lower()
             for m in session.conversation_history
-            if m.get("role") == "assistant"
+            if m.get("role") == role
         ]
-        # Look at the last 2 assistant messages
-        recent = assistant_msgs[-2:] if len(assistant_msgs) >= 2 else assistant_msgs
+        recent = msgs[-lookback:] if len(msgs) >= lookback else msgs
 
         matched_keywords: List[str] = []
         for msg_text in recent:
@@ -831,6 +892,10 @@ class CompanionEngine:
                             matched_keywords.append(sk)
 
         return matched_keywords
+
+    def _get_user_item_mentions(self, session: SessionState) -> List[str]:
+        """Scan recent user messages for explicit item/product mentions."""
+        return self._get_practice_from_history(session, role="user", lookback=4)
 
     # Map _update_memory domain labels → DOMAIN_PRODUCT_MAP keys
     DOMAIN_NORMALIZE = {
@@ -846,47 +911,31 @@ class CompanionEngine:
     }
 
     def _build_context_search_terms(self, analysis: Dict, session: SessionState) -> List[str]:
-        """Derive product search keywords from conversation context signals."""
+        """Derive product search keywords from conversation context.
+
+        Only uses strong, conversation-grounded signals:
+        - Practice suggestions in assistant messages (japa→mala, puja→thali)
+        - Explicit item mentions in user messages
+        - Deity products ONLY when conversation is about worship/practice (not just mentioning a deity)
+
+        Removed: emotion maps, domain maps, concept maps — these produced
+        irrelevant products that felt salesy (e.g., anxiety→crystals).
+        """
         terms = []
 
-        # 1. Deity (highest signal — most specific)
-        deity = (analysis.get("entities", {}).get("deity", "")
-                 or session.memory.story.preferred_deity or "").lower()
-        if deity:
-            terms.extend(self.DEITY_PRODUCT_MAP.get(deity, []))
-
-        # 2. Emotion keywords (before domain — emotion products need priority in scoring)
-        emotion = (analysis.get("emotion", "")
-                   or session.memory.story.emotional_state or "").lower()
-        domain = (analysis.get("life_domain", "")
-                  or session.memory.story.life_area or "").lower()
-
-        # Normalize _update_memory labels to product map keys
-        domain = self.DOMAIN_NORMALIZE.get(domain, domain)
-
-        if emotion and emotion != "neutral":
-            terms.extend(self.EMOTION_PRODUCT_MAP.get(emotion, []))
-        # 3. Domain keywords
-        if domain and domain not in ("unknown", "", None):
-            terms.extend(self.DOMAIN_PRODUCT_MAP.get(domain, self.DOMAIN_PRODUCT_MAP.get("general", [])))
-
-        # 4. Spiritual concepts (lowest priority)
-        for concept in (session.memory.relevant_concepts or []):
-            terms.extend(self.CONCEPT_PRODUCT_MAP.get(concept.lower(), []))
-
-        # 5. Practice keywords from assistant history (reuse existing method)
+        # 1. Practice keywords from assistant history (highest signal — companion suggested a practice)
         terms.extend(self._get_practice_from_history(session))
 
-        # 6. Practice keywords from user messages (catches kundli, specific practice mentions)
-        user_msgs = [
-            m["content"].lower()
-            for m in session.conversation_history[-6:]
-            if m.get("role") == "user"
-        ]
-        for msg_text in user_msgs:
-            for practice_info in self.PRACTICE_PRODUCT_MAP.values():
-                if any(kw in msg_text for kw in practice_info["detect"]):
-                    terms.extend(practice_info["search_keywords"])
+        # 2. Practice/item keywords from user messages (user explicitly mentions items)
+        terms.extend(self._get_user_item_mentions(session))
+
+        # 3. Deity products ONLY if a ritual/worship context is present (not just philosophical mention)
+        entities = analysis.get("entities", {}) if analysis else {}
+        has_worship_context = bool(entities.get("ritual") or entities.get("item"))
+        if has_worship_context:
+            deity = (entities.get("deity", "") or session.memory.story.preferred_deity or "").lower()
+            if deity:
+                terms.extend(self.DEITY_PRODUCT_MAP.get(deity, []))
 
         # Deduplicate preserving order, cap at 6
         seen = set()
@@ -953,9 +1002,11 @@ class CompanionEngine:
             return []
 
         # Path A: Acceptance-based (both phases)
+        # Only trigger if user accepted AND the prior suggestions involve items (mala, diya, thali)
         is_acceptance = self._is_acceptance(message)
         if is_acceptance:
-            keywords = self._get_keywords_from_suggestions(session) or self._get_practice_from_history(session)
+            # Only use practice-to-product mappings — not generic suggestion keywords
+            keywords = self._get_practice_from_history(session)
             if keywords:
                 search_query = " ".join(keywords[:6])
                 logger.info(f"Proactive product inference (acceptance): searching '{search_query}' for session {session.session_id}")
@@ -971,15 +1022,26 @@ class CompanionEngine:
                     logger.info(f"Proactive products found: {len(products)} items for session {session.session_id}")
                     return products
 
-        # Path B: Context-based (GUIDANCE phase only, requires strong signal)
+        # Path B: Context-based (GUIDANCE phase only)
+        # Only trigger when the companion's response suggests a practice that needs
+        # physical items (diya, mala, thali, etc.) OR user explicitly mentioned an item.
+        # Merely mentioning a deity or life domain is NOT enough — that feels salesy.
         if is_guidance_phase and settings.PRODUCT_GUIDANCE_CONTEXT_ENABLED and analysis:
-            # Require strong signal: deity, ritual, or item entity present
             entities = analysis.get("entities", {})
-            has_strong_signal = bool(
-                entities.get("deity") or entities.get("ritual") or entities.get("item")
-            )
-            if has_strong_signal:
-                context_terms = self._build_context_search_terms(analysis, session)
+            # Strong signal: user mentioned a specific item or ritual that needs items
+            has_item_signal = bool(entities.get("item") or entities.get("ritual"))
+            # Also check if user explicitly mentioned wanting/needing something
+            _item_intent_phrases = ["need a", "want a", "buy", "get a", "where can i find", "purchase"]
+            has_purchase_intent = any(p in message.lower() for p in _item_intent_phrases)
+
+            if has_item_signal or has_purchase_intent:
+                # Only use practice-based search terms (not emotion/domain maps)
+                practice_terms = self._get_practice_from_history(session)
+                user_terms = self._get_user_item_mentions(session)
+                context_terms = practice_terms + user_terms
+                if not context_terms and entities.get("ritual"):
+                    # Fallback: use ritual name as search term
+                    context_terms = [entities["ritual"]]
                 if context_terms:
                     search_query = " ".join(context_terms[:6])
                     logger.info(f"Proactive product inference (context): searching '{search_query}' for session {session.session_id}")
@@ -1060,7 +1122,7 @@ class CompanionEngine:
         is_urgent_request = any(keyword in last_msg.lower() for keyword in urgent_keywords)
         
         if last_guidance > 0 and (session.turn_count - last_guidance) < MIN_SPACING:
-            if is_urgent_request and is_direct_question:
+            if is_urgent_request:
                 # User is explicitly demanding guidance NOW - override spacing
                 logger.info(
                     f"Session {session.session_id}: URGENT guidance request detected, "

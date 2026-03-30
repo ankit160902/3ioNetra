@@ -628,7 +628,7 @@ class LLMService:
                 profile_parts.append(f"   • Life area: {user_profile.get('life_area')}")
                 has_data = True
             if user_profile.get('preferred_deity'):
-                profile_parts.append(f"   • Preferred deity: {user_profile.get('preferred_deity')}")
+                profile_parts.append(f"   • Preferred deity: {user_profile.get('preferred_deity')} (use as a starting point, not the only tradition — vary your recommendations across deities and traditions)")
                 has_data = True
             if user_profile.get('location'):
                 profile_parts.append(f"   • Location: {user_profile.get('location')}")
@@ -637,17 +637,16 @@ class LLMService:
                 profile_parts.append(f"   • Spiritual interests: {', '.join(user_profile.get('spiritual_interests', []))}")
                 has_data = True
 
-            # Extended spiritual profile — only include when topic is spiritual or in guidance
-            if is_spiritual_topic or is_guidance_phase:
-                if user_profile.get('rashi'):
-                    profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
-                    has_data = True
-                if user_profile.get('gotra'):
-                    profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
-                    has_data = True
-                if user_profile.get('nakshatra'):
-                    profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
-                    has_data = True
+            # Spiritual profile — always include so LLM can personalize any response
+            if user_profile.get('rashi'):
+                profile_parts.append(f"   • Rashi (Zodiac): {user_profile.get('rashi')}")
+                has_data = True
+            if user_profile.get('gotra'):
+                profile_parts.append(f"   • Gotra: {user_profile.get('gotra')}")
+                has_data = True
+            if user_profile.get('nakshatra'):
+                profile_parts.append(f"   • Nakshatra: {user_profile.get('nakshatra')}")
+                has_data = True
             if user_profile.get('temple_visits'):
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
                 has_data = True
@@ -752,11 +751,11 @@ class LLMService:
                 if msg.get("role") == "system"
             )
         
-        # Format conversation history (last 8 messages = 4 turns of context)
+        # Format conversation history (last 14 messages = 7 turns of context)
         history_text = ""
         if conversation_history:
             # Exclude the very last message if it's the current query to avoid duplication
-            recent_history = conversation_history[-8:]
+            recent_history = conversation_history[-14:]
             if recent_history and recent_history[-1]["role"] == "user" and recent_history[-1]["content"] == query:
                 recent_history = recent_history[:-1]
                 
@@ -804,8 +803,14 @@ class LLMService:
         readiness_trigger = (user_profile or {}).get('readiness_trigger', '')
         if readiness_trigger and phase == ConversationPhase.GUIDANCE:
             trigger_labels = {
-                'explicit_request': 'The user explicitly asked for specific information (panchang, product, verse).',
-                'user_asked_for_guidance': 'The user asked for guidance or help directly.',
+                'explicit_request': (
+                    'The user asked a DIRECT question — answer it directly using '
+                    'all available profile data. Do not deflect with generic advice.'
+                ),
+                'user_asked_for_guidance': (
+                    'The user asked for guidance directly — give a specific, '
+                    'personalized answer using all available profile data.'
+                ),
                 'signals_accumulated': 'You have gathered enough context over multiple turns to offer guidance now.',
             }
             trigger_note = trigger_labels.get(readiness_trigger, '')

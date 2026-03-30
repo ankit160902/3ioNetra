@@ -277,32 +277,31 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
 
 
 async def _run_speculative_rag(session, query, rag_pipeline, companion_engine, streaming=False):
-    """Add user message, increment turn, run engine + speculative RAG in parallel.
+    """Add user message, increment turn, run engine (which handles RAG internally).
 
     Returns (engine_result_or_meta, speculative_docs).
+    Note: Speculative RAG removed — engine already runs enriched RAG via
+    _retrieve_and_validate() for both listening and guidance paths. Running
+    a second parallel RAG on the raw message was redundant and added 30-80s
+    of CPU-bound latency (embedding + reranking) per request.
     """
     session.add_message('user', query.message)
     session.turn_count += 1
 
-    msg_lower = query.message.strip().lower()
-    skip = msg_lower in TRIVIAL_MESSAGES or len(query.message.split()) < 10
-
     if streaming:
-        engine_fn = companion_engine.process_message_preamble(session, query.message)
+        engine_result = await companion_engine.process_message_preamble(session, query.message)
     else:
-        engine_fn = companion_engine.process_message(session, query.message)
+        engine_result = await companion_engine.process_message(session, query.message)
 
-    if skip:
-        engine_result = await engine_fn
-        return engine_result, []
-
-    rag_task = rag_pipeline.search(query=query.message, language=query.language, top_k=settings.RETRIEVAL_TOP_K)
-    engine_result, speculative_docs = await asyncio.gather(engine_fn, rag_task)
-    return engine_result, speculative_docs
+    return engine_result, []
 
 
 async def _build_guidance_context(session, query, speculative_docs, context_synthesizer, rag_pipeline):
-    """Synthesise dharmic query and fetch additional RAG docs if speculative set is empty.
+    """Synthesise dharmic query. Uses engine's pre-retrieved docs — no fallback RAG search.
+
+    The engine already ran _retrieve_and_validate() with enriched queries + RetrievalJudge.
+    Running a second RAG search here added 15-40s of latency for marginal benefit.
+    The LLM generates good responses from memory + conversation history even without docs.
 
     Returns (dharmic_query, retrieved_docs).
     """
@@ -311,14 +310,6 @@ async def _build_guidance_context(session, query, speculative_docs, context_synt
     dharmic_query = session.dharmic_query
 
     retrieved_docs = speculative_docs if speculative_docs else []
-    if not retrieved_docs and dharmic_query.query_type != QueryType.PANCHANG:
-        retrieved_docs = await rag_pipeline.search(
-            query=dharmic_query.build_search_query(),
-            scripture_filter=dharmic_query.allowed_scriptures,
-            language=query.language,
-            top_k=settings.RETRIEVAL_TOP_K,
-            min_score=settings.MIN_SIMILARITY_SCORE,
-        )
     return dharmic_query, retrieved_docs
 
 
@@ -390,8 +381,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config, past_memories = engine_result
 
     if is_ready_for_wisdom:
+        # Use engine's already-retrieved + validated docs as primary source
         dharmic_query, retrieved_docs = await _build_guidance_context(
-            session, query, speculative_docs, context_synthesizer, rag_pipeline
+            session, query, context_docs_used, context_synthesizer, rag_pipeline
         )
 
         reduce_scripture = safety_validator.should_reduce_scripture_density(session)
@@ -485,6 +477,9 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                 yield f"event: done\ndata: {json.dumps({'full_response': crisis_response, 'recommended_products': [], 'flow_metadata': {'detected_domain': None, 'emotional_state': None, 'topics': [], 'readiness_score': 0}})}\n\n"
                 return
 
+            # Emit thinking indicator IMMEDIATELY — user sees feedback within ~0.5s
+            yield f"event: status\ndata: {json.dumps({'stage': 'thinking', 'message': 'Mitra is thinking...'})}\n\n"
+
             meta, speculative_docs = await _run_speculative_rag(
                 session, query, rag_pipeline, companion_engine, streaming=True
             )
@@ -500,8 +495,9 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
 
             if is_ready:
                 yield f"event: status\ndata: {json.dumps({'stage': 'searching', 'message': 'Searching scriptures...'})}\n\n"
+                # Use engine's already-retrieved + validated docs as primary source
                 dharmic_query, retrieved_docs = await _build_guidance_context(
-                    session, query, speculative_docs, context_synthesizer, rag_pipeline
+                    session, query, meta.get("context_docs", []), context_synthesizer, rag_pipeline
                 )
                 reduce_scripture = safety_validator.should_reduce_scripture_density(session)
 

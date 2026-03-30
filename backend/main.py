@@ -42,6 +42,14 @@ async def lifespan(app: FastAPI):
     companion_engine = get_companion_engine()
     companion_engine.set_rag_pipeline(rag_pipe)
 
+    # 3b. Pre-initialize cache (surface Redis issues at boot, not first request)
+    from services.cache_service import get_cache_service
+    get_cache_service()
+
+    # 3c. Pre-initialize ConceptOntology (loads SCO graph, avoids first-request latency)
+    from services.concept_ontology import get_concept_ontology
+    get_concept_ontology()
+
     # 4. Initialize query logger (async SQLite for RAG analytics)
     if settings.QUERY_LOG_ENABLED:
         from services.query_logger import get_query_logger

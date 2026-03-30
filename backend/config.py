@@ -67,13 +67,13 @@ class Settings(BaseSettings):
     INTENT_WEIGHT_SCALE: float = 0.3       # how much intent adjusts final score
     SOFT_FLOOR_RATIO: float = 0.75         # min_score * this = soft floor in search()
     CONTEXT_VERSE_SCORE_RATIO: float = 0.5 # parent-child context verse discount
-    MIN_CANDIDATE_POOL: int = 40           # default pool; was 60 — adaptive sizing now handles per-intent
-    CANDIDATE_POOL_MULTIPLIER: int = 5     # top_k * this = candidate pool target (legacy fallback)
-    CANDIDATE_POOL_KEYWORD: int = 25       # simple ASKING_INFO queries
-    CANDIDATE_POOL_DEFAULT: int = 40       # most queries
-    CANDIDATE_POOL_THEMATIC: int = 50      # emotional/thematic queries
-    CANDIDATE_POOL_COMPARATIVE: int = 60   # comparative queries needing broad retrieval
-    CURATED_SLOT_LIMIT: int = 10           # max curated docs in slot reservation
+    MIN_CANDIDATE_POOL: int = 15           # reduced from 40 — fewer candidates = faster reranking
+    CANDIDATE_POOL_MULTIPLIER: int = 3     # top_k * this = candidate pool target (legacy fallback)
+    CANDIDATE_POOL_KEYWORD: int = 10       # simple ASKING_INFO queries (was 25)
+    CANDIDATE_POOL_DEFAULT: int = 15       # most queries (was 40)
+    CANDIDATE_POOL_THEMATIC: int = 20      # emotional/thematic queries (was 50)
+    CANDIDATE_POOL_COMPARATIVE: int = 25   # comparative queries needing broad retrieval (was 60)
+    CURATED_SLOT_LIMIT: int = 4            # max curated docs in slot reservation (was 10, reduced for latency)
     CURATED_VIABILITY_THRESHOLD: float = 0.5  # min score for curated doc injection
     EXPAND_TOP_N: int = 2                  # how many top docs get parent-child expansion
     CURATED_FLOOR: float = 0.35
@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
     RERANKER_ENABLED: bool = Field(default=True, env="RERANKER_ENABLED")
+    MAX_RERANK_CANDIDATES: int = Field(default=10, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
     SKIP_RERANK_THRESHOLD: float = Field(default=0.75, env="SKIP_RERANK_THRESHOLD")
@@ -220,6 +221,7 @@ class Settings(BaseSettings):
     # bge-reranker-v2-m3: multilingual, accurate but heavier (~200ms)
     # BAAI/bge-reranker-base: English-focused, lighter (~50ms) — use if most queries are English/Hindi
     RERANKER_MODEL: str = Field(default="BAAI/bge-reranker-v2-m3", env="RERANKER_MODEL")
+    RERANKER_ONNX_ENABLED: bool = Field(default=False, env="RERANKER_ONNX_ENABLED")  # ONNX for 2-4x faster reranking
     RERANKER_TYPE: str = "cross-encoder"  # "cross-encoder" or "api"
 
     # ------------------------------------------------------------------

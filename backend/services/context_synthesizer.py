@@ -124,23 +124,35 @@ class ContextSynthesizer:
 
         query_text = self._extract_user_query(session)
 
+        # Prefer CURRENT signals (just analyzed this turn) over stale story fields
+        current_emotion = None
+        current_life_domain = None
+        if session.signals_collected:
+            if SignalType.EMOTION in session.signals_collected:
+                current_emotion = session.signals_collected[SignalType.EMOTION].value
+            if SignalType.LIFE_DOMAIN in session.signals_collected:
+                current_life_domain = session.signals_collected[SignalType.LIFE_DOMAIN].value
+
+        emotion = current_emotion or story.emotional_state or 'unknown'
+        life_domain = current_life_domain or story.life_area
+
         dharmic_query = DharmicQueryObject(
             query=query_text,
             query_type=self._determine_query_type_from_memory(story),
             dharmic_concepts=self._get_dharmic_concepts(None, story) if not memory.relevant_concepts else memory.relevant_concepts[:7],
             user_stage=self._infer_user_stage(session),
             response_style=self._determine_response_style_from_memory(memory),
-            emotion=story.emotional_state or 'unknown',
+            emotion=emotion,
             trigger=story.trigger_event,
-            life_domain=story.life_area,
+            life_domain=life_domain,
             mental_state=None,
             user_goal=story.unmet_needs[0] if story.unmet_needs else None,
             allowed_scriptures=LIFE_DOMAIN_TO_SCRIPTURES.get(
-                story.life_area, 
+                life_domain,
                 ['Hindu Temples'] + DEFAULT_SCRIPTURES if story.temple_interest else DEFAULT_SCRIPTURES
             ),
             guidance_type=EMOTION_TO_GUIDANCE_TYPE.get(
-                story.emotional_state, 'guidance'
+                emotion, 'guidance'
             ),
             conversation_summary=memory.get_memory_summary(),
         )

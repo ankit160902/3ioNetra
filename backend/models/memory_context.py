@@ -198,58 +198,29 @@ class ConversationMemory:
             self.relevant_concepts.append(concept)
 
     def get_memory_summary(self) -> str:
-        """Get a textual summary of the conversation memory in natural language"""
+        """Get a lightweight summary focused on current conversational context.
+
+        Profile fields (preferred_deity, rashi, gotra, temple_visits, purchase_history,
+        location, spiritual_interests) are intentionally excluded here — they are already
+        injected via the user profile section of the prompt. Repeating them here amplifies
+        bias and causes the LLM to loop on the same deity/temple/topic.
+        """
         parts = []
 
-        # Build a narrative sentence
         if self.story.primary_concern:
-            parts.append(f"The user is dealing with {self.story.primary_concern}")
+            parts.append(f"The user is currently dealing with {self.story.primary_concern}")
 
         if self.story.emotional_state:
-            parts.append(f"They are currently feeling {self.story.emotional_state}")
+            parts.append(f"They are feeling {self.story.emotional_state}")
 
         if self.story.life_area:
-            parts.append(f"This situation relates to their {self.story.life_area}")
+            parts.append(f"This relates to their {self.story.life_area}")
 
         if self.story.trigger_event:
-            parts.append(f"It was triggered by {self.story.trigger_event}")
-
-        if self.story.temple_interest:
-            parts.append(f"They have shown interest in {self.story.temple_interest}")
-
-        if self.story.preferred_deity:
-            parts.append(f"Their preferred deity is {self.story.preferred_deity}")
-
-        if self.story.location:
-            parts.append(f"They are located in {self.story.location}")
-            
-        if self.story.spiritual_interests:
-            parts.append(f"They are interested in {', '.join(self.story.spiritual_interests)}")
+            parts.append(f"Triggered by {self.story.trigger_event}")
 
         if self.story.unmet_needs:
             parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
-
-        if self.story.rashi:
-            parts.append(f"Their Rashi is {self.story.rashi}")
-        
-        if self.story.gotra:
-            parts.append(f"Their Gotra is {self.story.gotra}")
-            
-        if self.story.temple_visits:
-            parts.append(f"They have previously visited: {', '.join(self.story.temple_visits)}")
-            
-        if self.story.purchase_history:
-            parts.append(f"They have purchased spiritual items like: {', '.join(self.story.purchase_history)}")
-
-        if self.user_quotes:
-            # Provide up to 3 recent significant quotes *before* the current one
-            # (Assuming the current one was just added as the last item)
-            past_quotes = [q["quote"] for q in self.user_quotes[-4:-1] if len(q["quote"]) > 10]
-            if past_quotes:
-                parts.append(f"Earlier in this conversation they mentioned: {'; '.join(past_quotes)}")
-            
-            # If there's only one quote (current turn), don't add it as "previously mentioned"
-            # The LLM gets the current message separately anyway.
 
         return ". ".join(parts) if parts else "This is the start of the conversation."
 

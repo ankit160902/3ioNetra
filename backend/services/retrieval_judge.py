@@ -228,23 +228,28 @@ class RetrievalJudge:
         if intent_str in simple_intents:
             return "simple"
 
-        # Fix 7: Emotional crisis queries need decomposition
+        # Emotional expressions (joy, gratitude, casual sharing) — simple path
+        # Only crisis emotions need decomposition, not all emotions
         emotion = (intent_analysis.get("emotion") or "").lower()
+        if intent_str == "EXPRESSING_EMOTION" and emotion not in self._COMPLEX_EMOTIONS:
+            return "simple"
+
+        # Fix 7: Emotional crisis queries need decomposition
         if emotion in self._COMPLEX_EMOTIONS:
             return "complex"
 
+        # Use original message word count if available (enriched queries inflate word count)
         query_lower = query.lower()
         words = query_lower.split()
+        # Enriched queries contain " | " separators — use segment before first pipe for word count
+        if " | " in query_lower:
+            words = query_lower.split(" | ")[0].split()
         word_count = len(words)
 
-        # Long queries (>20 words) are always complex — catches emotional dumps
-        # that embed multiple concepts the embedding model can't handle in one shot.
-        # Must be checked BEFORE needs_direct_answer to catch verbose emotional venting.
-        if word_count > 20:
-            return "complex"
-
-        # Medium-length queries (15-20 words) with emotional or guidance intent — complex
-        if word_count > 15 and intent_str in {"SEEKING_GUIDANCE", "ASKING_INFO", "EXPRESSING_EMOTION"}:
+        # Very long queries (>30 words) are complex — genuine multi-concept dumps
+        # Threshold raised from 20 to 30: decomposition adds 30-60s of CPU-bound
+        # latency (3x RAG searches). Only worth it for truly complex queries.
+        if word_count > 30:
             return "complex"
 
         # Emotional sharing without needing direct answer — simple
