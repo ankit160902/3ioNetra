@@ -5,6 +5,7 @@ import re
 from typing import Tuple, Optional, TYPE_CHECKING, Dict, List
 
 from config import settings
+from constants import TRIVIAL_MESSAGES
 from models.session import SessionState, ConversationPhase, SignalType, IntentType
 from models.memory_context import ConversationMemory
 from services.panchang_service import get_panchang_service
