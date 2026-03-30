@@ -209,8 +209,10 @@ class IntentAgent:
                     }
                 )
 
-            # Run in thread pool so it doesn't block the event loop
-            response_text = await asyncio.to_thread(_sync_call)
+            # Run in thread pool with 8s timeout — fall back to keyword matching if Gemini is slow
+            response_text = await asyncio.wait_for(
+                asyncio.to_thread(_sync_call), timeout=8.0
+            )
 
             raw_text = response_text.text.strip()
             # Handle potential markdown code blocks in response
