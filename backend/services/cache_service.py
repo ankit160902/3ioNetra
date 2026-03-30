@@ -47,7 +47,7 @@ class CacheService:
 
     def __init__(self):
         self._enabled = False
-        self._l1 = _LRUCache(max_size=200)
+        self._l1 = _LRUCache(max_size=1000)
         try:
             import redis.asyncio as aioredis
             import redis as sync_redis
@@ -57,7 +57,7 @@ class CacheService:
                 db=settings.REDIS_DB,
                 password=settings.REDIS_PASSWORD,
                 decode_responses=True,
-                max_connections=20,
+                max_connections=100,
                 socket_connect_timeout=3,
                 socket_timeout=5,
                 retry_on_timeout=True,

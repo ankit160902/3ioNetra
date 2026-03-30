@@ -183,7 +183,7 @@ class RedisSessionManager(SessionManager):
             db=settings.REDIS_DB,
             password=settings.REDIS_PASSWORD,
             decode_responses=True,
-            max_connections=20,
+            max_connections=100,
             socket_connect_timeout=3,
             socket_timeout=5,
             retry_on_timeout=True,

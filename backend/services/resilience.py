@@ -1,4 +1,5 @@
 import time
+import random
 import logging
 from enum import Enum
 from typing import Callable, Any, Optional
@@ -48,7 +49,8 @@ class CircuitBreaker:
     def _check_state(self):
         """Transition from OPEN to HALF_OPEN if timeout elapsed."""
         if self.state == CircuitState.OPEN and self.last_failure_time:
-            if time.time() - self.last_failure_time > self.recovery_timeout:
+            jitter = random.uniform(0, self.recovery_timeout * 0.25)
+            if time.time() - self.last_failure_time > (self.recovery_timeout + jitter):
                 logger.info(f"Circuit {self.name} transitioning to HALF-OPEN")
                 self.state = CircuitState.HALF_OPEN
 

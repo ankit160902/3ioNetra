@@ -38,4 +38,4 @@ EXPOSE 8080
 
 # Use shell form for CMD to allow environment variable expansion ($PORT)
 # This is critical for Google Cloud Run compatibility
-CMD uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 65
+CMD gunicorn main:app --bind 0.0.0.0:${PORT:-8080} --worker-class uvicorn.workers.UvicornWorker --workers 4 --timeout 300 --keep-alive 65 --max-requests 1000 --max-requests-jitter 50 --graceful-timeout 30 --preload

@@ -772,7 +772,7 @@ class RAGPipeline:
             prefix = "query: " if is_query else "passage: "
             clean_text = prefix + clean_text
 
-        vec = self._embedding_model.encode([clean_text], convert_to_tensor=False, show_progress_bar=False)[0]
+        vec = (await asyncio.to_thread(self._embedding_model.encode, [clean_text], convert_to_tensor=False, show_progress_bar=False))[0]
         return np.asarray(vec, dtype="float32")
 
     # ------------------------------------------------------------------
@@ -1385,7 +1385,7 @@ Respond ONLY with 2 terms, separated by a newline."""
             # Cross-encoder scores (duck-typing supports API-based rerankers)
             if self._reranker_model is not None:
                 if hasattr(self._reranker_model, 'predict'):
-                    re_scores = self._reranker_model.predict(pairs)
+                    re_scores = await asyncio.to_thread(self._reranker_model.predict, pairs)
                 elif hasattr(self._reranker_model, 'rerank'):
                     documents = [pair[1] for pair in pairs]
                     re_scores = self._reranker_model.rerank(query, documents)
