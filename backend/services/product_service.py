@@ -214,12 +214,56 @@ class ProductService:
 
             return score
 
-        # Sort by score descending
+        # Sort by keyword score descending
         sorted_products = sorted(raw_products, key=calculate_score, reverse=True)
 
         # Clean up internal _text_score field before returning (Issue 29)
         for p in sorted_products:
             p.pop("_text_score", None)
+
+        # ── Semantic Reranking via Embeddings ──
+        # Use the RAG pipeline's embedding model to compute cosine similarity
+        # between the conversation context and each product's name+description.
+        # This ensures products are semantically relevant (e.g., Vishnu products
+        # rank higher when talking about Vishnu, not random Durga murtis).
+        try:
+            from routers.dependencies import get_rag_pipeline
+            rag = get_rag_pipeline()
+            if rag and rag.available and rag._embedding_model is not None and sorted_products:
+                import numpy as np
+                # Build context string from query + deity
+                context = query_text
+                if deity:
+                    context = f"{deity} {context}"
+
+                context_vec = rag._embedding_model.encode(
+                    [f"query: {context}"], convert_to_tensor=False, show_progress_bar=False
+                )[0]
+                context_vec = np.asarray(context_vec, dtype="float32")
+                context_norm = np.linalg.norm(context_vec)
+                if context_norm > 0:
+                    context_vec /= context_norm
+
+                for p in sorted_products:
+                    product_text = f"{p.get('name', '')} {p.get('description', '')[:200]}"
+                    prod_vec = rag._embedding_model.encode(
+                        [f"passage: {product_text}"], convert_to_tensor=False, show_progress_bar=False
+                    )[0]
+                    prod_vec = np.asarray(prod_vec, dtype="float32")
+                    prod_norm = np.linalg.norm(prod_vec)
+                    if prod_norm > 0:
+                        prod_vec /= prod_norm
+                    sim = float(np.dot(context_vec, prod_vec))
+                    # Blend: 40% keyword score + 60% semantic similarity (scaled to ~100)
+                    keyword_score = calculate_score(p)
+                    p["_final_score"] = 0.4 * keyword_score + 0.6 * (sim * 100)
+
+                sorted_products = sorted(sorted_products, key=lambda x: x.get("_final_score", 0), reverse=True)
+                for p in sorted_products:
+                    p.pop("_final_score", None)
+                logger.info(f"Product semantic reranking applied for context='{context[:40]}'")
+        except Exception as e:
+            logger.warning(f"Semantic reranking skipped (non-fatal): {e}")
 
         # Deduplicate products by name (catalog may have duplicate entries)
         seen_names = set()
