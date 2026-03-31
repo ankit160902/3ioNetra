@@ -35,7 +35,7 @@ TIER_MODELS = {
 # Tier → generation config
 TIER_CONFIGS = {
     ModelTier.ECONOMY: {
-        "max_output_tokens": 512,
+        "max_output_tokens": 256,
         "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
@@ -47,8 +47,8 @@ TIER_CONFIGS = {
         ],
     },
     ModelTier.STANDARD: {
-        "max_output_tokens": 768,
-        "thinking_config": {"thinking_budget": 128},
+        "max_output_tokens": 400,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -59,8 +59,8 @@ TIER_CONFIGS = {
         ],
     },
     ModelTier.PREMIUM: {
-        "max_output_tokens": settings.RESPONSE_MAX_TOKENS,
-        "thinking_config": {"thinking_budget": 256},
+        "max_output_tokens": 512,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
