@@ -272,7 +272,7 @@ class LLMService:
 
             self.client = genai.Client(
                 api_key=self.api_key,
-                http_options={"timeout": 30000},  # 30s HTTP timeout — allows streaming but caps max wait
+                http_options={"timeout": 15000},  # 15s HTTP timeout — caps max thread hang time
             )
             self.available = True
             self._gemini_caches = {}  # {cache_key: cache_name}
