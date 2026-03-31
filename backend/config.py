@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
-    RESPONSE_MAX_TOKENS: int = 512
+    RESPONSE_MAX_TOKENS: int = 2048
     INTENT_TEMPERATURE: float = 0.1
     QUERY_TRANSLATE_TEMPERATURE: float = 0.1
     QUERY_EXPAND_TEMPERATURE: float = 0.3

@@ -528,7 +528,7 @@ class LLMService:
         """Build the Gemini generation config dict."""
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
-            "max_output_tokens": 200,
+            "max_output_tokens": 2048,
             "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},

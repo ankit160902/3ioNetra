@@ -35,7 +35,7 @@ TIER_MODELS = {
 # Tier → generation config
 TIER_CONFIGS = {
     ModelTier.ECONOMY: {
-        "max_output_tokens": 256,
+        "max_output_tokens": 1024,
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -46,7 +46,7 @@ TIER_CONFIGS = {
         ],
     },
     ModelTier.STANDARD: {
-        "max_output_tokens": 400,
+        "max_output_tokens": 2048,
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -57,7 +57,7 @@ TIER_CONFIGS = {
         ],
     },
     ModelTier.PREMIUM: {
-        "max_output_tokens": 512,
+        "max_output_tokens": 2048,
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -230,12 +230,12 @@ def _make_decision(tier: ModelTier, reason: str, phase: Optional[ConversationPha
     model = TIER_MODELS[tier]
     config = TIER_CONFIGS[tier].copy()
 
-    # Reduce token budget for listening phase — only ~150 tokens typically used
+    # Listening phase: keep generous budget — thinking tokens count towards limit
     if phase == ConversationPhase.LISTENING:
         if tier == ModelTier.ECONOMY:
-            config["max_output_tokens"] = 256   # was 512
+            config["max_output_tokens"] = 1024
         elif tier == ModelTier.STANDARD:
-            config["max_output_tokens"] = 512   # was 768
+            config["max_output_tokens"] = 1024
 
     logger.info(f"MODEL_ROUTE | tier={tier.value} model={model} reason={reason} max_tokens={config.get('max_output_tokens')}")
     return RoutingDecision(

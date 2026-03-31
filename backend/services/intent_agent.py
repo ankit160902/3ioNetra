@@ -212,8 +212,8 @@ class IntentAgent:
                         "temperature": settings.INTENT_TEMPERATURE,
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},
-                        "max_output_tokens": 256,
-                        "thinking_config": {"thinking_budget": 128},
+                        "max_output_tokens": 1024,
+                        "thinking_config": {"thinking_budget": 256},
                     }
                 )
 
