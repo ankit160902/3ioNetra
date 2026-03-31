@@ -236,7 +236,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Circuit Breaker Settings
     # ------------------------------------------------------------------
-    CIRCUIT_BREAKER_THRESHOLD: int = 2   # Trip after 2 failures (was 5) — fail fast
+    CIRCUIT_BREAKER_THRESHOLD: int = 1   # Trip after 1 failure — fastest possible fail-fast
     CIRCUIT_BREAKER_TIMEOUT: int = 15    # Recover after 15s (was 60) — retry sooner
 
     # ------------------------------------------------------------------

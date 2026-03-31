@@ -1198,7 +1198,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                 return await asyncio.to_thread(_sync)
 
             stream = await asyncio.wait_for(
-                self.circuit_breaker.call(_do_stream_call), timeout=7.0
+                self.circuit_breaker.call(_do_stream_call), timeout=5.0
             )
 
             queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -1313,7 +1313,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                 return await asyncio.to_thread(_sync)
 
             response = await asyncio.wait_for(
-                self.circuit_breaker.call(_do_call), timeout=7.0
+                self.circuit_breaker.call(_do_call), timeout=5.0
             )
 
             # Fallback responses in case of errors or empty responses

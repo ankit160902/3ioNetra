@@ -217,9 +217,9 @@ class IntentAgent:
                     }
                 )
 
-            # Run in thread pool with 4s timeout — keyword fallback is good enough
+            # Run in thread pool with 2s timeout — keyword fallback is reliable
             response_text = await asyncio.wait_for(
-                asyncio.to_thread(_sync_call), timeout=4.0
+                asyncio.to_thread(_sync_call), timeout=2.0
             )
 
             raw_text = response_text.text.strip()
