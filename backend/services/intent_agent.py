@@ -207,7 +207,6 @@ class IntentAgent:
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},
                         "max_output_tokens": 1024,
-                        "thinking_config": {"thinking_budget": 256},
                     }
                 )
 

@@ -36,6 +36,7 @@ TIER_MODELS = {
 TIER_CONFIGS = {
     ModelTier.ECONOMY: {
         "max_output_tokens": 1024,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -47,6 +48,7 @@ TIER_CONFIGS = {
     },
     ModelTier.STANDARD: {
         "max_output_tokens": 2048,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
@@ -58,6 +60,7 @@ TIER_CONFIGS = {
     },
     ModelTier.PREMIUM: {
         "max_output_tokens": 2048,
+        "thinking_config": {"thinking_budget": 0},
         "temperature": settings.RESPONSE_TEMPERATURE,
         "automatic_function_calling": {"disable": True},
         "safety_settings": [
