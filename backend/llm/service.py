@@ -272,7 +272,7 @@ class LLMService:
 
             self.client = genai.Client(
                 api_key=self.api_key,
-                http_options={"timeout": 60000},  # 60s HTTP timeout — Gemini thinking mode needs time
+                http_options={"timeout": 30000},  # 30s — balanced for thinking mode + streaming
             )
             self.available = True
             self._gemini_caches = {}  # {cache_key: cache_name}
