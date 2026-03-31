@@ -55,9 +55,18 @@ def clean_response(text: str) -> str:
     """Remove trailing questions and clean formatting, especially from [VERSE] tags"""
     if not text:
         return ""
-        
+
     # Simply return the text cleaned of whitespace initially
     text = text.strip()
+
+    # Strip markdown bold/italic from entire response (Gemini sometimes adds **bold** despite instructions)
+    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', text)  # ***bold italic*** → plain
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)       # **bold** → plain
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'\1', text)  # *italic* → plain
+    # Strip markdown headers
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+    # Strip markdown bullet points (- or *) at start of lines
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
     
     # Robustly clean content inside [VERSE] tags to prevent markdown artifacts
     def clean_verse_content(match):
