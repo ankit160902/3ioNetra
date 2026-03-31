@@ -211,9 +211,9 @@ class IntentAgent:
                     }
                 )
 
-            # Run in thread pool with 8s timeout — fall back to keyword matching if Gemini is slow
+            # Run in thread pool with 4s timeout — keyword fallback is good enough
             response_text = await asyncio.wait_for(
-                asyncio.to_thread(_sync_call), timeout=8.0
+                asyncio.to_thread(_sync_call), timeout=4.0
             )
 
             raw_text = response_text.text.strip()
