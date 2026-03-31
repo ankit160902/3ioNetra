@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM Settings
     # ------------------------------------------------------------------
-    GEMINI_MODEL: str = "gemini-3-flash-preview"  # Rich quality, faster than 2.5-flash
-    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # Intent detection — fast, no thinking overhead
+    GEMINI_MODEL: str = "gemini-2.0-flash"  # Fast, no thinking — 2-3s responses
+    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # Same model for intent
     GEMINI_CACHE_TTL: int = Field(default=21600, env="GEMINI_CACHE_TTL")  # 6 hours — context caching for system instruction
 
     # Per-task LLM temperatures

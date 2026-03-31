@@ -529,7 +529,6 @@ class LLMService:
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
             "max_output_tokens": 2048,
-            "thinking_config": {"thinking_budget": 0},
             "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
