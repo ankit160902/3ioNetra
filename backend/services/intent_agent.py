@@ -194,12 +194,6 @@ class IntentAgent:
         if not self.available:
             return self._fallback_analysis(message)
 
-        # Check LLM circuit breaker — skip Gemini if it's known to be down
-        from services.resilience import CircuitState
-        if hasattr(self.llm, 'circuit_breaker') and self.llm.circuit_breaker.state == CircuitState.OPEN:
-            logger.info("Intent: LLM circuit OPEN, using keyword fallback")
-            return self._fallback_analysis(message)
-
         prompt = self.INTENT_PROMPT.format(message=message, context=context_summary)
 
         try:
@@ -217,10 +211,8 @@ class IntentAgent:
                     }
                 )
 
-            # Run in thread pool with 2s timeout — keyword fallback is reliable
-            response_text = await asyncio.wait_for(
-                asyncio.to_thread(_sync_call), timeout=2.0
-            )
+            # Run in thread pool — no timeout, let Gemini complete
+            response_text = await asyncio.to_thread(_sync_call)
 
             raw_text = response_text.text.strip()
             # Handle potential markdown code blocks in response
