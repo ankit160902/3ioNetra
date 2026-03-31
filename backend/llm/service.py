@@ -272,7 +272,7 @@ class LLMService:
 
             self.client = genai.Client(
                 api_key=self.api_key,
-                http_options={"timeout": 20000},  # 20s HTTP timeout — enough for Gemini thinking + response
+                http_options={"timeout": 60000},  # 60s HTTP timeout — Gemini thinking mode needs time
             )
             self.available = True
             self._gemini_caches = {}  # {cache_key: cache_name}
@@ -1196,7 +1196,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
                 return await asyncio.to_thread(_sync)
 
-            stream = await self.circuit_breaker.call(_do_stream_call)
+            stream = await _do_stream_call()
 
             queue: asyncio.Queue[str | None] = asyncio.Queue()
 
@@ -1309,7 +1309,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
                 return await asyncio.to_thread(_sync)
 
-            response = await self.circuit_breaker.call(_do_call)
+            response = await _do_call()
 
             # Fallback responses in case of errors or empty responses
             fallbacks = [
