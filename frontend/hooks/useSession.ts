@@ -247,13 +247,25 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
           ...authHeader,
         };
 
+        // AbortController for timeout — cancel request if no data for 30s
+        const controller = new AbortController();
+        let lastDataTime = Date.now();
+        const timeoutInterval = setInterval(() => {
+          if (Date.now() - lastDataTime > 30000) {
+            controller.abort();
+            clearInterval(timeoutInterval);
+          }
+        }, 5000);
+
         const res = await fetch(`${API_URL}/api/conversation/stream`, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
+          signal: controller.signal,
         });
 
         if (!res.ok) {
+          clearInterval(timeoutInterval);
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || 'Stream request failed');
         }
@@ -263,30 +275,35 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         let buffer = '';
         let currentEvent = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            lastDataTime = Date.now(); // reset timeout on each chunk
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (line.startsWith('event: ')) {
-              currentEvent = line.slice(7).trim();
-            } else if (line.startsWith('data: ') && currentEvent) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (currentEvent === 'metadata') onMetadata(data);
-                else if (currentEvent === 'token') onToken(data.text);
-                else if (currentEvent === 'done') onDone(data);
-                else if (currentEvent === 'status' && onStatus) onStatus(data);
-                else if (currentEvent === 'error') onError(new Error(data.message));
-              } catch {
-                // skip malformed JSON lines
+            for (const line of lines) {
+              if (line.startsWith('event: ')) {
+                currentEvent = line.slice(7).trim();
+              } else if (line.startsWith('data: ') && currentEvent) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (currentEvent === 'metadata') onMetadata(data);
+                  else if (currentEvent === 'token') onToken(data.text);
+                  else if (currentEvent === 'done') onDone(data);
+                  else if (currentEvent === 'status' && onStatus) onStatus(data);
+                  else if (currentEvent === 'error') onError(new Error(data.message));
+                } catch {
+                  // skip malformed JSON lines
+                }
+                currentEvent = '';
               }
-              currentEvent = '';
             }
           }
+        } finally {
+          clearInterval(timeoutInterval);
         }
       } catch (e: any) {
         setError(e.message || 'Stream failed');

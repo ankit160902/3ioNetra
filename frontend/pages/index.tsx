@@ -190,15 +190,18 @@ export default function Home() {
 
   useEffect(() => {
     const now = Date.now();
-    if (isProcessing && now - lastScrollRef.current < 100) return;
+    // During streaming, throttle scroll to every 200ms to avoid jank
+    // After streaming, scroll immediately
+    const throttle = isStreamingRef.current ? 200 : 0;
+    if (now - lastScrollRef.current < throttle) return;
     lastScrollRef.current = now;
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: isStreamingRef.current ? 'auto' : 'smooth' });
   }, [messages, isProcessing]);
 
 
-  // Auto-save conversation whenever messages change
+  // Auto-save conversation after streaming completes (not during)
   useEffect(() => {
-    if (!isAuthenticated || messages.length < 2) return;
+    if (!isAuthenticated || messages.length < 2 || isProcessing) return;
     const convId = currentConversationId || session.sessionId;
     if (!convId) return;
 
@@ -207,10 +210,10 @@ export default function Home() {
         await saveConversation(convId);
         await fetchHistory();
       } catch (err) { console.error('Auto-save failed:', err); }
-    }, 1500);
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, [messages, currentConversationId, session.sessionId, isAuthenticated]);
+  }, [messages, currentConversationId, session.sessionId, isAuthenticated, isProcessing]);
 
   useEffect(() => {
     setMessages([]);
