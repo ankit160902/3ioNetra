@@ -6,7 +6,7 @@ pydantic-settings
 pymongo
 
 # LLM
-google-genai
+google-genai>=1.61.0
 gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)
