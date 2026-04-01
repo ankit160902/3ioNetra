@@ -1,6 +1,7 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
+from config import settings
 from .auth_service import get_mongo_client
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,8 @@ class ProductService:
             return []
 
     async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
-                              emotion: str = "", deity: str = "") -> List[Dict[str, Any]]:
+                              emotion: str = "", deity: str = "",
+                              allow_category_fallback: bool = True) -> List[Dict[str, Any]]:
         """Search products by name or category with precision and domain context"""
         import re
         # Tokenize and clean
@@ -265,6 +267,14 @@ class ProductService:
         except Exception as e:
             logger.warning(f"Semantic reranking skipped (non-fatal): {e}")
 
+        # Minimum relevance gate: drop products below the score floor
+        min_score = getattr(settings, 'PRODUCT_MIN_RELEVANCE_SCORE', 15.0)
+        pre_filter_count = len(sorted_products)
+        sorted_products = [p for p in sorted_products if calculate_score(p) >= min_score]
+        if pre_filter_count > 0 and not sorted_products:
+            logger.info(f"All {pre_filter_count} products below min relevance score ({min_score}) for query '{query_text[:40]}'")
+            return []
+
         # Deduplicate products by name (catalog may have duplicate entries)
         seen_names = set()
         deduped = []
@@ -290,7 +300,8 @@ class ProductService:
                 break
 
         # Category-level fallback: fill remaining slots from domain-relevant categories
-        if len(diverse) < limit and life_domain:
+        # Only used for explicit product requests — non-explicit paths pass allow_category_fallback=False
+        if allow_category_fallback and len(diverse) < limit and life_domain:
             fallback_categories = self.DOMAIN_CATEGORY_MAP.get(life_domain.lower(), [])
             if fallback_categories and self.collection is not None:
                 existing_names = {p.get("name") for p in diverse}

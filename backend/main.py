@@ -12,7 +12,6 @@ from fastapi import FastAPI, Request
 # Increase thread pool to prevent exhaustion from hanging Gemini calls
 asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=128))
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 
 from config import settings
@@ -91,18 +90,34 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Request latency middleware
-class LatencyMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
+# Request latency middleware — pure ASGI (does NOT buffer response bodies, preserving SSE streaming)
+# NOTE: BaseHTTPMiddleware buffers the entire response before sending, which breaks StreamingResponse.
+class LatencyMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start = time.perf_counter()
-        response = await call_next(request)
-        elapsed_ms = round((time.perf_counter() - start) * 1000)
-        path = request.url.path
-        # Only log API endpoints, skip static/health
-        if path.startswith("/api") and path not in ("/api/health", "/api/ready"):
-            logger.info(f"REQ_LATENCY {request.method} {path} {response.status_code} {elapsed_ms}ms")
-        response.headers["X-Response-Time-Ms"] = str(elapsed_ms)
-        return response
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                elapsed_ms = round((time.perf_counter() - start) * 1000)
+                headers = list(message.get("headers", []))
+                headers.append((b"x-response-time-ms", str(elapsed_ms).encode()))
+                message = {**message, "headers": headers}
+
+                path = scope.get("path", "")
+                method = scope.get("method", "")
+                status_code = message.get("status", 0)
+                if path.startswith("/api") and path not in ("/api/health", "/api/ready"):
+                    logger.info(f"REQ_LATENCY {method} {path} {status_code} {elapsed_ms}ms")
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 app.add_middleware(LatencyMiddleware)
 

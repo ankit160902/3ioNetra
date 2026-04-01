@@ -205,8 +205,9 @@ class IntentAgent:
                     config={
                         "temperature": settings.INTENT_TEMPERATURE,
                         "response_mime_type": "application/json",
-                        "automatic_function_calling": {"disable": True},
                         "max_output_tokens": 1024,
+                        "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                        "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True),
                     }
                 )
 

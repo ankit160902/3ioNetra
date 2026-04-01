@@ -46,34 +46,35 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
         # try to inherit context from the user's recent past sessions.
         if not session.memory.story.primary_concern and not session.is_returning_user:
             try:
-                storage = get_conversation_storage()
-                recent = await storage.get_recent_conversation_summaries(user["id"], limit=5)
-                if recent:
-                    from models.memory_context import ConversationMemory
-                    # Use latest conversation as base memory
-                    latest = recent[0]
-                    if latest.get("memory"):
-                        session.memory = ConversationMemory.from_dict(latest["memory"])
-                    session.is_returning_user = True
-                    session.memory.is_returning_user = True
-                    # Re-set user fields after memory override
-                    session.memory.user_id = user.get('id')
-                    session.memory.user_name = user.get('name')
+                async def _inherit_memory():
+                    storage = get_conversation_storage()
+                    recent = await storage.get_recent_conversation_summaries(user["id"], limit=5)
+                    if recent:
+                        from models.memory_context import ConversationMemory
+                        latest = recent[0]
+                        if latest.get("memory"):
+                            session.memory = ConversationMemory.from_dict(latest["memory"])
+                        session.is_returning_user = True
+                        session.memory.is_returning_user = True
+                        session.memory.user_id = user.get('id')
+                        session.memory.user_name = user.get('name')
 
-                    # Build journey summary from all recent conversations
-                    journey_parts = []
-                    for conv in recent:
-                        conv_summary = conv.get("conversation_summary", "")
-                        if not conv_summary and conv.get("memory"):
-                            mem = ConversationMemory.from_dict(conv["memory"])
-                            conv_summary = mem.get_memory_summary()
-                        if conv_summary:
-                            date = str(conv.get("updated_at", ""))[:10]
-                            journey_parts.append(f"[{date}]: {conv_summary}")
+                        journey_parts = []
+                        for conv in recent:
+                            conv_summary = conv.get("conversation_summary", "")
+                            if not conv_summary and conv.get("memory"):
+                                mem = ConversationMemory.from_dict(conv["memory"])
+                                conv_summary = mem.get_memory_summary()
+                            if conv_summary:
+                                date = str(conv.get("updated_at", ""))[:10]
+                                journey_parts.append(f"[{date}]: {conv_summary}")
 
-                    # Store on memory object so it persists in prompt regardless of history window
-                    session.memory.previous_session_summary = " | ".join(journey_parts[:5])
-                    logger.info(f"Inherited journey context from {len(recent)} conversations for user {user['id']}")
+                        session.memory.previous_session_summary = " | ".join(journey_parts[:5])
+                        logger.info(f"Inherited journey context from {len(recent)} conversations for user {user['id']}")
+
+                await asyncio.wait_for(_inherit_memory(), timeout=10.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"Memory inheritance timed out for user {user.get('id')}")
             except Exception as e:
                 logger.error(f"Failed to inherit memory context: {e}")
 
@@ -133,22 +134,34 @@ async def _get_or_create_session(
             session = None
 
         if not session and user:
-            storage = get_conversation_storage()
-            conv = await storage.get_conversation(user["id"], query.session_id)
-            if conv:
-                logger.info(f"Restoring expired session {query.session_id} from persistent history")
-                session = await session_manager.create_session(
-                    min_signals=settings.MIN_SIGNALS_THRESHOLD,
-                    min_turns=settings.MIN_CLARIFICATION_TURNS,
-                    max_turns=settings.MAX_CLARIFICATION_TURNS
-                )
-                session.session_id = query.session_id
-                session.conversation_history = conv.get("messages", [])
-                session.is_returning_user = True
-                memory_snapshot = conv.get("memory")
-                await companion_engine.reconstruct_memory(session, session.conversation_history, snapshot=memory_snapshot)
-                session.memory.is_returning_user = True
-                await session_manager.update_session(session)
+            try:
+                async def _restore_session():
+                    storage = get_conversation_storage()
+                    conv = await storage.get_conversation(user["id"], query.session_id)
+                    if conv:
+                        logger.info(f"Restoring expired session {query.session_id} from persistent history")
+                        s = await session_manager.create_session(
+                            min_signals=settings.MIN_SIGNALS_THRESHOLD,
+                            min_turns=settings.MIN_CLARIFICATION_TURNS,
+                            max_turns=settings.MAX_CLARIFICATION_TURNS
+                        )
+                        s.session_id = query.session_id
+                        s.conversation_history = conv.get("messages", [])
+                        s.is_returning_user = True
+                        memory_snapshot = conv.get("memory")
+                        await companion_engine.reconstruct_memory(s, s.conversation_history, snapshot=memory_snapshot)
+                        s.memory.is_returning_user = True
+                        await session_manager.update_session(s)
+                        return s
+                    return None
+
+                restored = await asyncio.wait_for(_restore_session(), timeout=15.0)
+                if restored:
+                    session = restored
+            except asyncio.TimeoutError:
+                logger.warning(f"Session restoration timed out for session {query.session_id}")
+            except Exception as e:
+                logger.error(f"Session restoration failed: {e}")
 
         if not session:
             session = await session_manager.create_session(

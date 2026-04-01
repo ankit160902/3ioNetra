@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM Settings
     # ------------------------------------------------------------------
-    GEMINI_MODEL: str = "gemini-2.0-flash"  # Fast, no thinking — 2-3s responses
-    GEMINI_FAST_MODEL: str = "gemini-2.0-flash"  # Same model for intent
+    GEMINI_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")  # Fast, no thinking — 2-3s responses
+    GEMINI_FAST_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_FAST_MODEL")  # Same model for intent
     GEMINI_CACHE_TTL: int = Field(default=21600, env="GEMINI_CACHE_TTL")  # 6 hours — context caching for system instruction
 
     # Per-task LLM temperatures
@@ -158,6 +158,7 @@ class Settings(BaseSettings):
     PRODUCT_SUPPRESS_EMOTIONS: str = "grief,despair,hopelessness,crisis,shame"
     PRODUCT_GUIDANCE_CONTEXT_ENABLED: bool = True   # Allow context-based products in guidance phase
     PRODUCT_LISTENING_PROACTIVE_ENABLED: bool = False  # Disable proactive products in listening phase
+    PRODUCT_MIN_RELEVANCE_SCORE: float = 15.0         # Min combined score to include a product (15 ≈ one name keyword match)
 
     # ------------------------------------------------------------------
     # Safety / Crisis

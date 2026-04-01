@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { Send, Loader2, RefreshCw, LogOut, User, History, ChevronDown, BookOpen, Activity, ThumbsUp, ThumbsDown } from 'lucide-react';
 import Head from 'next/head';
-import { useSession, Citation, SourceReference, FlowMetadata, UserProfile, Product } from '../hooks/useSession';
+import { useSession, Citation, SourceReference, FlowMetadata, UserProfile, Product, AuthExpiredError } from '../hooks/useSession';
 import { PhaseIndicatorCompact } from '../components/PhaseIndicator';
 import { useAuth } from '../hooks/useAuth';
 import LoginPage from '../components/LoginPage';
@@ -223,6 +223,26 @@ export default function Home() {
     }
   }, [user?.id, isAuthenticated]);
 
+  // Re-validate auth when tab becomes visible after being backgrounded
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const authHdr = getAuthHeader();
+      if (!authHdr) return;
+      try {
+        const res = await fetch(`${API_URL}/api/auth/verify`, { headers: authHdr });
+        if (res.status === 401) logout();
+      } catch {
+        // Network error — don't logout, could be transient
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isAuthenticated, getAuthHeader, logout]);
+
   const fetchHistory = async () => {
     if (!isAuthenticated) return;
     try {
@@ -379,6 +399,7 @@ export default function Home() {
           async (err) => {
             isStreamingRef.current = false;
             setLoadingStatus('');
+            if (err instanceof AuthExpiredError) { logout(); return; }
             console.warn('Stream failed, falling back:', err);
             // Remove placeholder
             setMessages((prev) => prev.slice(0, -1));
@@ -412,6 +433,7 @@ export default function Home() {
               }
             } catch (fallbackErr) {
               console.error('Fallback also failed:', fallbackErr);
+              if (fallbackErr instanceof AuthExpiredError) { logout(); return; }
               setMessages((prev) => [...prev, {
                 role: 'assistant',
                 content: 'I apologize, but I encountered an error. Please try again.',
@@ -425,6 +447,7 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Error in handleTextSubmit:', error);
+      if (error instanceof AuthExpiredError) { logout(); return; }
       // Remove placeholder if it exists
       setMessages((prev) => {
         if (prev.length > 0 && prev[prev.length - 1].role === 'assistant' && prev[prev.length - 1].content === '') {

@@ -845,7 +845,8 @@ class RAGPipeline:
                 return self._llm.client.models.generate_content(
                     model=settings.GEMINI_FAST_MODEL, contents=prompt,
                     config={"temperature": settings.QUERY_TRANSLATE_TEMPERATURE, "max_output_tokens": 100,
-                            "automatic_function_calling": {"disable": True}})
+                            "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
             response = await asyncio.to_thread(_sync)
             translation = (response.text or "").strip()
             if translation:
@@ -898,7 +899,9 @@ Respond ONLY with 2 terms, separated by a newline."""
                 return self._llm.client.models.generate_content(
                     model=settings.GEMINI_FAST_MODEL,
                     contents=prompt,
-                    config={"temperature": settings.QUERY_EXPAND_TEMPERATURE, "max_output_tokens": 100, "automatic_function_calling": {"disable": True}}
+                    config={"temperature": settings.QUERY_EXPAND_TEMPERATURE, "max_output_tokens": 100,
+                            "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)}
                 )
 
             response = await asyncio.to_thread(_sync_expand)
@@ -940,7 +943,8 @@ Respond ONLY with 2 terms, separated by a newline."""
                 return self._llm.client.models.generate_content(
                     model=settings.GEMINI_FAST_MODEL, contents=prompt,
                     config={"temperature": settings.QUERY_SUMMARIZE_TEMPERATURE, "max_output_tokens": 50,
-                            "automatic_function_calling": {"disable": True}})
+                            "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                            "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
             response = await asyncio.to_thread(_sync)
             summary = (response.text or "").strip()
             if summary and len(summary.split()) <= 20:
@@ -1010,7 +1014,8 @@ Respond ONLY with 2 terms, separated by a newline."""
                     return self._llm.client.models.generate_content(
                         model=settings.GEMINI_FAST_MODEL, contents=prompt,
                         config={"temperature": settings.HYDE_TEMPERATURE, "max_output_tokens": 500,
-                                "automatic_function_calling": {"disable": True}})
+                                "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                                "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
                 response = await asyncio.to_thread(_sync)
                 raw = (response.text or "").strip()
                 passages = [p.strip() for p in raw.split("---") if p.strip()]

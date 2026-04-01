@@ -290,6 +290,8 @@ class LLMService:
         """Get or create a Gemini cached content for the system instruction.
         Returns cache name string or None if caching fails.
         Tracks expiry to avoid using stale cache references."""
+        if settings.GEMINI_CACHE_TTL <= 0:
+            return None
         cache_key = f"{model}:{phase_key}"
         entry = self._gemini_caches.get(cache_key)
         if entry:
@@ -529,7 +531,6 @@ class LLMService:
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
             "max_output_tokens": 2048,
-            "automatic_function_calling": {"disable": True},
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
                 {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
@@ -541,6 +542,11 @@ class LLMService:
         model = gen_config.pop("_model", settings.GEMINI_MODEL)
         sys_instruction = self._get_system_instruction(phase)
         phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
+
+        # Minimal thinking + disable AFC properly for Gemini 3 models
+        from google.genai import types as _gentypes
+        gen_config["thinking_config"] = _gentypes.ThinkingConfig(thinking_level="MINIMAL")
+        gen_config["automatic_function_calling"] = _gentypes.AutomaticFunctionCallingConfig(disable=True)
 
         cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)
         if cache_name:
@@ -1199,16 +1205,16 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             stream = await _do_stream_call()
 
             queue: asyncio.Queue[str | None] = asyncio.Queue()
+            loop = asyncio.get_event_loop()
 
             def _read_stream():
                 try:
                     for chunk in stream:
                         if chunk.text:
-                            queue.put_nowait(chunk.text)
+                            loop.call_soon_threadsafe(queue.put_nowait, chunk.text)
                 finally:
-                    queue.put_nowait(None)
+                    loop.call_soon_threadsafe(queue.put_nowait, None)
 
-            loop = asyncio.get_event_loop()
             reader_task = loop.run_in_executor(None, _read_stream)
 
             while True:
@@ -1382,14 +1388,22 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             return random.choice(fallbacks)
 
     async def generate_quick_response(self, prompt: str) -> str:
-        """Quick generation using the flash model for internal tasks (summaries, etc.)."""
+        """Quick generation using gemini-2.0-flash for internal tasks (grounding, summaries).
+        Uses the lightweight model — no thinking overhead, ~1s vs ~4s."""
         try:
-            from google import genai
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(
-                model=settings.GEMINI_FAST_MODEL,
-                contents=prompt,
-            )
+            from google.genai import types as _gentypes
+
+            def _sync():
+                return self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config={
+                        "temperature": 0.1,
+                        "max_output_tokens": 256,
+                        "automatic_function_calling": _gentypes.AutomaticFunctionCallingConfig(disable=True),
+                    },
+                )
+            response = await asyncio.to_thread(_sync)
             return response.text.strip() if response.text else ""
         except Exception as e:
             logger.error(f"Quick generation failed: {e}")

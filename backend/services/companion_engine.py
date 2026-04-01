@@ -493,6 +493,20 @@ class CompanionEngine:
             )
             recommend_from_intent = analysis.get("recommend_products", False)
 
+            # Guard: override LLM hallucination — never recommend products for
+            # informational / philosophical / verse-request intents
+            _no_product_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
+            if recommend_from_intent and (
+                intent in _no_product_intents
+                or "Verse Request" in turn_topics
+                or (intent == IntentType.SEEKING_GUIDANCE
+                    and (analysis.get("life_domain") or "").lower() == "spiritual"
+                    and not analysis.get("entities", {}).get("item")
+                    and not analysis.get("entities", {}).get("ritual"))
+            ):
+                logger.info(f"Product guard: overriding recommend_products=True for intent={intent}, topics={turn_topics}")
+                recommend_from_intent = False
+
             # Explicit user request — bypasses all gates except crisis
             if is_explicit_product_request:
                 if not self._should_suppress_products(session, analysis, is_explicit_request=True):
@@ -526,20 +540,24 @@ class CompanionEngine:
                         if context_terms:
                             search_terms = " ".join(context_terms[:6])
                         else:
-                            search_terms = message
-                    life_domain = analysis.get("life_domain", "unknown")
-                    logger.info(f"Intent-recommended products in guidance phase: {search_terms} | Domain: {life_domain}")
-                    products = await self.product_service.search_products(
-                        search_terms, life_domain=life_domain,
-                        emotion=analysis.get("emotion", ""),
-                        deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
-                    )
-                    if products:
-                        session.last_proactive_product_turn = session.turn_count
-                        session.product_event_count += 1
+                            logger.info("Intent recommended products but no specific search terms — skipping")
+                            search_terms = ""
+                    if search_terms:
+                        life_domain = analysis.get("life_domain", "unknown")
+                        logger.info(f"Intent-recommended products in guidance phase: {search_terms} | Domain: {life_domain}")
+                        products = await self.product_service.search_products(
+                            search_terms, life_domain=life_domain,
+                            emotion=analysis.get("emotion", ""),
+                            deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
+                            allow_category_fallback=False,
+                        )
+                        if products:
+                            session.last_proactive_product_turn = session.turn_count
+                            session.product_event_count += 1
 
-            # Proactive inference — fully gated
-            if not products:
+            # Proactive inference — fully gated; skip for informational/philosophical intents
+            _skip_proactive_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
+            if not products and intent not in _skip_proactive_intents and "Verse Request" not in turn_topics:
                 products = await self._infer_proactive_products(
                     session, message, analysis.get("life_domain", "unknown"),
                     analysis=analysis, is_guidance_phase=True)
@@ -648,7 +666,9 @@ class CompanionEngine:
                     session.product_event_count += 1
 
         # Proactive product inference in listening phase (disabled by default via config)
-        if not products:
+        # Skip for informational/philosophical intents
+        _skip_proactive_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
+        if not products and intent not in _skip_proactive_intents and "Verse Request" not in turn_topics:
             products = await self._infer_proactive_products(
                 session, message, analysis.get("life_domain", "unknown"),
                 analysis=analysis, is_guidance_phase=False)
@@ -1016,6 +1036,7 @@ class CompanionEngine:
                     emotion=(analysis.get("emotion", "") if analysis else ""),
                     deity=((analysis.get("entities", {}).get("deity", "") if analysis else "")
                            or session.memory.story.preferred_deity or ""),
+                    allow_category_fallback=False,
                 )
                 if products:
                     session.last_proactive_product_turn = session.turn_count
@@ -1050,6 +1071,7 @@ class CompanionEngine:
                         search_query, life_domain=life_domain,
                         emotion=analysis.get("emotion", ""),
                         deity=(entities.get("deity", "") or session.memory.story.preferred_deity or ""),
+                        allow_category_fallback=False,
                     )
                     if products:
                         session.last_proactive_product_turn = session.turn_count
@@ -1495,23 +1517,7 @@ class CompanionEngine:
                 memory.story.life_area = "Yoga Practice"
                 session.add_signal(SignalType.LIFE_DOMAIN, "Yoga Practice", 0.9)
 
-        # 4. PRODUCT & SERVICE INTENTS
-        # Explicit detection: Look for purchase intent or specific product questions
-        buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "available", "get", "recommend", "remedy", "products", "item", "items", "is there", "any"]
-        product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal", "oil", "tea", "supplement", "herbs", "ayurvedic", "journal", "pendant", "bracelet"]
-        
-        is_explicit_product_inquiry = False
-        if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text or "is there" in text or "suggest" in text or "love" in text or "get" in text)):
-            is_explicit_product_inquiry = True
-
-        if is_explicit_product_inquiry:
-            session.add_signal(SignalType.INTENT, "Product Inquiry", 0.9)
-            if "Product Inquiry" not in turn_topics:
-                turn_topics.append("Product Inquiry")
-            # Boost readiness as user is asking for specific items
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
-
-        # 5. VERSE & SCRIPTURE INTENTS
+        # 4. VERSE & SCRIPTURE INTENTS (checked before product detection to prevent false triggers)
         verse_keywords = ["verse", "verses", "scripture", "scriptures", "gita", "upanishad", "upanishads", "mantra", "mantras", "remind me", "wisdom", "sloka", "shloka", "philosophy"]
         intent_keywords = ["give", "tell", "provide", "share", "need", "want", "love", "send", "suggest", "provide me", "how to", "show", "read", "?"]
         if has_word(verse_keywords, text) and (any(w in text for w in intent_keywords)):
@@ -1520,6 +1526,23 @@ class CompanionEngine:
                 turn_topics.append("Verse Request")
             # Boost readiness significantly for direct scripture requests
             memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
+
+        # 5. PRODUCT & SERVICE INTENTS
+        # Skip product detection entirely if this is a verse/scripture request
+        if "Verse Request" not in turn_topics:
+            buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "products", "item", "items"]
+            product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal", "oil", "tea", "supplement", "herbs", "ayurvedic", "journal", "pendant", "bracelet"]
+
+            is_explicit_product_inquiry = False
+            if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text or "is there" in text or "suggest" in text or "love" in text or "get" in text)):
+                is_explicit_product_inquiry = True
+
+            if is_explicit_product_inquiry:
+                session.add_signal(SignalType.INTENT, "Product Inquiry", 0.9)
+                if "Product Inquiry" not in turn_topics:
+                    turn_topics.append("Product Inquiry")
+                # Boost readiness as user is asking for specific items
+                memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
 
         # 6. PROCEDURAL & ROUTINE INTENTS
         # Routine Request

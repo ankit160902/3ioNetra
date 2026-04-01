@@ -12,21 +12,27 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 # ----------------------------------------------------------------------------
 
 async def get_current_user(authorization: Optional[str] = Header(None)):
-    """Extract and verify user from Authorization header"""
+    """Extract and verify user from Authorization header.
+    Returns None for anonymous access (no header).
+    Raises 401 if a token is provided but invalid/expired.
+    """
     if not authorization:
         return None
 
     try:
-        # Expected format: "Bearer <token>"
         if " " not in authorization:
-            return None
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
 
         token = authorization.split(" ")[1]
         auth_service = get_auth_service()
         user = await asyncio.to_thread(auth_service.verify_token, token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Token expired or invalid")
         return user
+    except HTTPException:
+        raise
     except Exception:
-        return None
+        raise HTTPException(status_code=401, detail="Authentication failed")
 
 # ----------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS

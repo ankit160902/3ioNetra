@@ -74,6 +74,17 @@ export interface UserProfile {
 }
 
 /* =======================
+   Errors
+======================= */
+
+export class AuthExpiredError extends Error {
+  constructor() {
+    super('Session expired. Please log in again.');
+    this.name = 'AuthExpiredError';
+  }
+}
+
+/* =======================
    Config
 ======================= */
 
@@ -189,6 +200,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         });
 
         if (!res.ok) {
+          if (res.status === 401) throw new AuthExpiredError();
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || 'Conversation failed');
         }
@@ -266,6 +278,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
 
         if (!res.ok) {
           clearInterval(timeoutInterval);
+          if (res.status === 401) throw new AuthExpiredError();
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || 'Stream request failed');
         }
@@ -346,6 +359,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       });
 
       if (!res.ok) {
+        if (res.status === 401) throw new AuthExpiredError();
         throw new Error('Failed to load session');
       }
 
