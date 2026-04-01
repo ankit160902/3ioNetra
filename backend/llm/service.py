@@ -544,9 +544,10 @@ class LLMService:
         sys_instruction = self._get_system_instruction(phase)
         phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
 
-        # Minimal thinking + disable AFC properly for Gemini 3 models
+        # Disable AFC; only enable thinking for models that support it
         from google.genai import types as _gentypes
-        gen_config["thinking_config"] = _gentypes.ThinkingConfig(thinking_level="MINIMAL")
+        if any(tag in model for tag in ("2.5", "3-flash", "thinking")):
+            gen_config["thinking_config"] = _gentypes.ThinkingConfig(thinking_level="MINIMAL")
         gen_config["automatic_function_calling"] = _gentypes.AutomaticFunctionCallingConfig(disable=True)
 
         cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)

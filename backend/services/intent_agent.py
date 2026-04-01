@@ -206,7 +206,7 @@ class IntentAgent:
                         "temperature": settings.INTENT_TEMPERATURE,
                         "response_mime_type": "application/json",
                         "max_output_tokens": 1024,
-                        "thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL"),
+                        **({"thinking_config": __import__("google.genai", fromlist=["types"]).types.ThinkingConfig(thinking_level="MINIMAL")} if any(t in settings.GEMINI_FAST_MODEL for t in ("2.5", "3-flash", "thinking")) else {}),
                         "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True),
                     }
                 )
