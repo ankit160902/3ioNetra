@@ -127,6 +127,21 @@ class CacheService:
         except Exception as e:
             logger.error(f"Cache set error: {e}")
 
+    async def flush_prefix(self, prefix: str) -> int:
+        """Delete all cache keys matching a prefix. Returns count deleted."""
+        self._l1._store.clear()
+        if not self._enabled:
+            return 0
+        count = 0
+        try:
+            async for key in self._redis.scan_iter(match=f"cache:{prefix}:*", count=100):
+                await self._redis.delete(key)
+                count += 1
+            logger.info(f"Flushed {count} keys with prefix 'cache:{prefix}:*'")
+        except Exception as e:
+            logger.error(f"Cache flush error: {e}")
+        return count
+
     async def close(self) -> None:
         """Close Redis connection."""
         if self._enabled:

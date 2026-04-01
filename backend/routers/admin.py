@@ -32,6 +32,14 @@ async def health_check():
         "rag_available": get_rag_pipeline().available if get_rag_pipeline() else False
     }
 
+@router.post("/cache/flush")
+async def flush_response_cache():
+    """Flush stale response cache entries from Redis."""
+    from services.cache_service import get_cache_service
+    cache = get_cache_service()
+    count = await cache.flush_prefix("response_semantic")
+    return {"flushed": count}
+
 @router.get("/ready")
 async def readiness_check():
     """System readiness check endpoint."""
