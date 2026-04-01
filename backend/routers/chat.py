@@ -277,8 +277,11 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
     Returns (session, is_crisis, crisis_response).
     """
     session = await _get_or_create_session(query, user, session_manager, companion_engine)
-    await _populate_session_with_user_context(session, user, query.user_profile)
-    is_crisis, crisis_response = await safety_validator.check_crisis_signals(session, query.message)
+    # Parallelize: user context population and crisis check are independent
+    _, (is_crisis, crisis_response) = await asyncio.gather(
+        _populate_session_with_user_context(session, user, query.user_profile),
+        safety_validator.check_crisis_signals(session, query.message),
+    )
     if is_crisis:
         session.add_message('user', query.message)
         # Populate emotion signal for crisis — IntentAgent is skipped in crisis path
@@ -477,13 +480,14 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
 
     session_manager, companion_engine, context_synthesizer, safety_validator, response_composer = _init_services()
 
-    session, is_crisis, crisis_response = await _preflight(
-        query, user, session_manager, companion_engine, safety_validator
-    )
-
     async def event_generator():
-        yield ": connected\n\n"  # SSE comment — flushes HTTP response immediately
+        yield ": connected\n\n"  # SSE comment — opens connection immediately
+
         try:
+            session, is_crisis, crisis_response = await _preflight(
+                query, user, session_manager, companion_engine, safety_validator
+            )
+
             if is_crisis:
                 yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': session.phase.value, 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
                 yield f"event: token\ndata: {json.dumps({'text': crisis_response})}\n\n"

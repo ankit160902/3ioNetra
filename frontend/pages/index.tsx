@@ -340,28 +340,21 @@ export default function Home() {
 
         let accumulatedText = '';
         isStreamingRef.current = true;
-        let renderScheduled = false;
 
         await sendMessageStream(
           currentInput,
           language,
-          // onToken — accumulate and flush to UI on next animation frame
-          // This batches multiple tokens arriving within the same 16ms frame
-          // into a single React re-render, avoiding 20-40 renders/sec overhead
+          // onToken — update message content directly; React 18 auto-batches
+          // synchronous calls within the same reader.read() chunk, and renders
+          // between async chunks for progressive streaming display
           (text) => {
             accumulatedText += text;
-            if (!renderScheduled) {
-              renderScheduled = true;
-              requestAnimationFrame(() => {
-                renderScheduled = false;
-                const snapshot = accumulatedText;
-                setMessages((prev) => {
-                  const updated = [...prev];
-                  updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
-                  return updated;
-                });
-              });
-            }
+            const snapshot = accumulatedText;
+            setMessages((prev) => {
+              const updated = [...prev];
+              updated[updated.length - 1] = { ...updated[updated.length - 1], content: snapshot };
+              return updated;
+            });
           },
           // onMetadata — update session state
           (meta) => {

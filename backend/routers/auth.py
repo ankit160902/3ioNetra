@@ -45,7 +45,8 @@ async def register_user(request: UserRegisterRequest):
     """
     auth_service = get_auth_service()
     try:
-        result = auth_service.register_user(
+        result = await asyncio.to_thread(
+            auth_service.register_user,
             name=request.name,
             email=request.email,
             password=request.password,
@@ -84,7 +85,7 @@ async def login_user(request: UserLoginRequest):
     """
     auth_service = get_auth_service()
     try:
-        result = auth_service.login_user(request.email, request.password)
+        result = await asyncio.to_thread(auth_service.login_user, request.email, request.password)
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -124,18 +125,31 @@ async def logout_user(authorization: Optional[str] = Header(None)):
         
     token = authorization.split(" ")[1]
     auth_service = get_auth_service()
-    auth_service.logout_user(token)
+    await asyncio.to_thread(auth_service.logout_user, token)
     return {"message": "Successfully logged out"}
 
 @router.get("/product-names")
 async def get_product_names():
     """Return list of product names for registration form dropdown."""
     try:
+        from services.cache_service import get_cache_service
+        cache = get_cache_service()
+
+        # Check cache first (product names are static)
+        cached = await cache.get("product_names")
+        if cached is not None:
+            return cached
+
         from services.product_service import get_product_service
         svc = get_product_service()
-        products = await svc.get_all_products()
-        # Deduplicate and sort product names
+        # get_all_products is async-declared but uses sync PyMongo internally
+        products = await asyncio.to_thread(
+            lambda: list(svc.collection.find({"is_active": True}, {"name": 1}))
+        ) if svc.collection is not None else []
         names = sorted(set(p.get("name", "") for p in products if p.get("name")))
+
+        # Cache for 1 hour
+        await cache.set("product_names", names, ttl=3600)
         return names
     except Exception:
         return []

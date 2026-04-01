@@ -50,6 +50,15 @@ export function useAuth() {
 
       if (storedToken && storedUser) {
         try {
+          // Skip verify if token was recently validated (within 5 minutes)
+          const lastVerified = localStorage.getItem('auth_last_verified');
+          const VERIFY_INTERVAL_MS = 5 * 60 * 1000;
+          if (lastVerified && Date.now() - parseInt(lastVerified) < VERIFY_INTERVAL_MS) {
+            const user = JSON.parse(storedUser);
+            setAuthState({ user, token: storedToken, isAuthenticated: true, isLoading: false });
+            return;
+          }
+
           // Verify token with backend
           const response = await fetch(`${API_URL}/api/auth/verify`, {
             headers: {
@@ -61,6 +70,7 @@ export function useAuth() {
             const data = await response.json();
             // Update stored user with latest from server
             localStorage.setItem('auth_user', JSON.stringify(data.user));
+            localStorage.setItem('auth_last_verified', Date.now().toString());
             setAuthState({
               user: data.user,
               token: storedToken,
@@ -220,6 +230,7 @@ export function useAuth() {
   const logout = useCallback(() => {
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
+    localStorage.removeItem('auth_last_verified');
     setAuthState({
       user: null,
       token: null,

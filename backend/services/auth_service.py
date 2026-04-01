@@ -175,8 +175,11 @@ def _calculate_age_and_group(dob: str) -> tuple[int, str]:
 class AuthService:
     """MongoDB-based authentication service"""
 
+    _TOKEN_CACHE_TTL = 300  # 5 minutes
+
     def __init__(self):
         self.db = get_mongo_client()
+        self._token_cache: dict[str, tuple[float, dict]] = {}  # token -> (expiry_mono, user_data)
 
     def register_user(
         self,
@@ -302,6 +305,16 @@ class AuthService:
 
     def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
         """Verify token and return flattened user info"""
+        import time as _time
+
+        # Check in-memory cache first
+        cached = self._token_cache.get(token)
+        if cached is not None:
+            cache_expiry, user_data = cached
+            if _time.monotonic() < cache_expiry:
+                return user_data
+            del self._token_cache[token]
+
         if self.db is None:
             return None
         try:
@@ -326,7 +339,13 @@ class AuthService:
         except Exception as e:
             logger.error(f"verify_token user lookup error: {e}")
             return None
-        return self._flatten_user_msg(user) if user else None
+        result = self._flatten_user_msg(user) if user else None
+
+        # Cache successful verification
+        if result is not None:
+            self._token_cache[token] = (_time.monotonic() + self._TOKEN_CACHE_TTL, result)
+
+        return result
 
     def _flatten_user_msg(self, user: Dict[str, Any]) -> Dict[str, Any]:
         """Flatten nested MongoDB document for application use"""
@@ -363,6 +382,7 @@ class AuthService:
 
     def logout_user(self, token: str) -> bool:
         """Logout user by invalidating token"""
+        self._token_cache.pop(token, None)
         if self.db is None:
             return False
         try:
@@ -375,6 +395,11 @@ class AuthService:
     def invalidate_user_tokens(self, user_id: str) -> int:
         """Invalidate all tokens for a user (e.g. after password change).
         Returns the number of tokens deleted."""
+        # Clear cached tokens for this user
+        self._token_cache = {
+            k: v for k, v in self._token_cache.items()
+            if v[1].get("id") != user_id
+        }
         if self.db is None:
             return 0
         try:

@@ -184,10 +184,12 @@ class ResponseComposer:
             yield self._compose_fallback(dharmic_query)
             return
 
-        # Check response cache — if hit, yield cached response as a single chunk
+        # Check response cache — if hit, yield in word-sized chunks to preserve streaming UX
         cached_response = await self._check_response_cache(llm_query, phase, memory)
         if cached_response:
-            yield self._personalize_cached_response(cached_response, memory)
+            text = self._personalize_cached_response(cached_response, memory)
+            for word in text.split(' '):
+                yield word + ' '
             return
 
         context_docs = retrieved_verses

@@ -133,32 +133,6 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
     }
   }, [session.sessionId]);
 
-  /* =======================
-     Create session
-  ======================= */
-
-  const createSession = useCallback(async (): Promise<string> => {
-    const res = await fetch(`${API_URL}/api/session/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (!res.ok) {
-      throw new Error('Failed to create session');
-    }
-
-    const data = await res.json();
-
-    setSession({
-      sessionId: data.session_id,
-      phase: data.phase,
-      turnCount: 0,
-      signalsCollected: {},
-      isComplete: false,
-    });
-
-    return data.session_id;
-  }, []);
 
   /* =======================
      Send message (CORE)
@@ -170,15 +144,8 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setError(null);
 
       try {
-        let sessionId = session.sessionId;
-
-        // First message → create session
-        if (!sessionId) {
-          sessionId = await createSession();
-        }
-
         const body: any = {
-          session_id: sessionId,
+          session_id: session.sessionId,
           message,
           language,
         };
@@ -223,7 +190,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         setIsLoading(false);
       }
     },
-    [session.sessionId, session.turnCount, userProfile, authHeader, createSession]
+    [session.sessionId, session.turnCount, userProfile, authHeader]
   );
 
   /* =======================
@@ -244,12 +211,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setError(null);
 
       try {
-        let sessionId = session.sessionId;
-        if (!sessionId) {
-          sessionId = await createSession();
-        }
-
-        const body: any = { session_id: sessionId, message, language };
+        const body: any = { session_id: session.sessionId, message, language };
         if (session.turnCount === 0 && userProfile) {
           body.user_profile = userProfile;
         }
@@ -303,7 +265,19 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
               } else if (line.startsWith('data: ') && currentEvent) {
                 try {
                   const data = JSON.parse(line.slice(6));
-                  if (currentEvent === 'metadata') onMetadata(data);
+                  if (currentEvent === 'metadata') {
+                    // Update session state from backend metadata (essential when session is created inline)
+                    if (data.session_id || data.phase || data.turn_count !== undefined) {
+                      setSession((prev) => ({
+                        ...prev,
+                        sessionId: data.session_id || prev.sessionId,
+                        phase: data.phase || prev.phase,
+                        turnCount: data.turn_count ?? prev.turnCount,
+                        signalsCollected: data.signals_collected || prev.signalsCollected,
+                      }));
+                    }
+                    onMetadata(data);
+                  }
                   else if (currentEvent === 'token') onToken(data.text);
                   else if (currentEvent === 'done') onDone(data);
                   else if (currentEvent === 'status' && onStatus) onStatus(data);
@@ -325,7 +299,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         setIsLoading(false);
       }
     },
-    [session.sessionId, session.turnCount, userProfile, authHeader, createSession]
+    [session.sessionId, session.turnCount, userProfile, authHeader]
   );
 
   /* =======================
