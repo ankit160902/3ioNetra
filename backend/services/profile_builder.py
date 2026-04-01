@@ -25,6 +25,8 @@ def _get_panchang_snapshot() -> Optional[Dict]:
             enriched = panchang.get_enriched_panchang(datetime.now())
             if "error" not in enriched:
                 _panchang_cache = {
+                    "date": enriched.get("date", ""),
+                    "vaara": enriched.get("vaara", ""),
                     "tithi": enriched["tithi"],
                     "tithi_significance": enriched.get("tithi_significance", ""),
                     "tithi_good_for": enriched.get("tithi_good_for", ""),

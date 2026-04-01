@@ -8,6 +8,7 @@ import logging
 import random
 import re
 import time as _time
+from datetime import datetime
 from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from config import settings
@@ -618,6 +619,11 @@ class LLMService:
             has_data = False
             profile_parts = []
 
+            # Always include current date & time so LLM never has to guess
+            now = datetime.now()
+            profile_parts.append(f"   • Current Date & Time: {now.strftime('%A, %B %d, %Y')} | {now.strftime('%I:%M %p')} IST")
+            has_data = True
+
             if user_profile.get('name'):
                 profile_parts.append(f"   • Their name is: {user_profile.get('name')}")
                 has_data = True
@@ -672,6 +678,8 @@ class LLMService:
             if user_profile.get('current_panchang') and (is_spiritual_topic or is_guidance_phase):
                 p = user_profile['current_panchang']
                 panchang_lines = ["   • CURRENT PANCHANG (Today):"]
+                if p.get('date') or p.get('vaara'):
+                    panchang_lines.append(f"     Today: {p.get('vaara', '')} {p.get('date', '')}")
 
                 # Tithi with significance
                 tithi_line = f"     Tithi: {p.get('tithi', '')}"
