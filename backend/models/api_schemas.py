@@ -57,7 +57,7 @@ class UserProfileContext(BaseModel):
 class ConversationalQuery(BaseModel):
     """Request body for conversational endpoint"""
     session_id: Optional[str] = None
-    message: str = Field(..., max_length=_MAX_QUERY_LENGTH)
+    message: str = Field(..., min_length=1, max_length=_MAX_QUERY_LENGTH)
     language: str = "en"
     user_profile: Optional[UserProfileContext] = None
 

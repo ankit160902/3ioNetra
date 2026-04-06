@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
@@ -7,36 +8,9 @@ from .auth_service import get_mongo_client
 logger = logging.getLogger(__name__)
 
 class ProductService:
-    # Domain → categories map (used for reranking boosts AND category-level fallback)
-    DOMAIN_CATEGORY_MAP = {
-        "career": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
-        "relationships": ["Astrostore", "ASTROLOGY", "Pooja Essential", "Astro List", "Mangal"],
-        "health": ["Astrostore", "GST-Included"],
-        "spiritual": [
-            "Pooja Essential", "Puja Essential", "Spiritual Home", "Astrostore",
-            "Pooja Murti", "Seva", "Puja", "members-form",
-            "Sculptures & Statues", "Chadhawa", "lord vishnu",
-            "bhagwan krishna blessings", "flower offering to maa durga", "Bhajan Clubbing",
-        ],
-        "family": ["Pooja Essential", "Puja Essential", "Spiritual Home", "Pooja Murti", "Sculptures & Statues"],
-        "finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
-        "education": ["Astrostore", "Astro List"],
-        "self-improvement": [
-            "Astrostore", "Astro List",
-            "Abundance alignment", "Abundance Mindset", "Conscious Parenting",
-        ],
-        # _update_memory domain labels
-        "career & finance": ["Astrostore", "ASTROLOGY", "Astro List", "Book-now", "Mangal"],
-        "physical health": ["Astrostore", "GST-Included"],
-        "ayurveda & wellness": ["Astrostore", "GST-Included"],
-        "yoga practice": ["Astrostore", "GST-Included"],
-        "meditation & mind": ["Astrostore", "Pooja Essential"],
-        "spiritual growth": [
-            "Pooja Essential", "Spiritual Home", "Astrostore", "Pooja Murti", "Seva", "members-form",
-            "Sculptures & Statues", "Chadhawa", "lord vishnu",
-            "bhagwan krishna blessings", "flower offering to maa durga", "Bhajan Clubbing",
-        ],
-    }
+    # DOMAIN_CATEGORY_MAP removed — replaced by enriched life_domains field on each product
+    # emotion_category_boost removed — replaced by EMOTION_BENEFIT_BRIDGE + enriched benefits field
+    # physical_categories / service_categories removed — replaced by enriched product_type field
 
     def __init__(self):
         self.db = get_mongo_client()
@@ -57,20 +31,137 @@ class ProductService:
             return []
         query = {"is_active": True} if active_only else {}
         try:
-            cursor = self.collection.find(query)
-            products = []
-            for doc in cursor:
-                doc = self._serialize_doc(doc)
-                products.append(doc)
-            return products
+            def _fetch():
+                return [self._serialize_doc(doc) for doc in self.collection.find(query)]
+            return await asyncio.to_thread(_fetch)
         except Exception as e:
             logger.error(f"get_all_products DB error: {e}")
+            return []
+
+    # Semantic bridge: user's negative emotion → product's positive benefit attributes
+    # This is NOT a product map — it maps human emotions to desirable product qualities.
+    # Products are enriched with benefits like "peace", "healing" — this bridges the gap.
+    EMOTION_BENEFIT_BRIDGE = {
+        "anxiety": ["calm", "peace", "clarity"],
+        "grief": ["healing", "peace", "hope"],
+        "stress": ["calm", "peace", "clarity"],
+        "sadness": ["healing", "peace", "hope"],
+        "anger": ["calm", "peace", "clarity"],
+        "fear": ["protection", "courage", "strength"],
+        "confusion": ["clarity", "focus", "peace"],
+        "loneliness": ["devotion", "love", "peace"],
+        "hopelessness": ["hope", "healing", "strength"],
+        "frustration": ["calm", "clarity", "focus"],
+        "shame": ["healing", "peace", "hope"],
+        "guilt": ["healing", "peace", "hope"],
+        "despair": ["hope", "healing", "strength"],
+    }
+
+    async def search_by_metadata(
+        self,
+        practices: Optional[List[str]] = None,
+        deities: Optional[List[str]] = None,
+        emotions: Optional[List[str]] = None,
+        life_domains: Optional[List[str]] = None,
+        product_type: Optional[str] = None,
+        benefits: Optional[List[str]] = None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Search products using enriched metadata fields.
+
+        Queries MongoDB's enriched arrays (practices, deities, emotions, life_domains, benefits).
+        Returns products matching ANY criteria, ranked by match count (most relevant first).
+        This replaces all hardcoded keyword maps with data-driven discovery.
+        """
+        if self.collection is None:
+            return []
+
+        # Build $or conditions from provided criteria
+        conditions = []
+        if practices:
+            conditions.append({"practices": {"$in": practices}})
+        if deities:
+            conditions.append({"deities": {"$in": deities}})
+        if emotions:
+            # Also bridge to benefits: user emotion → product benefit
+            benefit_targets = set()
+            for emo in emotions:
+                benefit_targets.update(self.EMOTION_BENEFIT_BRIDGE.get(emo.lower(), []))
+            conditions.append({"emotions": {"$in": emotions}})
+            if benefit_targets:
+                conditions.append({"benefits": {"$in": list(benefit_targets)}})
+        if life_domains:
+            conditions.append({"life_domains": {"$in": life_domains}})
+        if product_type:
+            conditions.append({"product_type": product_type})
+        if benefits:
+            conditions.append({"benefits": {"$in": benefits}})
+
+        if not conditions:
+            return []
+
+        query = {"is_active": True, "$or": conditions}
+
+        try:
+            def _fetch():
+                docs = list(self.collection.find(query).limit(limit * 3))
+                results = []
+                for doc in docs:
+                    doc = self._serialize_doc(doc)
+                    # Score by match count: more criteria matched = more relevant
+                    match_score = 0
+                    if practices and any(p in doc.get("practices", []) for p in practices):
+                        match_score += 3  # Practice match is strongest signal
+                    if deities and any(d in doc.get("deities", []) for d in deities):
+                        match_score += 3  # Deity match is strong
+                    if life_domains and any(d in doc.get("life_domains", []) for d in life_domains):
+                        match_score += 2
+                    if emotions:
+                        if any(e in doc.get("emotions", []) for e in emotions):
+                            match_score += 2
+                        # Also check benefit bridge matches
+                        benefit_targets = set()
+                        for emo in emotions:
+                            benefit_targets.update(self.EMOTION_BENEFIT_BRIDGE.get(emo.lower(), []))
+                        if any(b in doc.get("benefits", []) for b in benefit_targets):
+                            match_score += 1
+                    if benefits and any(b in doc.get("benefits", []) for b in benefits):
+                        match_score += 1
+
+                    doc["_metadata_score"] = match_score
+                    results.append(doc)
+
+                # Sort by match score descending
+                results.sort(key=lambda x: x.get("_metadata_score", 0), reverse=True)
+
+                # Filter: require at least one strong signal (practice=3 or deity=3)
+                # This prevents consultation services with only emotion/life_domain matches
+                # from appearing as "recommended" for every query.
+                MIN_METADATA_SCORE = 3
+                results = [r for r in results if r.get("_metadata_score", 0) >= MIN_METADATA_SCORE]
+
+                # Deduplicate by name
+                seen_names = set()
+                deduped = []
+                for r in results:
+                    if r["name"] not in seen_names:
+                        seen_names.add(r["name"])
+                        r.pop("_metadata_score", None)
+                        deduped.append(r)
+                    if len(deduped) >= limit:
+                        break
+
+                return deduped
+
+            return await asyncio.to_thread(_fetch)
+        except Exception as e:
+            logger.error(f"search_by_metadata error: {e}")
             return []
 
     async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
                               emotion: str = "", deity: str = "",
                               allow_category_fallback: bool = True) -> List[Dict[str, Any]]:
-        """Search products by name or category with precision and domain context"""
+        """Search products by text (for explicit user queries). Uses MongoDB $text search."""
         import re
         # Tokenize and clean
         tokens = re.findall(r'\w+', query_text.lower())
@@ -82,6 +173,11 @@ class ProductService:
             if t not in stop_words and len(t) > 2 and t not in seen:
                 keywords.append(t)
                 seen.add(t)
+
+        # Inject deity into keywords so MongoDB retrieves deity-relevant products
+        if deity and deity.lower() not in seen and len(deity) > 2:
+            keywords.insert(0, deity.lower())
+            seen.add(deity.lower())
 
         if not keywords or self.collection is None:
             return []
@@ -97,14 +193,14 @@ class ProductService:
                 "$text": {"$search": search_string},
                 "is_active": True,
             }
-            cursor = self.collection.find(
-                text_query,
-                {"_text_score": {"$meta": "textScore"}},
-            ).sort([("_text_score", {"$meta": "textScore"})]).limit(50)
+            def _text_search():
+                cursor = self.collection.find(
+                    text_query,
+                    {"_text_score": {"$meta": "textScore"}},
+                ).sort([("_text_score", {"$meta": "textScore"})]).limit(50)
+                return [self._serialize_doc(doc) for doc in cursor]
 
-            for doc in cursor:
-                doc = self._serialize_doc(doc)
-                raw_products.append(doc)
+            raw_products = await asyncio.to_thread(_text_search)
             used_text_search = True
         except Exception as e:
             logger.warning(f"$text search failed, falling back to regex: {e}")
@@ -118,10 +214,10 @@ class ProductService:
                     {"description": {"$regex": regex_pattern, "$options": "i"}},
                 ],
             }
-            cursor = self.collection.find(query).limit(50)
-            for doc in cursor:
-                doc = self._serialize_doc(doc)
-                raw_products.append(doc)
+            def _regex_search():
+                return [self._serialize_doc(doc) for doc in self.collection.find(query).limit(50)]
+
+            raw_products = await asyncio.to_thread(_regex_search)
             
         # Re-rank based on keyword match density and multi-term boosting
         def calculate_score(product):
@@ -148,65 +244,47 @@ class ProductService:
                 if has_match:
                     matched_keywords += 1
 
-            # Multi-term boost: additive bonus per extra match (avoids multiplicative distortion)
+            # Multi-term boost: strong bonus when product matches ALL search terms
             if matched_keywords > 1:
                 score += 10 * (matched_keywords - 1)
+            # Extra bonus for matching ALL keywords — ensures "hanuman murti" ranks
+            # Hanuman murtis above generic murtis
+            if len(keywords) > 1 and matched_keywords == len(keywords):
+                score += 20
 
-            # Life Domain Category Boosting (uses class-level DOMAIN_CATEGORY_MAP)
-            boosted_categories = ProductService.DOMAIN_CATEGORY_MAP.get(life_domain.lower(), [])
-            if any(cat in product.get("category", "") for cat in boosted_categories):
-                score += 30  # Domain match boost (higher than emotion)
+            # Life Domain boost (enriched field — replaces hardcoded DOMAIN_CATEGORY_MAP)
+            if life_domain and life_domain.lower() in product.get("life_domains", []):
+                score += 30
 
-            # Deity name boost
+            # Deity boost (enriched field + name match)
             if deity:
                 deity_lower = deity.lower()
-                if deity_lower in name_lower:
-                    score += 30
-                if deity_lower in desc_lower:
+                if deity_lower in product.get("deities", []):
+                    score += 30  # Enriched deity match (strongest)
+                elif deity_lower in name_lower:
+                    score += 20  # Name text match (fallback)
+                elif deity_lower in desc_lower:
                     score += 10
 
-            # Emotion category boost
-            emotion_category_boost = {
-                "anxiety": ["Astrostore"],
-                "grief": ["Seva", "Astro List", "Spiritual"],
-                "confusion": ["Astro List", "ASTROLOGY", "Ank Shastra"],
-                "anger": ["Astrostore"],
-                "stress": ["Astrostore", "GST-Included"],
-                "fear": ["Astrostore", "Pooja Murti"],
-                "hopelessness": ["Astro List", "Spiritual"],
-                "sadness": ["Astrostore", "Astro List"],
-                "loneliness": ["Astrostore", "GST-Included", "Astro List"],
-                "frustration": ["Astrostore", "Astro List"],
-                "despair": ["Astro List", "Spiritual", "Seva"],
-                "shame": ["Astro List", "Astrostore"],
-                "guilt": ["Seva", "Astro List", "Astrostore"],
-                "jealousy": ["Astrostore"],
-            }
+            # Emotion benefit boost (enriched field — replaces hardcoded emotion_category_boost)
             if emotion:
-                emotion_cats = emotion_category_boost.get(emotion.lower(), [])
-                if any(cat in product.get("category", "") for cat in emotion_cats):
-                    score += 20  # Emotion boost (lower than domain)
+                # Bridge: user emotion → product benefits
+                target_benefits = ProductService.EMOTION_BENEFIT_BRIDGE.get(emotion.lower(), [])
+                product_benefits = product.get("benefits", [])
+                if any(b in product_benefits for b in target_benefits):
+                    score += 20
+                # Also check direct emotion match on enriched emotions field
+                if emotion.lower() in product.get("emotions", []):
+                    score += 15
 
-            # Category Boosts
-            # 1. Physical products boost
-            physical_categories = [
-                "Astrostore", "Pooja Essential", "Puja Essential", "Spiritual Home",
-                "Sculptures & Statues", "Chadhawa", "lord vishnu", "Pooja Murti",
-                "flower offering to maa durga", "bhagwan krishna blessings",
-            ]
-            if product.get("category") in physical_categories:
+            # Product type boost (enriched field — replaces hardcoded category lists)
+            ptype = product.get("product_type", "")
+            if ptype == "physical":
                 score += 10
-
-            # 2. Spiritual Services and Astrology boost
-            service_categories = [
-                "ASTROLOGY", "Astro List", "Puja", "Seva", "Ank Shastra",
-                "Book-now", "members-form", "Mangal", "Bhajan Clubbing",
-                "Abundance alignment", "Abundance Mindset", "Conscious Parenting",
-            ]
-            if product.get("category") in service_categories:
+            elif ptype in ("service", "consultation"):
                 score += 15
 
-            # 3. Price-tier moderation: mildly boost accessible items, penalize expensive ones
+            # Price-tier moderation
             price = product.get("amount", 0)
             if isinstance(price, (int, float)):
                 if price <= 999:
@@ -299,23 +377,25 @@ class ProductService:
             if len(diverse) >= limit:
                 break
 
-        # Category-level fallback: fill remaining slots from domain-relevant categories
-        # Only used for explicit product requests — non-explicit paths pass allow_category_fallback=False
+        # Domain-level fallback: fill remaining slots from life_domain-tagged products
+        # Uses enriched life_domains field instead of hardcoded category map
         if allow_category_fallback and len(diverse) < limit and life_domain:
-            fallback_categories = self.DOMAIN_CATEGORY_MAP.get(life_domain.lower(), [])
-            if fallback_categories and self.collection is not None:
+            if self.collection is not None:
                 existing_names = {p.get("name") for p in diverse}
+                # Query by enriched life_domains field
                 cat_query = {
                     "is_active": True,
-                    "category": {"$in": fallback_categories},
+                    "life_domains": life_domain.lower(),
                 }
                 try:
-                    cat_cursor = self.collection.find(cat_query).limit(limit * 3)
-                    fallback_pool = []
-                    for doc in cat_cursor:
-                        doc = self._serialize_doc(doc)
-                        if doc.get("name") not in existing_names:
-                            fallback_pool.append(doc)
+                    def _cat_search():
+                        results = []
+                        for doc in self.collection.find(cat_query).limit(limit * 3):
+                            doc = self._serialize_doc(doc)
+                            if doc.get("name") not in existing_names:
+                                results.append(doc)
+                        return results
+                    fallback_pool = await asyncio.to_thread(_cat_search)
                 except Exception as e:
                     logger.warning(f"Category fallback query failed: {e}")
                     fallback_pool = []
@@ -347,20 +427,13 @@ class ProductService:
             query["category"] = {"$regex": category, "$options": "i"}
         
         try:
-            cursor = self.collection.find(query).limit(limit)
-            products = []
-            for doc in cursor:
-                doc = self._serialize_doc(doc)
-                products.append(doc)
-
-            # If no products found in category, return top active products
-            if not products and category:
-                cursor = self.collection.find({"is_active": True}).limit(limit)
-                for doc in cursor:
-                    doc = self._serialize_doc(doc)
-                    products.append(doc)
-
-            return products
+            def _fetch():
+                results = [self._serialize_doc(doc) for doc in self.collection.find(query).limit(limit)]
+                # If no products found in category, return top active products
+                if not results and category:
+                    results = [self._serialize_doc(doc) for doc in self.collection.find({"is_active": True}).limit(limit)]
+                return results
+            return await asyncio.to_thread(_fetch)
         except Exception as e:
             logger.error(f"get_recommended_products DB error: {e}")
             return []

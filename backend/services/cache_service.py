@@ -113,6 +113,10 @@ class CacheService:
 
     async def set(self, prefix: str, val: Any, ttl: int = 3600, **kwargs) -> None:
         """Store a value in both L1 (memory) and L2 (Redis)."""
+        # Guard: Redis SETEX requires TTL > 0. Skip caching if TTL is zero/negative.
+        if ttl <= 0:
+            return
+
         key = self._generate_key(prefix, **kwargs)
 
         # Always write to L1 (even if Redis is down)

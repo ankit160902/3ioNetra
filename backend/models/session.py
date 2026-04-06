@@ -110,6 +110,10 @@ class SessionState:
     # FIFO capped at 3 entries
     last_suggestions: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Track suggested verses/mantras for diversity (anti-repetition)
+    # Each entry: {"turn": int, "mantras": ["Om Namah Shivaya"], "references": ["BG 2.47"]}
+    suggested_verses: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict:
         return {
             "session_id": self.session_id,

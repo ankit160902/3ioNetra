@@ -5,6 +5,7 @@ Logs cost per request to structured logger and optionally to MongoDB
 with a 90-day TTL for analytics.
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -117,14 +118,19 @@ class CostTracker:
             f"cost=${cost:.6f} intent={intent} phase={phase}"
         )
 
-        # Optionally persist to MongoDB
+        # Optionally persist to MongoDB (non-blocking if in async context)
         if self.enabled:
             self._ensure_db()
             if self._collection is not None:
                 try:
                     doc = asdict(record)
                     doc["timestamp_dt"] = datetime.utcnow()
-                    self._collection.insert_one(doc)
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.run_in_executor(None, self._collection.insert_one, doc)
+                    except RuntimeError:
+                        # No running event loop — persist synchronously
+                        self._collection.insert_one(doc)
                 except Exception as e:
                     logger.warning(f"Failed to persist cost record: {e}")
 

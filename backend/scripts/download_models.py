@@ -33,12 +33,22 @@ def download_models():
     model = SentenceTransformer(emb_model_name)
     model.save(str(emb_path))
     
-    # 2. Reranker Model
+    # 2. Reranker Model (PyTorch)
     reranker_model_name = settings.RERANKER_MODEL
     logger.info(f"Downloading & saving reranker model '{reranker_model_name}' to {reranker_path}...")
     reranker = CrossEncoder(reranker_model_name)
     reranker.save(str(reranker_path))
-    
+
+    # 3. Export reranker to ONNX (for faster CPU inference at runtime)
+    # Wrapped in try/except — if this fails, PyTorch fallback still works
+    try:
+        logger.info(f"Exporting reranker to ONNX format...")
+        reranker_onnx = CrossEncoder(str(reranker_path), backend="onnx")
+        reranker_onnx.save(str(reranker_path))
+        logger.info("✅ ONNX reranker exported successfully")
+    except Exception as e:
+        logger.warning(f"ONNX export failed (PyTorch fallback will be used at runtime): {e}")
+
     logger.info("✅ All models baked into local directories successfully!")
 
 if __name__ == "__main__":

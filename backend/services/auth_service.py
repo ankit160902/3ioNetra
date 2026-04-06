@@ -567,6 +567,7 @@ class ConversationStorage:
             {"$project": {
                 "session_id": 1,
                 "last_title": 1,
+                "generated_title": 1,
                 "created_at": 1,
                 "updated_at": 1,
                 "message_count": {"$size": {"$ifNull": ["$messages", []]}},
@@ -583,7 +584,7 @@ class ConversationStorage:
                 result.append({
                     "id": str(conv["_id"]),
                     "session_id": conv.get("session_id"),
-                    "title": conv.get("last_title", "New Conversation"),
+                    "title": conv.get("generated_title") or conv.get("last_title", "New Conversation"),
                     "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
                     "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
                     "message_count": conv.get("message_count", 0),
@@ -661,6 +662,25 @@ class ConversationStorage:
             {"user_id": user_id, "session_id": conversation_id},
             {"$set": {field: value}}
         )
+
+    async def get_conversation_fields(self, user_id: str, conversation_id: str, fields: list) -> Optional[dict]:
+        """Lightweight projection read for specific fields from a conversation."""
+        if self.db is None:
+            return None
+        projection = {f: 1 for f in fields}
+        def _fetch():
+            return self.db.conversations.find_one(
+                {"user_id": user_id, "session_id": conversation_id},
+                projection
+            )
+        return await asyncio.to_thread(_fetch)
+
+    async def invalidate_history_cache(self, user_id: str):
+        """Invalidate the Redis-cached conversation list for a user."""
+        try:
+            await self._redis.delete(f"history_list:{user_id}")
+        except Exception:
+            pass  # cache will expire naturally in 10 min
 
     async def delete_conversation(self, user_id: str, conversation_id: str) -> bool:
         """Delete a specific conversation"""

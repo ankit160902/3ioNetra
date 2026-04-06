@@ -22,14 +22,27 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # LLM Settings
     # ------------------------------------------------------------------
-    GEMINI_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")  # Fast, no thinking — 2-3s responses
-    GEMINI_FAST_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_FAST_MODEL")  # Same model for intent
+    GEMINI_MODEL: str = Field(default="gemini-2.0-flash", env="GEMINI_MODEL")  # Main responses — no thinking, proven quality
+    GEMINI_FAST_MODEL: str = Field(default="gemini-2.5-flash-lite", env="GEMINI_FAST_MODEL")  # Intent classification — 30% faster
     GEMINI_CACHE_TTL: int = Field(default=21600, env="GEMINI_CACHE_TTL")  # 6 hours — context caching for system instruction
 
     # Per-task LLM temperatures
     RESPONSE_TEMPERATURE: float = 0.7
     RESPONSE_MAX_TOKENS: int = 2048
     INTENT_TEMPERATURE: float = 0.1
+
+    # Token budget ceilings (used by TokenBudgetCalculator — adaptive system)
+    TOKEN_CEILING_BRIEF: int = 512       # greetings, closures
+    TOKEN_CEILING_MODERATE: int = 1024   # emotional shares, simple Qs
+    TOKEN_CEILING_DETAILED: int = 2048   # guidance, how-to
+    TOKEN_CEILING_FULL_TEXT: int = 4096  # chalisa, stotra, complete prayers
+
+    # Context Budget Manager — prevents response truncation
+    PROMPT_TARGET_INPUT_TOKENS: int = 8000   # Max input tokens — lower = faster Gemini response
+    PROMPT_SAFETY_MARGIN: int = 500          # Buffer for model overhead
+    PROMPT_MIN_HISTORY_MESSAGES: int = 4     # Never trim below 4 history messages
+    PROMPT_MIN_RAG_DOCS: int = 1             # Never trim below 1 RAG doc
+
     QUERY_TRANSLATE_TEMPERATURE: float = 0.1
     QUERY_EXPAND_TEMPERATURE: float = 0.3
     QUERY_SUMMARIZE_TEMPERATURE: float = 0.1
@@ -121,7 +134,7 @@ class Settings(BaseSettings):
 
     # Long Query Summarization
     LONG_QUERY_SUMMARIZATION_ENABLED: bool = Field(default=True, env="LONG_QUERY_SUMMARIZATION_ENABLED")
-    LONG_QUERY_THRESHOLD: int = Field(default=15, env="LONG_QUERY_THRESHOLD")
+    LONG_QUERY_THRESHOLD: int = Field(default=20, env="LONG_QUERY_THRESHOLD")
 
     # Query Expansion — LLM-based expansion for short queries (adds ~800ms latency)
     QUERY_EXPANSION_ENABLED: bool = Field(default=True, env="QUERY_EXPANSION_ENABLED")
@@ -152,9 +165,9 @@ class Settings(BaseSettings):
     # Product Recommendation Throttling
     # ------------------------------------------------------------------
     PRODUCT_SESSION_CAP: int = 3                    # Max proactive product events per session
-    PRODUCT_COOLDOWN_TURNS: int = 5                 # Min turns between proactive product events
+    PRODUCT_COOLDOWN_TURNS: int = 7                 # Min turns between proactive product events
     PRODUCT_COOLDOWN_AFTER_REJECTION: int = 10      # Cooldown turns after user rejects products
-    PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 3         # No proactive products before this turn
+    PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 2         # Allow products from turn 2 (not the very first message)
     PRODUCT_SUPPRESS_EMOTIONS: str = "grief,despair,hopelessness,crisis,shame"
     PRODUCT_GUIDANCE_CONTEXT_ENABLED: bool = True   # Allow context-based products in guidance phase
     PRODUCT_LISTENING_PROACTIVE_ENABLED: bool = False  # Disable proactive products in listening phase

@@ -742,8 +742,18 @@ class RAGPipeline:
         from sentence_transformers import CrossEncoder
         if settings.RERANKER_ONNX_ENABLED:
             try:
-                logger.info("RAGPipeline: loading reranker with ONNX backend (2-4x faster)")
-                self._reranker_model = CrossEncoder(settings.RERANKER_MODEL, backend="onnx")
+                # Load from local DEV cache if ONNX model exists there, else from HuggingFace
+                _local_reranker = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "reranker")
+                _onnx_path = os.path.join(_local_reranker, "onnx", "model.onnx")
+                _reranker_src = _local_reranker if os.path.exists(_onnx_path) else settings.RERANKER_MODEL
+                logger.info(f"RAGPipeline: loading reranker with ONNX backend from {_reranker_src}")
+                self._reranker_model = CrossEncoder(_reranker_src, backend="onnx")
+                _model_type = type(self._reranker_model.model).__name__
+                logger.info(f"RAGPipeline: reranker loaded — model_type={_model_type} device={self._reranker_model.device}")
+                if "ORT" in _model_type:
+                    return
+                # If sentence_transformers silently fell back to PyTorch, log and keep it
+                logger.warning(f"ONNX backend requested but got {_model_type} — keeping as-is")
                 return
             except Exception as e:
                 logger.warning(f"ONNX reranker load failed, falling back to PyTorch: {e}")
@@ -774,6 +784,23 @@ class RAGPipeline:
 
         vec = (await asyncio.to_thread(self._embedding_model.encode, [clean_text], convert_to_tensor=False, show_progress_bar=False))[0]
         return np.asarray(vec, dtype="float32")
+
+    async def generate_embeddings_batch(self, texts: list, is_query: bool = True) -> list:
+        """Batch-encode multiple texts in a single model.encode() call.
+        Far faster than N separate generate_embeddings() calls (avoids GIL serialization)."""
+        self._ensure_embedding_model()
+        if self._embedding_model is None:
+            dim = self.dim or settings.EMBEDDING_DIM
+            return [np.zeros((dim,), dtype="float32") for _ in texts]
+        prefix = ""
+        if self._needs_instruction_prefix():
+            prefix = "query: " if is_query else "passage: "
+        clean_texts = [prefix + t.strip().replace("\n", " ") for t in texts]
+        vecs = await asyncio.to_thread(
+            self._embedding_model.encode, clean_texts,
+            convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),
+        )
+        return [np.asarray(v, dtype="float32") for v in vecs]
 
     # ------------------------------------------------------------------
     # Query Expansion
@@ -1007,12 +1034,15 @@ Respond ONLY with 2 terms, separated by a newline."""
                 f'teaching and its practical meaning. Separate passages with "---".'
             )
             try:
+                _t_hyde_llm = time.perf_counter()
                 def _sync():
                     return self._llm.client.models.generate_content(
                         model=settings.GEMINI_FAST_MODEL, contents=prompt,
                         config={"temperature": settings.HYDE_TEMPERATURE, "max_output_tokens": 500,
                                 "automatic_function_calling": __import__("google.genai", fromlist=["types"]).types.AutomaticFunctionCallingConfig(disable=True)})
                 response = await asyncio.to_thread(_sync)
+                _hyde_llm_ms = (time.perf_counter() - _t_hyde_llm) * 1000
+                logger.info(f"PERF_HYDE gemini_call={_hyde_llm_ms:.0f}ms")
                 raw = (response.text or "").strip()
                 passages = [p.strip() for p in raw.split("---") if p.strip()]
                 passages = passages[:settings.HYDE_COUNT]
@@ -1026,10 +1056,8 @@ Respond ONLY with 2 terms, separated by a newline."""
         if not passages:
             return []
 
-        # Embed with is_query=False (document space — HyDE key insight)
-        tasks = [self.generate_embeddings(p, is_query=False) for p in passages]
-        embeddings = await asyncio.gather(*tasks, return_exceptions=True)
-        hyde_vecs = [v for v in embeddings if isinstance(v, np.ndarray)]
+        # Batch-embed HyDE passages (single encode call, not N separate calls)
+        hyde_vecs = await self.generate_embeddings_batch(passages, is_query=False)
         if hyde_vecs:
             logger.info(f"HyDE: {len(hyde_vecs)} hypothetical embedding(s) added to search pool")
         return hyde_vecs
@@ -1474,6 +1502,66 @@ Respond ONLY with 2 terms, separated by a newline."""
             results.sort(key=lambda x: x.get("score", 0), reverse=True)
             return results
 
+    @staticmethod
+    def _mmr_diversify(
+        results: List[Dict],
+        query_embedding: Optional[np.ndarray] = None,
+        lambda_param: float = 0.7,
+        top_k: int = 7,
+    ) -> List[Dict]:
+        """Maximal Marginal Relevance — re-order results for relevance AND diversity.
+
+        Score = λ * relevance(doc) - (1-λ) * max_similarity(doc, already_selected)
+
+        λ=1.0 → pure relevance (no diversity), λ=0.5 → balanced, λ=0.7 → recommended
+        """
+        if not results or len(results) <= 1:
+            return results
+
+        selected = [results[0]]  # Always pick the most relevant first
+        remaining = list(results[1:])
+
+        while remaining and len(selected) < top_k:
+            best_score = -float('inf')
+            best_idx = 0
+
+            for i, candidate in enumerate(remaining):
+                # Relevance component: use final_score from reranking
+                relevance = candidate.get("final_score", candidate.get("score", 0))
+
+                # Diversity component: penalize similarity to already-selected docs
+                max_sim_to_selected = 0.0
+                cand_scripture = (candidate.get("scripture") or "").lower()
+                cand_topic = (candidate.get("topic") or "").lower()
+                cand_ref = (candidate.get("reference") or "").lower()
+
+                for sel in selected:
+                    sel_scripture = (sel.get("scripture") or "").lower()
+                    sel_topic = (sel.get("topic") or "").lower()
+                    sel_ref = (sel.get("reference") or "").lower()
+
+                    # Content similarity: same scripture + same topic = very similar
+                    sim = 0.0
+                    if cand_scripture == sel_scripture:
+                        sim += 0.4
+                    if cand_topic == sel_topic:
+                        sim += 0.3
+                    if cand_ref == sel_ref:
+                        sim = 1.0  # exact same verse = maximum penalty
+
+                    max_sim_to_selected = max(max_sim_to_selected, sim)
+
+                # MMR score
+                mmr_score = lambda_param * relevance - (1 - lambda_param) * max_sim_to_selected
+
+                if mmr_score > best_score:
+                    best_score = mmr_score
+                    best_idx = i
+
+            selected.append(remaining.pop(best_idx))
+
+        return selected
+
     async def search(
         self,
         query: str,
@@ -1485,6 +1573,7 @@ Respond ONLY with 2 terms, separated by a newline."""
         doc_type_filter: Optional[List[str]] = None,
         life_domain: Optional[str] = None,
         query_variants: Optional[List[str]] = None,
+        exclude_references: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
@@ -1614,21 +1703,21 @@ Respond ONLY with 2 terms, separated by a newline."""
             expanded_queries.append(translated_query)
             _seen_lower.add(translated_query.strip().lower())
 
-        # SCO: Sanskrit Concept Ontology expansion (item 3.3)
+        # SCO: Sanskrit Concept Ontology expansion — limited to 1 concept, 2 terms (latency cap)
         try:
             from services.concept_ontology import get_concept_ontology
             sco = get_concept_ontology()
             if sco.available:
                 detected = sco.detect_concepts(query)
-                for concept in detected[:3]:
-                    related = sco.get_related_concepts(concept, depth=2, max_results=3)
+                for concept in detected[:1]:  # Was [:3] — reduced to cap query count
+                    related = sco.get_related_concepts(concept, depth=1, max_results=2)  # Was depth=2, max=3
                     for term in related:
                         term_lower = term.strip().lower()
                         if term_lower not in _seen_lower:
                             expanded_queries.append(term)
                             _seen_lower.add(term_lower)
                 if detected:
-                    logger.info(f"SCO expansion: detected {detected}, added related concepts to query pool")
+                    logger.info(f"SCO expansion: detected {detected[:1]}, added related concepts to query pool")
         except Exception as e:
             logger.debug(f"SCO expansion skipped: {e}")
 
@@ -1638,10 +1727,12 @@ Respond ONLY with 2 terms, separated by a newline."""
         if 'hyde' in _result_map and not isinstance(_result_map['hyde'], Exception):
             hyde_embeddings = _result_map['hyde'] or []
 
-        # Parallel Execution: Embeddings for all expansions + HyDE
+        # Batch Execution: Single model.encode() call for all expansions (avoids GIL serialization)
         async def get_all_semantic_scores():
-            tasks = [self.generate_embeddings(q) for q in expanded_queries]
-            vecs = await asyncio.gather(*tasks)
+            _t_embed = time.perf_counter()
+            vecs = await self.generate_embeddings_batch(expanded_queries)
+            _embed_ms = (time.perf_counter() - _t_embed) * 1000
+            logger.info(f"PERF_EMBED batch={len(expanded_queries)} {_embed_ms:.0f}ms")
             all_scores = [self._cosine_similarities(v) for v in vecs]
             # Add HyDE pseudo-doc embeddings to MAX-pool
             for hyde_vec in hyde_embeddings:
@@ -1775,6 +1866,7 @@ Respond ONLY with 2 terms, separated by a newline."""
                 break
 
         # 5. Neural Re-ranking (Cross-Encoder) — skip when top result is already decisive
+        logger.info(f"PERF_RAG candidates={len(results)} before reranking")
         _t_rerank = time.perf_counter()
         if results and len(results) >= 2:
             top_score = results[0].get("score", 0)
@@ -1820,13 +1912,29 @@ Respond ONLY with 2 terms, separated by a newline."""
         final_results = results[:top_k]
         
         _timings['total_ms'] = round((time.perf_counter() - _t_start) * 1000)
-        logger.info(
+        _perf_msg = (
             f"RAG_LATENCY total={_timings['total_ms']}ms "
             f"preprocess={_timings.get('preprocess_ms', 0)}ms "
             f"search={_timings.get('hybrid_search_ms', 0)}ms "
             f"rerank={_timings.get('rerank_ms', 0)}ms "
-            f"| docs={len(final_results)} query='{query[:40]}' intent={intent}"
+            f"| docs={len(final_results)} queries={len(expanded_queries)} hyde={len(hyde_embeddings)} query='{query[:40]}' intent={intent}"
         )
+        logger.info(_perf_msg)
+        print(_perf_msg, flush=True)  # Ensure visibility in Cloud Run logs
+
+        # Exclude previously-suggested verses (session diversity)
+        if exclude_references and final_results:
+            _exclude_set = {r.lower() for r in exclude_references}
+            final_results = [
+                doc for doc in final_results
+                if (doc.get("reference") or "").lower() not in _exclude_set
+            ]
+
+        # MMR diversity — re-order for relevance + diversity balance
+        if final_results and len(final_results) > 1:
+            final_results = self._mmr_diversify(
+                final_results, lambda_param=0.7, top_k=top_k
+            )
 
         # Cache search results for repeat queries
         await cache.set("rag_search", final_results, ttl=settings.RAG_SEARCH_CACHE_TTL, **_cache_params)

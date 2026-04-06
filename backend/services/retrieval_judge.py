@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, TYPE_CHECKING
 
+from models.llm_schemas import extract_json, QueryRewrite as QueryRewriteSchema, GroundingResult as GroundingResultSchema
+
 from config import settings
 from rag.scoring_utils import get_doc_score
 
@@ -421,8 +423,9 @@ class RetrievalJudge:
 
         try:
             response = await self.llm.generate_quick_response(prompt)
-            parsed = self._parse_json(response)
-            rewritten = str(parsed.get("rewritten_query", query))
+            parsed = extract_json(response) or {}
+            validated = QueryRewriteSchema(**parsed)
+            rewritten = validated.rewritten_query or query
 
             if self.cache and rewritten != query:
                 await self.cache.set(
@@ -493,11 +496,12 @@ class RetrievalJudge:
 
         try:
             response = await self.llm.generate_quick_response(prompt)
-            parsed = self._parse_json(response)
+            parsed = extract_json(response) or {}
+            validated = GroundingResultSchema(**parsed)
             return GroundingResult(
-                grounded=bool(parsed.get("grounded", True)),
-                confidence=float(parsed.get("confidence", 1.0)),
-                issues=str(parsed.get("issues", "")),
+                grounded=validated.grounded,
+                confidence=validated.confidence,
+                issues=validated.issues,
             )
         except Exception as e:
             logger.warning(f"Grounding verification failed: {e}")
@@ -509,38 +513,8 @@ class RetrievalJudge:
 
     @staticmethod
     def _parse_json(text: str) -> Dict:
-        """Extract and parse JSON from LLM response text."""
-        if not text:
-            return {}
-        # Try direct parse first
-        try:
-            return json.loads(text.strip())
-        except json.JSONDecodeError:
-            pass
-        # Try to find JSON block in text
-        import re
-        # Match ```json ... ``` or ``` ... ```
-        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError:
-                pass
-        # Try to find raw JSON object (balanced-brace scanner for nested objects)
-        start = text.find('{')
-        if start != -1:
-            depth = 0
-            for i, ch in enumerate(text[start:], start):
-                if ch == '{':
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start:i+1])
-                        except json.JSONDecodeError:
-                            break
-        return {}
+        """Extract and parse JSON from LLM response text. Delegates to extract_json()."""
+        return extract_json(text) or {}
 
 
 # --------------------------------------------------

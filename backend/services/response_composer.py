@@ -38,13 +38,17 @@ class ResponseComposer:
                 pass
         return self._embedding_model
 
-    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str) -> str:
-        """Build a deterministic cache key from query semantics + context."""
+    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str, turn_count: int = 0) -> str:
+        """Build a deterministic cache key from query semantics + context.
+
+        Includes turn_count so same-session queries never hit stale cached responses.
+        Different turns always produce different keys → fresh LLM call → diverse mantras.
+        """
         phase_val = phase.value if phase else "unknown"
-        key_str = f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
+        key_str = f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}|turn{turn_count}"
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    async def _check_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory) -> Optional[str]:
+    async def _check_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory, turn_count: int = 0) -> Optional[str]:
         """Check if a semantically similar query has a cached response."""
         if not settings.RESPONSE_CACHE_ENABLED:
             return None
@@ -53,14 +57,14 @@ class ResponseComposer:
         life_domain = (memory.story.life_area or "").lower()
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count)
         cached = await cache.get("response_semantic", key=cache_key)
         if cached and isinstance(cached, dict):
             logger.info(f"Response cache HIT for query='{query[:40]}' (exact key match)")
             return cached.get("response")
         return None
 
-    async def _store_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory, response: str) -> None:
+    async def _store_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory, response: str, turn_count: int = 0) -> None:
         """Cache a generated response for future semantic matches."""
         if not settings.RESPONSE_CACHE_ENABLED:
             return
@@ -72,7 +76,7 @@ class ResponseComposer:
         life_domain = (memory.story.life_area or "").lower()
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count)
         await cache.set(
             "response_semantic",
             {"response": response, "query": query},

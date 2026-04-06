@@ -21,11 +21,14 @@ from rag.pipeline import RAGPipeline
 from routers import auth, chat, admin
 from routers.dependencies import set_rag_pipeline
 
-# Setup logging
+# Setup logging with correlation ID support
+from services.observability import CorrelationFilter
 logging.basicConfig(
     level=settings.LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(name)s - %(levelname)s - [%(correlation_id)s] %(message)s"
 )
+# Add correlation filter to root logger so all log lines include request ID
+logging.getLogger().addFilter(CorrelationFilter())
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -59,8 +62,16 @@ async def lifespan(app: FastAPI):
         from services.query_logger import get_query_logger
         await get_query_logger().initialize()
 
+    # 5. Pre-warm Gemini context caches (avoids 30-35s penalty on first request)
+    from llm.service import get_llm_service
+    _llm = get_llm_service()
+    if _llm.available:
+        logger.info("Pre-warming Gemini context caches...")
+        _llm.prewarm_caches()
+        logger.info("✅ Gemini caches pre-warmed")
+
     logger.info("🎉 3ioNetra Backend Successfully Initialized!")
-    
+
     yield
     
     # Shutdown logic

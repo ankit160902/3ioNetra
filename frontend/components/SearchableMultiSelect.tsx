@@ -59,17 +59,17 @@ export default function SearchableMultiSelect({
 
   return (
     <div ref={containerRef} className="relative">
-      <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1">
+      <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5 ml-1">
         {label}
       </label>
 
       {/* Trigger area */}
       <div
         onClick={openDropdown}
-        className={`w-full px-4 py-3 bg-gray-50/50 border rounded-2xl cursor-pointer transition-all ${
+        className={`w-full px-4 py-3 bg-gray-50/50 dark:bg-gray-800/50 border rounded-2xl cursor-pointer transition-all ${
           isOpen
-            ? 'border-orange-200 ring-4 ring-orange-500/5 bg-white'
-            : 'border-orange-100 hover:border-orange-200'
+            ? 'border-orange-200 dark:border-orange-700 ring-4 ring-orange-500/5 bg-white dark:bg-gray-800'
+            : 'border-orange-100 dark:border-gray-700 hover:border-orange-200 dark:hover:border-gray-600'
         }`}
       >
         {/* Selected chips */}
@@ -92,7 +92,7 @@ export default function SearchableMultiSelect({
 
         {/* Search input row */}
         <div className="flex items-center gap-2">
-          <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+          <Search className="w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0" />
           <input
             ref={inputRef}
             value={searchTerm}
@@ -102,21 +102,21 @@ export default function SearchableMultiSelect({
             }}
             onClick={(e) => e.stopPropagation()}
             placeholder={selected.length > 0 ? 'Add more...' : placeholder}
-            className="flex-1 bg-transparent outline-none text-sm font-bold text-gray-700 placeholder:text-gray-400 min-w-0"
+            className="flex-1 bg-transparent outline-none text-sm font-bold text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
           />
           <ChevronDown
-            className={`w-3.5 h-3.5 text-gray-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+            className={`w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
           />
         </div>
       </div>
 
       {/* Dropdown */}
       {isOpen && (
-        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white border border-orange-100 rounded-2xl shadow-lg max-h-[200px] overflow-y-auto">
+        <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-orange-100 dark:border-gray-700 rounded-2xl shadow-lg dark:shadow-black/30 max-h-[200px] overflow-y-auto">
           {loading ? (
-            <p className="text-xs text-gray-400 italic px-4 py-3">Loading...</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic px-4 py-3">Loading...</p>
           ) : filtered.length === 0 ? (
-            <p className="text-xs text-gray-400 italic px-4 py-3">No results found</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 italic px-4 py-3">No results found</p>
           ) : (
             filtered.map((option) => {
               const isSelected = selected.includes(option);
@@ -127,13 +127,13 @@ export default function SearchableMultiSelect({
                   onClick={() => handleToggle(option)}
                   className={`w-full text-left px-4 py-2.5 text-sm font-bold flex items-center justify-between transition-colors ${
                     isSelected
-                      ? 'bg-orange-50 text-orange-700'
-                      : 'text-gray-700 hover:bg-orange-50/50'
+                      ? 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300'
+                      : 'text-gray-700 dark:text-gray-200 hover:bg-orange-50/50 dark:hover:bg-orange-900/20'
                   }`}
                 >
                   <span className="truncate">{option}</span>
                   {isSelected && (
-                    <span className="text-orange-500 shrink-0 ml-2 text-xs">✓</span>
+                    <span className="text-orange-500 dark:text-orange-400 shrink-0 ml-2 text-xs">✓</span>
                   )}
                 </button>
               );

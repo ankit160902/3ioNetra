@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&family=Noto+Serif+Devanagari:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -12,6 +12,15 @@
   box-sizing: border-box;
   padding: 0;
   margin: 0;
+}
+
+/* Smooth theme transitions */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.3s ease, color 0.2s ease, border-color 0.3s ease, box-shadow 0.3s ease, fill 0.2s ease, stroke 0.2s ease !important;
+  transition-delay: 0s !important;
 }
 
 html,
@@ -28,4 +37,35 @@ body {
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* Dark mode */
+html.dark body {
+  background-color: #0a0a0a;
+  color: #e5e5e5;
+}
+
+.dark .streaming-cursor {
+  background: #fb923c;
+}
+
+/* Toast animations */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(100%); }
+}
+.animate-toast-in { animation: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.animate-toast-out { animation: toast-out 0.2s ease-in forwards; }
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

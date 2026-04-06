@@ -1,29 +1,45 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Header, Depends, status
+from fastapi import APIRouter, HTTPException, Header, Cookie, Depends, Request, status
+from fastapi.responses import JSONResponse
 from typing import Optional, Dict
 from models.api_schemas import UserRegisterRequest, UserLoginRequest, AuthResponse, UserResponse
 from services.auth_service import get_auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
+# Cookie name for httpOnly auth token (Fix 4)
+AUTH_COOKIE_NAME = "auth_token"
+AUTH_COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days (matches backend token expiry)
+
 # ----------------------------------------------------------------------------
 # Helper function to verify auth token
 # ----------------------------------------------------------------------------
 
-async def get_current_user(authorization: Optional[str] = Header(None)):
-    """Extract and verify user from Authorization header.
-    Returns None for anonymous access (no header).
+async def get_current_user(
+    authorization: Optional[str] = Header(None),
+    request: Request = None,
+):
+    """Extract and verify user from httpOnly cookie (preferred) or Authorization header (fallback).
+    Returns None for anonymous access.
     Raises 401 if a token is provided but invalid/expired.
     """
-    if not authorization:
+    token = None
+
+    # Priority 1: httpOnly cookie (Fix 4 — XSS-safe)
+    if request and request.cookies.get(AUTH_COOKIE_NAME):
+        token = request.cookies[AUTH_COOKIE_NAME]
+
+    # Priority 2: Authorization header (backwards compat)
+    if not token and authorization:
+        if " " not in authorization:
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+        token = authorization.split(" ")[1]
+
+    if not token:
         return None
 
     try:
-        if " " not in authorization:
-            raise HTTPException(status_code=401, detail="Invalid authorization header")
-
-        token = authorization.split(" ")[1]
         auth_service = get_auth_service()
         user = await asyncio.to_thread(auth_service.verify_token, token)
         if user is None:
@@ -38,11 +54,23 @@ async def get_current_user(authorization: Optional[str] = Header(None)):
 # AUTHENTICATION ENDPOINTS
 # ----------------------------------------------------------------------------
 
+def _set_auth_cookie(response: JSONResponse, token: str) -> JSONResponse:
+    """Set httpOnly auth cookie on response (Fix 4)."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=False,  # Set to True in production (HTTPS only)
+        samesite="lax",
+        max_age=AUTH_COOKIE_MAX_AGE,
+        path="/",
+    )
+    return response
+
+
 @router.post("/register", response_model=AuthResponse)
 async def register_user(request: UserRegisterRequest):
-    """
-    Register a new user account with extended profile.
-    """
+    """Register a new user account with extended profile."""
     auth_service = get_auth_service()
     try:
         result = await asyncio.to_thread(
@@ -63,10 +91,13 @@ async def register_user(request: UserRegisterRequest):
         )
         if not result:
             raise ValueError("Email already registered or database unavailable")
-        return AuthResponse(
+        auth_data = AuthResponse(
             user=UserResponse(**result["user"]),
             token=result["token"]
         )
+        # Fix 4: Set httpOnly cookie AND return token in body (backwards compat)
+        response = JSONResponse(content=auth_data.model_dump())
+        return _set_auth_cookie(response, result["token"])
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -78,11 +109,10 @@ async def register_user(request: UserRegisterRequest):
             detail=f"Registration failed: {str(e)}"
         )
 
+
 @router.post("/login", response_model=AuthResponse)
 async def login_user(request: UserLoginRequest):
-    """
-    Login an existing user.
-    """
+    """Login an existing user."""
     auth_service = get_auth_service()
     try:
         result = await asyncio.to_thread(auth_service.login_user, request.email, request.password)
@@ -91,10 +121,13 @@ async def login_user(request: UserLoginRequest):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid email or password"
             )
-        return AuthResponse(
+        auth_data = AuthResponse(
             user=UserResponse(**result["user"]),
             token=result["token"]
         )
+        # Fix 4: Set httpOnly cookie AND return token in body (backwards compat)
+        response = JSONResponse(content=auth_data.model_dump())
+        return _set_auth_cookie(response, result["token"])
     except HTTPException:
         raise
     except Exception as e:
@@ -116,17 +149,24 @@ async def verify_auth(user: Dict = Depends(get_current_user)):
     return UserResponse(**user)
 
 @router.post("/logout")
-async def logout_user(authorization: Optional[str] = Header(None)):
-    """
-    Logout user and invalidate token.
-    """
-    if not authorization or " " not in authorization:
-        return {"message": "Already logged out"}
-        
-    token = authorization.split(" ")[1]
-    auth_service = get_auth_service()
-    await asyncio.to_thread(auth_service.logout_user, token)
-    return {"message": "Successfully logged out"}
+async def logout_user(authorization: Optional[str] = Header(None), request: Request = None):
+    """Logout user, invalidate token, and clear cookie."""
+    token = None
+    # Check cookie first
+    if request and request.cookies.get(AUTH_COOKIE_NAME):
+        token = request.cookies[AUTH_COOKIE_NAME]
+    # Fallback to header
+    if not token and authorization and " " in authorization:
+        token = authorization.split(" ")[1]
+
+    if token:
+        auth_service = get_auth_service()
+        await asyncio.to_thread(auth_service.logout_user, token)
+
+    # Fix 4: Clear httpOnly cookie on logout
+    response = JSONResponse(content={"message": "Successfully logged out"})
+    response.delete_cookie(AUTH_COOKIE_NAME, path="/")
+    return response
 
 @router.get("/product-names")
 async def get_product_names():

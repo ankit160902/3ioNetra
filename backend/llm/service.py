@@ -4,6 +4,7 @@ Provides empathetic, phase-aware interactions using Gemini AI
 """
 
 import asyncio
+import hashlib
 import logging
 import random
 import re
@@ -13,6 +14,7 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from config import settings
 from services.resilience import CircuitBreaker
+from google.genai import types as genai_types
 from models.session import ConversationPhase
 
 
@@ -60,15 +62,9 @@ def clean_response(text: str) -> str:
     # Simply return the text cleaned of whitespace initially
     text = text.strip()
 
-    # Strip markdown bold/italic from entire response (Gemini sometimes adds **bold** despite instructions)
-    text = re.sub(r'\*\*\*(.+?)\*\*\*', r'\1', text)  # ***bold italic*** → plain
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)       # **bold** → plain
-    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'\1', text)  # *italic* → plain
-    # Strip markdown headers
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
-    # Strip markdown bullet points (- or *) at start of lines
-    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
-    
+    # Markdown is now rendered by the frontend (react-markdown).
+    # Only clean markdown INSIDE [VERSE]/[MANTRA] tags (those are structural, not presentation).
+
     # Robustly clean content inside [VERSE] tags to prevent markdown artifacts
     def clean_verse_content(match):
         content = match.group(1).strip()
@@ -283,24 +279,72 @@ class LLMService:
             self.available = False
             logger.exception("❌ Failed to initialize Gemini")
 
+    def prewarm_caches(self) -> None:
+        """Pre-warm Gemini context caches at startup.
+
+        Creates cached content for ALL model+phase combinations the router could select,
+        so no user request ever pays the 30-35 second cache creation penalty.
+        """
+        if not self.available or settings.GEMINI_CACHE_TTL <= 0:
+            return
+
+        # Collect ALL models the router could use
+        models_to_warm = set()
+        models_to_warm.add(settings.GEMINI_MODEL)
+        try:
+            from services.model_router import TIER_MODELS
+            for model_name in TIER_MODELS.values():
+                models_to_warm.add(model_name)
+        except ImportError:
+            pass
+
+        phase_keys = ["listening", "full"]
+
+        for model in models_to_warm:
+            for phase_key in phase_keys:
+                phase = ConversationPhase.LISTENING if phase_key == "listening" else ConversationPhase.GUIDANCE
+                sys_instruction = self._get_system_instruction(phase)
+                cache_name = self._get_or_create_cache(model, sys_instruction, phase_key, allow_blocking=True)
+                if cache_name:
+                    logger.info(f"Pre-warmed cache: {model}:{phase_key} → {cache_name}")
+                else:
+                    logger.warning(f"Failed to pre-warm cache: {model}:{phase_key}")
+
     # --------------------------------------------------
     # Gemini Context Caching
     # --------------------------------------------------
 
-    def _get_or_create_cache(self, model: str, system_instruction: str, phase_key: str) -> Optional[str]:
-        """Get or create a Gemini cached content for the system instruction.
-        Returns cache name string or None if caching fails.
-        Tracks expiry to avoid using stale cache references."""
+    def _get_or_create_cache(self, model: str, system_instruction: str, phase_key: str, allow_blocking: bool = False) -> Optional[str]:
+        """Get existing Gemini cached content or fall back to inline instruction.
+
+        NEVER blocks on cache creation during a user request. If cache miss:
+        - Returns None immediately (caller uses inline system_instruction)
+        - Schedules background cache creation for next request
+
+        Only blocks when allow_blocking=True (used during startup pre-warm).
+        """
         if settings.GEMINI_CACHE_TTL <= 0:
             return None
-        cache_key = f"{model}:{phase_key}"
+        _instr_hash = hashlib.md5(system_instruction.encode()).hexdigest()[:8]
+        cache_key = f"{model}:{phase_key}:{_instr_hash}"
         entry = self._gemini_caches.get(cache_key)
         if entry:
             name, expires_at = entry
             if _time.monotonic() < expires_at:
                 return name
-            # Expired — remove and recreate
             del self._gemini_caches[cache_key]
+
+        # Cache miss — if not allowed to block, return None immediately
+        # and schedule background creation for next request
+        if not allow_blocking:
+            self._schedule_background_cache(model, system_instruction, phase_key, cache_key)
+            return None
+
+        # Blocking creation (only during startup pre-warm)
+        return self._create_cache_sync(model, system_instruction, cache_key)
+
+    def _create_cache_sync(self, model: str, system_instruction: str, cache_key: str) -> Optional[str]:
+        """Synchronous cache creation — only used during startup pre-warm."""
         try:
             from google.genai import types
             cache = self.client.caches.create(
@@ -312,11 +356,29 @@ class LLMService:
             )
             expires_at = _time.monotonic() + settings.GEMINI_CACHE_TTL - _CACHE_REFRESH_BUFFER
             self._gemini_caches[cache_key] = (cache.name, expires_at)
-            logger.info(f"Gemini cache created: {cache_key} → {cache.name} (TTL {settings.GEMINI_CACHE_TTL}s)")
+            logger.info(f"Gemini cache created: {cache_key} → {cache.name}")
             return cache.name
         except Exception as e:
-            logger.warning(f"Gemini cache creation failed (non-fatal, using inline): {e}")
+            logger.warning(f"Gemini cache creation failed: {e}")
             return None
+
+    def _schedule_background_cache(self, model: str, system_instruction: str, phase_key: str, cache_key: str):
+        """Schedule cache creation in background thread — doesn't block the request."""
+        import threading
+        if hasattr(self, '_pending_cache_keys') and cache_key in self._pending_cache_keys:
+            return  # Already being created
+        if not hasattr(self, '_pending_cache_keys'):
+            self._pending_cache_keys = set()
+        self._pending_cache_keys.add(cache_key)
+
+        def _bg_create():
+            try:
+                self._create_cache_sync(model, system_instruction, cache_key)
+            finally:
+                self._pending_cache_keys.discard(cache_key)
+
+        threading.Thread(target=_bg_create, daemon=True).start()
+        logger.info(f"Background cache creation scheduled: {cache_key}")
 
     # --------------------------------------------------
     # OCR & Multimodal
@@ -382,9 +444,8 @@ class LLMService:
             file_ref = self.client.files.upload(path=video_path)
             
             # Wait for file to be processed (standard for Files API)
-            import time
             while file_ref.state == "PROCESSING":
-                time.sleep(2)
+                await asyncio.sleep(2)
                 file_ref = self.client.files.get(name=file_ref.name)
             
             if file_ref.state == "FAILED":
@@ -527,11 +588,19 @@ class LLMService:
     # Generation Config
     # --------------------------------------------------
 
+    # _PHASE_MAX_TOKENS removed — token budgets are now solely managed by model_router.py
+
     def _build_gen_config(self, config_override: Optional[Dict] = None) -> Dict:
-        """Build the Gemini generation config dict."""
+        """Build the Gemini generation config dict.
+
+        Token budget (max_output_tokens) comes from model_router via config_override.
+        This method does NOT override it — model_router is the single authority.
+        Fallback uses TokenBudgetCalculator default (moderate=1024), NOT a hardcoded value.
+        """
+        from services.token_budget import CEILING_MAP, DEFAULT_CEILING
         gen_config = config_override.copy() if config_override else {
             "temperature": settings.RESPONSE_TEMPERATURE,
-            "max_output_tokens": 2048,
+            "max_output_tokens": DEFAULT_CEILING,  # Adaptive default, not hardcoded
             "safety_settings": [
                 {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_ONLY_HIGH"},
                 {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_ONLY_HIGH"},
@@ -544,15 +613,17 @@ class LLMService:
         sys_instruction = self._get_system_instruction(phase)
         phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
 
-        # Disable AFC; never set thinking_config for gemini-2.0-flash
-        from google.genai import types as _gentypes
+        # Disable AFC and thinking — gemini-2.5 models default to thinking ON, adding 5-15s latency
         gen_config.pop("thinking_config", None)
-        gen_config["automatic_function_calling"] = _gentypes.AutomaticFunctionCallingConfig(disable=True)
+        gen_config["automatic_function_calling"] = genai_types.AutomaticFunctionCallingConfig(disable=True)
+        # Cap thinking budget for gemini-2.5 models (default is unlimited, adding 10-15s)
+        # Budget 1024 gives reasoning ability while capping latency to ~1-2s extra
+        if "2.5" in model:
+            gen_config["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=1024)
 
         cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)
         if cache_name:
             gen_config["cached_content"] = cache_name
-            # Don't send system_instruction when using cache
         else:
             gen_config["system_instruction"] = sys_instruction
         return gen_config
@@ -754,7 +825,20 @@ class LLMService:
                 for s in suggestions[-3:]:
                     profile_parts.append(f"   • Turn {s['turn']}: You suggested {s['practice']}")
                 has_data = True
-            
+
+            # Verse/mantra anti-repetition history (Layer 2 diversity)
+            if user_profile.get('suggested_verses'):
+                profile_parts.append("\n   PREVIOUSLY SUGGESTED (offer fresh alternatives — do NOT repeat):")
+                for entry in user_profile['suggested_verses'][-10:]:
+                    parts = []
+                    if entry.get("mantras"):
+                        parts.extend(entry["mantras"][:2])
+                    if entry.get("references"):
+                        parts.extend(entry["references"][:2])
+                    if parts:
+                        profile_parts.append(f"   • Turn {entry.get('turn', '?')}: {' | '.join(parts)}")
+                has_data = True
+
             if has_data:
                 profile_text = "\n" + "="*70 + "\n"
                 profile_text += "WHO YOU ARE SPEAKING TO:\n"
@@ -960,7 +1044,13 @@ HOW TO USE THESE RESOURCES:
 
 
         # Build final prompt
-        returning_user_section = self._build_returning_user_section(is_returning_user, memory_context)
+        # Only include returning-user greeting instruction on the first turn.
+        # After turn 1, the LLM has conversation history and doesn't need the "greet them" prompt.
+        _history_turns = len(conversation_history) if conversation_history else 0
+        _is_first_turn = _history_turns <= 1  # 0 = no history, 1 = just the user's first message
+        returning_user_section = self._build_returning_user_section(
+            is_returning_user and _is_first_turn, memory_context
+        )
 
         # Build facts section only if there's content
         facts_section = ""
@@ -971,6 +1061,40 @@ CONTEXT & JOURNEY:
 ═══════════════════════════════════════════════════════════
 {fact_text}
 """
+
+        # Adaptive length hint — placed at end of prompt for maximum model attention
+        _query_words = len(query.strip().split())
+        _acceptance_words = {"ok", "okay", "sure", "fine", "sounds", "good", "thanks", "thank", "bye", "goodbye", "alright", "cool", "great", "perfect", "noted", "got"}
+        _query_lower_words = set(query.strip().lower().split())
+        if _query_words <= 4 and _query_lower_words & _acceptance_words:
+            _length_hint = "LENGTH: The user's message is a brief acceptance or closing. Respond in 1-2 sentences only.\n"
+        elif _query_words <= 3:
+            _length_hint = "LENGTH: The user's message is very short. Keep your response to 1-3 sentences.\n"
+        else:
+            _length_hint = ""
+
+        # Context Budget Manager — trim variable sections if prompt is too large
+        from services.context_budget import ContextBudgetManager
+        _budget_mgr = ContextBudgetManager(
+            max_output_tokens=getattr(self, '_current_max_output', 2048)
+        )
+        _sections = {
+            "user_profile": profile_text,
+            "panchang": "",  # Already embedded in profile_text
+            "past_memories": "",  # Already embedded in profile_text
+            "verse_history": "",  # Already embedded in profile_text
+            "conversation_history": history_text,
+            "rag_context": scripture_context,
+            "returning_user": returning_user_section,
+            "system_instruction": "",  # Handled separately via system_instruction
+            "current_query": query,
+            "phase_prompt": phase_instructions,
+        }
+        _trimmed = _budget_mgr.fit(_sections)
+        profile_text = _trimmed.get("user_profile", profile_text)
+        history_text = _trimmed.get("conversation_history", history_text)
+        scripture_context = _trimmed.get("rag_context", scripture_context)
+        returning_user_section = _trimmed.get("returning_user", returning_user_section)
 
         prompt = f"""
 {profile_text}
@@ -996,16 +1120,19 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 {phase_instructions}
 
 BEHAVIORAL CHECKS (apply before writing your response):
+- SHORT ACKNOWLEDGMENT: If user's message is 1-3 words (ok, thanks, sure, fine, got it, sounds good) — respond with ONLY 1 warm sentence. NO verse, NO mantra, NO scripture, NO spiritual advice. Just acknowledge warmly.
 - REPETITION: If your last 2 responses already gave a mantra/practice/Gita reference and the user is STILL processing — ask a deeper question instead.
 - LISTENING PHASE: If phase is LISTENING and user is sharing pain — end with a QUESTION, not a practice.
 - "TONIGHT": If your previous response also said "Tonight" — use a different timing.
-- RETURNING USER: If RETURNING USER section exists above, try to reference one specific detail from their journey.
+- RETURNING USER: Only on the FIRST message of a session. After that, DO NOT re-greet or re-introduce — continue the conversation naturally.
 
 {scripture_context}
 
 RESPOND TO WHAT THEY ACTUALLY SAID — not to what your context data contains.
-Do NOT force panchang, verses, deity names, or practices into every response. A warm 2-3 sentence reply is almost always better than one that tries to include everything. No numbered lists, no bullet points, no bold, no headers — flowing prose only. One verse maximum. Use deity NAMES (Shiva, Krishna) not just "He".
-
+GREETING RULE: When user just says "Hello", "Hi", "Namaste" — respond with a simple warm greeting and ask how they are. Do NOT mention their gotra, deity, temple visits, purchase history, or any profile data. Just be warm and human: "Namaste! How are you doing today?" Profile data is for LATER when it becomes contextually relevant.
+Do NOT force panchang, verses, deity names, or practices into every response. A warm 2-3 sentence reply is almost always better than one that tries to include everything. One verse maximum. Use deity NAMES (Shiva, Krishna) not just "He".
+Do NOT repeat any mantra, practice, or advice you already gave in this conversation. The user heard you the first time.
+{_length_hint}
 Your response:
 """
         

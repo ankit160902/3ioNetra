@@ -59,10 +59,11 @@ export function useAuth() {
             return;
           }
 
-          // Verify token with backend
+          // Verify token with backend (cookie sent automatically via credentials)
           const response = await fetch(`${API_URL}/api/auth/verify`, {
+            credentials: 'include',  // Fix 4: httpOnly cookie auth
             headers: {
-              'Authorization': `Bearer ${storedToken}`,
+              'Authorization': `Bearer ${storedToken}`,  // Backwards compat header
             },
           });
 
@@ -124,7 +125,7 @@ export function useAuth() {
     checkAuth();
   }, []);
 
-  // Login
+  // Login (Fix 4: credentials: 'include' for httpOnly cookie)
   const login = useCallback(async (email: string, password: string): Promise<boolean> => {
     setError(null);
     setAuthState(prev => ({ ...prev, isLoading: true }));
@@ -134,6 +135,7 @@ export function useAuth() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
+        credentials: 'include',  // Fix 4: send/receive httpOnly cookies
       });
 
       const data = await response.json();
@@ -149,8 +151,8 @@ export function useAuth() {
         return false;
       }
 
-      // Store auth data
-      localStorage.setItem('auth_token', data.token);
+      // Store auth data (token in cookie via Set-Cookie, user in localStorage for display)
+      localStorage.setItem('auth_token', data.token);  // Keep for backwards compat header fallback
       localStorage.setItem('auth_user', JSON.stringify(data.user));
 
       setAuthState({
@@ -177,6 +179,7 @@ export function useAuth() {
       const response = await fetch(`${API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',  // Fix 4: send/receive httpOnly cookies
         body: JSON.stringify({
           name: profile.name,
           email: profile.email,
@@ -226,8 +229,15 @@ export function useAuth() {
     }
   }, []);
 
-  // Logout
+  // Logout (Fix 4: also clear httpOnly cookie via backend)
   const logout = useCallback(() => {
+    // Call backend to clear cookie (fire-and-forget)
+    fetch(`${API_URL}/api/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: authState.token ? { 'Authorization': `Bearer ${authState.token}` } : {},
+    }).catch(() => {}); // Ignore errors — local state is cleared regardless
+
     localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth_last_verified');
@@ -237,7 +247,7 @@ export function useAuth() {
       isAuthenticated: false,
       isLoading: false,
     });
-  }, []);
+  }, [authState.token]);
 
   // Get auth header - Fixed to return proper type
   const getAuthHeader = useCallback((): Record<string, string> | undefined => {

@@ -18,37 +18,27 @@ logger = logging.getLogger(__name__)
 # MAPPINGS
 # -------------------------------------------------------------------
 
-EMOTION_TO_CONCEPTS = {
-    'anxiety': ['vairagya', 'surrender', 'present_moment', 'trust', 'breath'],
-    'sadness': ['impermanence', 'acceptance', 'dharma', 'seva', 'compassion'],
-    'anger': ['patience', 'forgiveness', 'detachment', 'ahimsa', 'self_control'],
-    'confusion': ['viveka', 'clarity', 'svadharma', 'guidance', 'wisdom'],
-    'fear': ['courage', 'faith', 'surrender', 'protection', 'strength'],
-    'hopelessness': ['hope', 'grace', 'perseverance', 'dharma', 'faith'],
-    'frustration': ['patience', 'acceptance', 'karma', 'equanimity', 'detachment'],
-    'guilt': ['forgiveness', 'redemption', 'dharma', 'renewal', 'self_compassion'],
-    'loneliness': ['connection', 'devotion', 'sangha', 'inner_self', 'love'],
-    'stress': ['peace', 'balance', 'karma_yoga', 'detachment', 'breath'],
-    'overwhelm': ['surrender', 'one_step', 'trust', 'simplicity', 'present_moment'],
-    'pilgrimage': ['tirtha', 'darshan', 'kshetra', 'bhakti', 'serenity', 'connection'],
-    'fatigue': ['dinacharya', 'agni', 'ojas', 'rest', 'balance'],
-    'restlessness': ['pranayama', 'dhyana', 'pratyahara', 'concentration', 'stillness'],
-}
+# EMOTION_TO_CONCEPTS removed — RAG now finds relevant concepts dynamically
+# Kept as empty dict for backwards compatibility (code references it with .get())
+EMOTION_TO_CONCEPTS = {}
 
+# LIFE_DOMAIN_TO_SCRIPTURES — softened to PREFERENCES, not hard filters
+# RAG uses these as boost signals, not exclusion filters.
+# None/empty means "search all scriptures equally"
 LIFE_DOMAIN_TO_SCRIPTURES = {
-    'work': ['Bhagavad Gita', 'Mahabharata'],
-    'family': ['Ramayana', 'Mahabharata', 'Bhagavad Gita'],
-    'relationships': ['Ramayana', 'Bhagavad Gita'],
-    'health': ['Charaka Samhita (Ayurveda)', 'Sanatan Scriptures', 'Bhagavad Gita'],
-    'wellness': ['Charaka Samhita (Ayurveda)', 'Patanjali Yoga Sutras', 'Bhagavad Gita'],
-    'yoga': ['Patanjali Yoga Sutras', 'Bhagavad Gita', 'Meditation and Mindfulness'],
-    'meditation': ['Meditation and Mindfulness', 'Patanjali Yoga Sutras', 'Bhagavad Gita'],
-    'spiritual': ['Bhagavad Gita', 'Sanatan Scriptures'],
-    'financial': ['Mahabharata', 'Bhagavad Gita'],
-    'career': ['Bhagavad Gita', 'Mahabharata'],
-    'pilgrimage': ['Hindu Temples', 'Bhagavad Gita'],
+    'work': None,           # was: ['Bhagavad Gita', 'Mahabharata'] — now searches all
+    'family': None,
+    'relationships': None,
+    'health': None,
+    'wellness': None,
+    'yoga': None,
+    'meditation': None,
+    'spiritual': None,
+    'financial': None,
+    'career': None,
+    'pilgrimage': ['Hindu Temples'],  # Temples are genuinely domain-specific
     'temples': ['Hindu Temples'],
-    'Panchang & Astrology': [], # No scriptural RAG for calendar specifics
+    'Panchang & Astrology': [],       # No scriptural RAG for calendar
 }
 
 
@@ -212,7 +202,7 @@ class ContextSynthesizer:
             concepts.extend(EMOTION_TO_CONCEPTS.get(emotion.value, []))
         
         if story and story.temple_interest:
-            concepts.extend(EMOTION_TO_CONCEPTS['pilgrimage'])
+            concepts.extend(EMOTION_TO_CONCEPTS.get('pilgrimage', ['tirtha', 'darshan', 'bhakti']))
         
         if not concepts:
             return DEFAULT_CONCEPTS

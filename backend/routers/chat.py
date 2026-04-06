@@ -3,12 +3,14 @@ import json
 import logging
 import asyncio
 import re
+import time
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import StreamingResponse
 
 from config import settings
+from services.observability import set_correlation_id, get_correlation_id
 from models.api_schemas import (
     ConversationalQuery, ConversationalResponse,
     SessionCreateResponse, SessionStateResponse,
@@ -351,6 +353,9 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     session.add_message('assistant', final_text)
     # Record practice suggestions for future product inference
     companion_engine.record_suggestion(session, final_text)
+    # Record verse/mantra history for diversity (anti-repetition)
+    from services.verse_tracker import record_suggested_verses
+    record_suggested_verses(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
     def _on_save_done(t):
@@ -372,6 +377,10 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
 @router.post("/conversation", response_model=ConversationalResponse)
 async def conversational_query(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """Main conversational endpoint with empathetic companion flow."""
+    cid = set_correlation_id()
+    _t_start = time.perf_counter()
+    logger.info(f"REQUEST_START | cid={cid} | session={query.session_id} | msg_len={len(query.message)}")
+
     rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
@@ -445,6 +454,16 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             response_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=True
         )
 
+        # Post-generation product inference: if LLM mentioned items but no products were pre-recommended
+        if not recommended_products:
+            _analysis = {"emotion": session.memory.story.emotional_state or "", "life_domain": session.memory.story.life_area or ""}
+            recommended_products = await companion_engine.product_recommender.infer_from_response(
+                session, response_text, _analysis,
+                life_domain=(session.memory.story.life_area or "unknown"),
+            )
+
+        _elapsed = (time.perf_counter() - _t_start) * 1000
+        logger.info(f"REQUEST_END | cid={cid} | phase=guidance | {_elapsed:.0f}ms | turn={session.turn_count}")
         return ConversationalResponse(
             session_id=session.session_id,
             phase=ConversationPhaseEnum.guidance,
@@ -460,6 +479,16 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             companion_response, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=False
         ))
 
+        # Post-generation product inference for listening path too
+        if not recommended_products:
+            _analysis = {"emotion": session.memory.story.emotional_state or "", "life_domain": session.memory.story.life_area or ""}
+            recommended_products = await companion_engine.product_recommender.infer_from_response(
+                session, companion_response, _analysis,
+                life_domain=(session.memory.story.life_area or "unknown"),
+            )
+
+        _elapsed = (time.perf_counter() - _t_start) * 1000
+        logger.info(f"REQUEST_END | cid={cid} | phase=listening | {_elapsed:.0f}ms | turn={session.turn_count}")
         return ConversationalResponse(
             session_id=session.session_id, phase=ConversationPhaseEnum.listening, response=companion_response,
             signals_collected=session.get_signals_summary(), turn_count=session.turn_count, is_complete=False,
@@ -474,6 +503,9 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 @router.post("/conversation/stream")
 async def conversational_query_stream(query: ConversationalQuery, user: dict = Depends(get_current_user)):
     """Streaming conversational endpoint — SSE token-by-token responses."""
+    cid = set_correlation_id()
+    logger.info(f"STREAM_START | cid={cid} | session={query.session_id} | msg_len={len(query.message)}")
+
     rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
@@ -487,6 +519,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             session, is_crisis, crisis_response = await _preflight(
                 query, user, session_manager, companion_engine, safety_validator
             )
+            yield ": keepalive\n\n"  # Flush after preflight — prevents proxy/browser timeout
 
             if is_crisis:
                 yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': session.phase.value, 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
@@ -500,6 +533,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             meta, speculative_docs = await _run_speculative_rag(
                 session, query, rag_pipeline, companion_engine, streaming=True
             )
+            yield ": keepalive\n\n"  # Flush after RAG — prevents timeout during search
 
             is_ready = meta["is_ready_for_wisdom"]
             turn_topics = meta["turn_topics"]
@@ -509,6 +543,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': 'guidance' if is_ready else active_phase.value, 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
 
             full_text_parts: list[str] = []
+            stream_complete = False
 
             if is_ready:
                 yield f"event: status\ndata: {json.dumps({'stage': 'searching', 'message': 'Searching scriptures...'})}\n\n"
@@ -554,11 +589,26 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     full_text_parts.append(fallback_text)
                     yield f"event: token\ndata: {json.dumps({'text': fallback_text})}\n\n"
 
+            stream_complete = True
             full_text = "".join(full_text_parts)
             cleaned_text = clean_response(full_text)
-            final_text = await _postprocess_and_save(
-                cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
-            )
+            try:
+                final_text = await _postprocess_and_save(
+                    cleaned_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=is_ready
+                )
+            except Exception as save_err:
+                logger.error(f"Post-process/save failed (using raw text): {save_err}")
+                final_text = cleaned_text
+
+            # Post-generation product inference for streaming path
+            if not recommended_products:
+                try:
+                    recommended_products = await companion_engine.product_recommender.infer_from_response(
+                        session, final_text, meta.get("analysis", {}),
+                        life_domain=(session.memory.story.life_area or "unknown"),
+                    )
+                except Exception as prod_err:
+                    logger.warning(f"Post-gen product inference failed: {prod_err}")
 
             flow_meta = {
                 "detected_domain": session.memory.story.life_area,
@@ -569,6 +619,9 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
 
             yield f"event: done\ndata: {json.dumps({'full_response': final_text, 'recommended_products': recommended_products, 'flow_metadata': flow_meta})}\n\n"
 
+        except asyncio.CancelledError:
+            # Client disconnected mid-stream — do NOT save partial response
+            logger.warning(f"SSE stream cancelled (client disconnect) for session {session.session_id if 'session' in dir() else 'unknown'}")
         except Exception as e:
             logger.exception(f"Error in SSE stream: {e}")
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
@@ -594,25 +647,28 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
         if db is None:
             raise HTTPException(status_code=500, detail="Database not available")
         response_hash = hashlib.sha256(request.response_text.encode()).hexdigest()
-        db.feedback.update_one(
-            {
-                "session_id": request.session_id,
-                "message_index": request.message_index,
-                "response_hash": response_hash,
-                "user_id": user.get("id") if user else None,
-            },
-            {"$set": {
+        filter_doc = {
+            "session_id": request.session_id,
+            "message_index": request.message_index,
+            "response_hash": response_hash,
+            "user_id": user.get("id") if user else None,
+        }
+        update_doc = {
+            "$set": {
                 "feedback": request.feedback,
                 "updated_at": datetime.utcnow(),
-            }, "$setOnInsert": {
+            },
+            "$setOnInsert": {
                 "session_id": request.session_id,
                 "message_index": request.message_index,
                 "response_text": request.response_text,
                 "response_hash": response_hash,
                 "user_id": user.get("id") if user else None,
                 "created_at": datetime.utcnow(),
-            }},
-            upsert=True,
+            },
+        }
+        await asyncio.to_thread(
+            db.feedback.update_one, filter_doc, update_doc, upsert=True
         )
         return {"message": "Feedback saved", "feedback": request.feedback}
     except HTTPException:
@@ -690,13 +746,62 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
         memory=memory_snapshot
     )
 
-    # 4. Generate and store a concise conversation summary (async, non-blocking)
-    async def _generate_and_store_summary(conversation_id, messages, memory_snap, uid):
+    # 4. Generate smart title + conversation summary (async, non-blocking)
+    async def _generate_title_and_summary(conversation_id, messages, memory_snap, uid):
         try:
             from llm.service import get_llm_service
             llm = get_llm_service()
             if not llm or not llm.available:
                 return
+
+            s = get_conversation_storage()
+            msg_count = len(messages)
+
+            # --- Smart title generation (only in the 4-6 message window) ---
+            if 4 <= msg_count <= 6:
+                existing = await s.get_conversation_fields(
+                    uid, conversation_id,
+                    ["generated_title", "title_generated_at_turn"]
+                )
+                has_title = bool(existing and existing.get("generated_title"))
+                prev_turn = (existing or {}).get("title_generated_at_turn", 0)
+                current_turn = msg_count // 2
+
+                should_generate = (
+                    (not has_title and current_turn >= 2) or
+                    (has_title and prev_turn <= 2 and current_turn >= 3)
+                )
+
+                if should_generate:
+                    early_messages = messages[:6]
+                    msg_text = "\n".join(
+                        f"{'User' if m.get('role') == 'user' else 'Mitra'}: {m.get('content', '')[:150]}"
+                        for m in early_messages
+                    )
+                    title_prompt = (
+                        "Generate a concise 4-7 word title for this spiritual companion conversation. "
+                        "The title should capture the user's core concern or life situation. "
+                        "Do NOT use generic words like 'Conversation', 'Chat', 'Discussion', 'Session'. "
+                        "Do NOT start with 'Seeking' or 'Finding'. "
+                        "Use natural, warm language. Examples of good titles:\n"
+                        "- Career Stress and Inner Peace\n"
+                        "- Coping With Father's Illness\n"
+                        "- Marriage Doubts and Family Pressure\n"
+                        "- Daily Meditation Practice Guidance\n"
+                        "- Overcoming Anxiety Through Faith\n\n"
+                        f"Conversation:\n{msg_text}\n\n"
+                        "Title (4-7 words, no quotes):"
+                    )
+                    title = await llm.generate_quick_response(title_prompt)
+                    if title:
+                        title = title.strip().strip('"\'').strip()
+                        if len(title) > 3 and len(title.split()) <= 10:
+                            await s.update_conversation_field(uid, conversation_id, "generated_title", title[:80])
+                            await s.update_conversation_field(uid, conversation_id, "title_generated_at_turn", current_turn)
+                            await s.invalidate_history_cache(uid)
+                            logger.info(f"Smart title for {conversation_id}: {title[:80]}")
+
+            # --- Conversation summary generation (existing logic) ---
             from models.memory_context import ConversationMemory
             mem = ConversationMemory.from_dict(memory_snap) if memory_snap else None
             base_summary = mem.get_memory_summary() if mem else ""
@@ -706,12 +811,11 @@ Last 6 messages: {json.dumps(messages[-6:], ensure_ascii=False)[:800]}
 Summary:"""
             summary = await llm.generate_quick_response(summary_prompt)
             if summary:
-                s = get_conversation_storage()
                 await s.update_conversation_field(uid, conversation_id, "conversation_summary", summary.strip()[:300])
         except Exception as e:
-            logger.error(f"Summary generation failed: {e}")
+            logger.error(f"Title/summary generation failed: {e}")
 
-    asyncio.create_task(_generate_and_store_summary(request.conversation_id, request.messages, memory_snapshot, user["id"]))
+    asyncio.create_task(_generate_title_and_summary(request.conversation_id, request.messages, memory_snapshot, user["id"]))
 
     return {"message": "Saved", "conversation_id": conv_id}
 

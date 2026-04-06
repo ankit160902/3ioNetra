@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 import re
+import time
 from typing import Tuple, Optional, TYPE_CHECKING, Dict, List
 
 from config import settings
@@ -11,12 +12,16 @@ from models.memory_context import ConversationMemory
 from services.panchang_service import get_panchang_service
 
 from rag.scoring_utils import get_doc_score
-from services.cost_tracker import get_cost_tracker, extract_tokens_from_response
+from services.cost_tracker import get_cost_tracker
 from services.intent_agent import get_intent_agent
 from services.memory_service import get_memory_service
 from services.model_router import get_model_router
 from services.product_service import get_product_service
+from services.conversation_fsm import ConversationFSM
+from services.memory_updater import update_memory as _update_memory_impl
+from services.product_recommender import ProductRecommender
 from services.profile_builder import build_user_profile
+from services.signal_collector import collect_signals_from_analysis
 from services.retrieval_judge import get_retrieval_judge
 if TYPE_CHECKING:
     from rag.pipeline import RAGPipeline
@@ -34,169 +39,39 @@ class CompanionEngine:
     - Listen and update ConversationMemory
     - Decide when we're ready for dharmic wisdom
     - Generate grounded empathetic responses
+
+    Product maps and recommendation logic extracted to product_recommender.py.
+    Memory update logic extracted to memory_updater.py.
+    Signal collection logic extracted to signal_collector.py.
+    Phase transition logic extracted to conversation_fsm.py.
     """
 
-    PRACTICE_PRODUCT_MAP = {
-        "japa": {
-            "detect": ["japa", "jaap", "jap ", "chant", "chanting", "recite", "108 times", "11 times", "21 times"],
-            "search_keywords": ["rudraksha mala", "mala"],
-        },
-        "puja": {
-            "detect": ["puja", "pooja", "aarti"],
-            "search_keywords": ["puja thali", "incense", "diya", "Kalash", "agardan", "kamandal", "Panch Patra", "chokra"],
-        },
-        "meditation": {
-            "detect": ["meditation", "meditate", "dhyana", "dhyan", "sit quietly"],
-            "search_keywords": ["incense", "Loban", "agarbatti", "Amethyst"],
-        },
-        "diya": {
-            "detect": ["diya", "deep ", "jyoti", "light a lamp", "light a diya", "akhand"],
-            "search_keywords": ["deep", "ghee", "diya", "akhand"],
-        },
-        "yoga": {
-            "detect": ["yoga", "asana", "pranayama", "surya namaskar"],
-            "search_keywords": ["yoga", "bracelet"],
-        },
-        "tilak": {
-            "detect": ["tilak", "sindoor", "kumkum", "chandan"],
-            "search_keywords": ["sindoor", "kumkum", "puja thali"],
-        },
-        "abhishek": {
-            "detect": ["abhishek", "abhishekam"],
-            "search_keywords": ["abhishek", "Kalash", "puja thali", "ghee"],
-        },
-        "havan": {
-            "detect": ["havan", "hawan", "homam", "yajna", "yagna", "yagya"],
-            "search_keywords": ["havan", "ghee", "yagya"],
-        },
-        "deity_worship": {
-            "detect": ["murti", "idol", "statue", "bhagwan"],
-            "search_keywords": ["murti", "brass idol"],
-        },
-        "home_temple": {
-            "detect": ["mandir", "home temple", "puja room", "spiritual corner", "altar"],
-            "search_keywords": ["puja box", "3D lamp", "deep", "bell", "aarti", "paduka", "photo frame"],
-        },
-        "crystal_healing": {
-            "detect": ["crystal", "gemstone", "stone", "healing stone"],
-            "search_keywords": ["bracelet", "crystal"],
-        },
-        "seva": {
-            "detect": ["seva", "temple service", "pind daan", "ganga aarti", "shraddha"],
-            "search_keywords": ["seva", "pind daan", "ganga aarti"],
-        },
-        "consultation": {
-            "detect": ["consult", "consultation", "expert", "astrologer", "jyotish", "kundli", "kundali", "horoscope", "birth chart", "numerology", "ank shastra"],
-            "search_keywords": ["consultation", "astrology", "Astro List", "Book-now"],
-        },
-        "vrat": {
-            "detect": ["vrat", "fast", "fasting", "upvas", "ekadashi"],
-            "search_keywords": ["puja thali", "incense", "diya"],
-        },
-        "sankalpa": {
-            "detect": ["sankalpa", "intention", "resolve", "pledge", "commitment"],
-            "search_keywords": ["mala", "Rudraksha", "yantra"],
-        },
-        "temple_seva": {
-            "detect": ["annadaan", "gau seva", "kirtan", "shringar", "pushpanjali", "bhog", "chadhawa", "vastra", "pujan"],
-            "search_keywords": ["seva", "annadaan", "kirtan", "shringar", "yagya", "pujan", "Jwala"],
-        },
-        "workshop": {
-            "detect": ["workshop", "session", "event", "class", "course", "sound healing", "bhajan"],
-            "search_keywords": ["HEARTSPACE", "healing", "bhajan", "Rhythm"],
-        },
-        "kundli": {
-            "detect": ["kundli", "kundali", "rashi", "nakshatra", "dosha", "mangal dosh", "kaal sarp", "pitra", "navgrah", "sade sati"],
-            "search_keywords": ["consultation", "dosh nivaran", "yantra", "Navgrah"],
-        },
-    }
-
-    EMOTION_PRODUCT_MAP = {
-        "anxiety": ["Inner Peace", "Antidepression", "Amethyst", "Rose Quartz", "Black Tourmaline", "7 Chakra", "incense"],
-        "grief": ["consultation", "seva", "pind daan", "Rose Quartz", "Rudraksha"],
-        "confusion": ["consultation", "astrology", "Lapis Lazuli", "Amethyst", "7 Chakra"],
-        "anger": ["Anger Relief", "Black Tourmaline", "Carnelian", "incense", "Smoky Quartz"],
-        "hopelessness": ["consultation", "Rose Quartz", "Inner Peace", "Antidepression", "7 Chakra"],
-        "stress": ["Antidepression", "Inner Peace", "Amethyst", "Smoky Quartz", "Ultimate Wellness", "incense"],
-        "fear": ["Triple Protection", "Black Tourmaline", "Hanuman", "Panchmukhi", "5 Mukhi Rudraksha"],
-        "sadness": ["Rose Quartz", "Antidepression", "consultation", "Inner Peace"],
-        "loneliness": ["Rose Quartz", "Inner Peace", "consultation", "7 Chakra"],
-        "frustration": ["Anger Relief", "Smoky Quartz", "Black Tourmaline", "Tiger Eye", "consultation"],
-        "shame": ["Rose Quartz", "consultation", "Amethyst", "Inner Peace"],
-        "despair": ["consultation", "Antidepression", "Rose Quartz", "7 Chakra", "seva"],
-        "guilt": ["Rose Quartz", "consultation", "Amethyst", "seva"],
-        "jealousy": ["Black Tourmaline", "Triple Protection", "Rose Quartz"],
-    }
-
-    DEITY_PRODUCT_MAP = {
-        "krishna": ["Krishna", "Radha Krishna", "3D lamp", "Krishna Murti", "Puja Box", "Light Frame"],
-        "shiva": ["Shiva", "Rudraksha", "3D Shiva", "Shiva 3D Light", "1 Mukhi", "5 Mukhi"],
-        "hanuman": ["Hanuman", "Panchamukhi", "3D Hanuman", "Hanuman Bell", "Hanuman Yantra", "Brass Idol"],
-        "ganesh": ["Ganesh", "Ganesha", "murti", "3D Ganesh", "Ganesh 3D Light", "Ganapati"],
-        "lakshmi": ["Lakshmi", "Pyrite", "prosperity", "Lakshmi Charan", "Lakshmi Kuber", "7 Mukhi Rudraksha"],
-        "durga": ["Durga", "murti", "Mundeshwari", "Shakti"],
-        "saraswati": ["Saraswati", "Education", "Lakshmi Ganesh Saraswati"],
-        "shrinathji": ["Shrinathji", "3D box", "golden arch"],
-        "vishnu": ["Vishnu", "Vishnusahasranam", "Sudarshan"],
-        "surya": ["Surya", "Abhimantrit Surya", "copper wall hanging"],
-        "kali": ["Kali", "Bhairav", "Triple Protection"],
-        "naag": ["Naagdev", "Kaal Sarp", "Nag", "serpent", "Sade Sati"],
-        "ram": ["Ram", "Hanuman", "Brass Idol"],
-        "murugan": ["Karungali", "Murugan", "Vel"],
-    }
-
-    DOMAIN_PRODUCT_MAP = {
-        "career": ["Career Success", "Success & Focus", "Tiger Eye", "Pyrite", "consultation", "Money Magnet"],
-        "relationships": ["Rose Quartz", "Early Marriage", "consultation", "Life Goal Support"],
-        "health": ["Weight Loss", "Headache Relief", "7 Chakra", "bracelet", "Ultimate Wellness", "Diabetes Control"],
-        "spiritual": ["Rudraksha", "mala", "incense", "deep", "murti", "Karungali", "yantra"],
-        "family": ["puja thali", "deep", "Lakshmi Ganesh", "puja box"],
-        "finance": ["Money Magnet", "Dhan Yog", "Pyrite", "Lakshmi", "Career Success", "Lakshmi Pyramid"],
-        "education": ["Education", "Success & Focus", "Tiger Eye", "Lapis Lazuli", "consultation"],
-        "self-improvement": ["Education", "Success & Focus", "Tiger Eye", "Lapis Lazuli", "consultation", "abundance"],
-        "yoga practice": ["incense", "meditation", "7 Chakra", "Amethyst"],
-        "meditation & mind": ["Amethyst", "incense", "Smoky Quartz", "Inner Peace", "mala"],
-        "ayurveda & wellness": ["Ultimate Wellness", "7 Chakra", "Health & Wealth"],
-        "marriage": ["Rose Quartz", "Early Marriage", "consultation", "Lakshmi Ganesh"],
-        "parenting": ["Rose Quartz", "puja thali", "Lakshmi Ganesh", "consultation", "Conscious Parenting"],
-        "addiction": ["Amethyst", "Black Tourmaline", "consultation", "Rudraksha"],
-        "grief & loss": ["Rose Quartz", "seva", "pind daan", "consultation"],
-        "self-worth": ["Tiger Eye", "Carnelian", "Rose Quartz", "consultation"],
-        "general": ["consultation", "7 Chakra", "Rudraksha", "Rose Quartz", "incense"],
-    }
-
-    CONCEPT_PRODUCT_MAP = {
-        "bhakti": ["murti", "puja thali", "deep", "incense", "3D lamp"],
-        "vairagya": ["mala", "Rudraksha", "Karungali"],
-        "karma": ["seva", "consultation"],
-        "dharma": ["mala", "Rudraksha", "consultation"],
-        "surrender": ["murti", "deep", "seva"],
-        "moksha": ["1 Mukhi Rudraksha", "mala", "Rudraksha"],
-        "shakti": ["Durga", "Triple Protection", "Carnelian"],
-        "prosperity": ["Dhan Yog", "Money Magnet", "Pyrite", "Lakshmi"],
-        "protection": ["Triple Protection", "Black Tourmaline", "Hanuman", "Panchamukhi"],
-        "vastu": ["Sudarshan Yantra", "7 Horses", "Surya", "Kurma"],
-        "puja": ["puja thali", "incense", "diya", "deep"],
-        "healing": ["7 Chakra", "Rose Quartz", "Amethyst", "Ultimate Wellness"],
-        "courage": ["Hanuman", "Tiger Eye", "Carnelian", "Triple Protection"],
-        "navagraha": ["Navgrah", "Mangal", "Surya", "consultation"],
-        "pitru": ["pind daan", "seva", "consultation"],
-        "dosh": ["Kaal Sarp", "Mangal", "Sade Sati", "consultation", "yantra"],
-        "ank_shastra": ["Ank Shastra", "consultation"],
-    }
-
-    def __init__(self, rag_pipeline: Optional["RAGPipeline"] = None) -> None:
-        from llm.service import get_llm_service
-        self.llm = get_llm_service()
+    def __init__(
+        self,
+        rag_pipeline: Optional["RAGPipeline"] = None,
+        *,
+        llm=None,
+        intent_agent=None,
+        memory_service=None,
+        product_service=None,
+        panchang=None,
+        model_router=None,
+    ) -> None:
+        # Accept injected ports or fall back to singleton factories
+        if llm is not None:
+            self.llm = llm
+        else:
+            from llm.service import get_llm_service
+            self.llm = get_llm_service()
 
         self.rag_pipeline = rag_pipeline
-        self.panchang = get_panchang_service()
-        self.intent_agent = get_intent_agent()
-        self.memory_service = get_memory_service(rag_pipeline)
-        self.product_service = get_product_service()
-        self.model_router = get_model_router()
+        self.panchang = panchang if panchang is not None else get_panchang_service()
+        self.intent_agent = intent_agent if intent_agent is not None else get_intent_agent()
+        self.memory_service = memory_service if memory_service is not None else get_memory_service(rag_pipeline)
+        self.product_service = product_service if product_service is not None else get_product_service()
+        self.product_recommender = ProductRecommender(self.product_service, self.panchang)
+        self.model_router = model_router if model_router is not None else get_model_router()
         self.available = self.llm.available
-        self._suppress_emotion_set = frozenset(settings.PRODUCT_SUPPRESS_EMOTIONS.split(","))
         logger.info(f"CompanionEngine initialized (LLM available={self.available})")
 
     def set_rag_pipeline(self, rag_pipeline: "RAGPipeline") -> None:
@@ -232,40 +107,15 @@ class CompanionEngine:
 
         analysis, past_memories = await asyncio.gather(*tasks)
 
-        # 1. Update session signals and story (Same as process_message)
-        if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
-            session.memory.story.life_area = analysis["life_domain"]
-            session.add_signal(SignalType.LIFE_DOMAIN, analysis["life_domain"], 0.95)
+        # 1. Update session signals and story from intent analysis
+        collect_signals_from_analysis(session, analysis)
 
-        if analysis.get("emotion") and analysis["emotion"] != "neutral":
-            session.memory.story.emotional_state = analysis["emotion"]
-            session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
-
-        entities = analysis.get("entities", {})
-        if entities.get("deity"):
-            session.memory.story.preferred_deity = entities["deity"]
-        if entities.get("ritual"):
-            session.memory.story.primary_concern = f"Performing {entities['ritual']}"
-
-        if analysis.get("summary"):
-            session.memory.story.primary_concern = analysis["summary"]
-
-        # 🚀 Decide phase
+        # 🚀 Decide phase (via FSM)
         intent = analysis.get("intent")
-        # Explicit requests bypass readiness at any turn
-        is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
-                              "Verse Request" in turn_topics or \
-                              analysis.get("recommend_products", False)
-        # General guidance/info needs at least 2 turns of listening first
-        is_guidance_ask = (analysis.get("needs_direct_answer", False) or
-                           intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO))
-        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= 2)
+        fsm = ConversationFSM(session)
+        is_ready, readiness_trigger = fsm.evaluate(analysis, turn_topics)
 
-        current_phase = ConversationPhase.CLARIFICATION
-        if intent == IntentType.CLOSURE:
-            current_phase = ConversationPhase.CLOSURE
-
-        is_ready = False if intent == IntentType.CLOSURE else (self._assess_readiness(session) or is_direct_ask)
+        current_phase = ConversationPhase.CLOSURE if intent == IntentType.CLOSURE else ConversationPhase.CLARIFICATION
 
         if is_ready:
             # Metadata for frontend
@@ -287,18 +137,28 @@ class CompanionEngine:
         }
 
         if self.available:
-            # Start streaming
+            # Start streaming with proper model routing + token budget
             user_profile = build_user_profile(session.memory, session)
             if past_memories:
                 user_profile["past_memories"] = past_memories
 
+            # Route through model_router for correct token budget (was missing → truncation)
+            routing = self.model_router.route(
+                intent_analysis=analysis,
+                phase=current_phase,
+                session=session,
+                has_rag_context=False,
+            )
+
             async for token in self.llm.generate_response_stream(
                 query=message,
-                context_docs=[], # No RAG in easy listening unless we want to parallelize it too
+                context_docs=[],
                 conversation_history=session.conversation_history,
                 user_profile=user_profile,
                 phase=current_phase,
                 memory_context=session.memory,
+                model_override=routing.model_name,
+                config_override=routing.config_override,
             ):
                 yield {"type": "token", "content": token}
         else:
@@ -317,6 +177,7 @@ class CompanionEngine:
         turn_topics = self._update_memory(session.memory, session, message)
 
         # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval + Speculative RAG
+        _t_parallel_start = time.perf_counter()
         tasks = [
             self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
         ]
@@ -330,15 +191,13 @@ class CompanionEngine:
         else:
             tasks.append(asyncio.sleep(0, result=[]))
 
-        # Speculative RAG: start search in parallel with intent for substantive messages.
-        # Pre-filter: skip for trivial messages, panchang keywords, and short positive phrases
-        # that will be discarded by skip-RAG logic anyway. Saves 2-6s of wasted compute.
+        # Speculative RAG: start search in parallel with intent for any substantive message.
+        # Runs from turn 1 to eliminate the sequential _retrieve_and_validate bottleneck.
         _trivial = message.strip().lower() in TRIVIAL_MESSAGES
         _panchang_kw = {"panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"}
         _is_panchang_q = any(k in message.lower() for k in _panchang_kw)
         _speculative_rag_eligible = (
-            session.turn_count > 2
-            and msg_words > 8
+            msg_words > 3
             and not _trivial
             and not _is_panchang_q
             and self.rag_pipeline and self.rag_pipeline.available
@@ -354,39 +213,18 @@ class CompanionEngine:
             tasks.append(asyncio.sleep(0, result=[]))
 
         _results = await asyncio.gather(*tasks, return_exceptions=True)
+        _t_parallel_end = time.perf_counter()
+        _parallel_ms = (_t_parallel_end - _t_parallel_start) * 1000
         analysis, past_memories = _results[0], _results[1]
         speculative_rag_docs = _results[2] if not isinstance(_results[2], Exception) else []
+        logger.info(f"PERF_PREAMBLE parallel={_parallel_ms:.0f}ms intent_ok={not isinstance(_results[0], Exception)} mem_ok={not isinstance(_results[1], Exception)} rag_ok={not isinstance(_results[2], Exception)} rag_docs={len(speculative_rag_docs) if isinstance(speculative_rag_docs, list) else 0}")
         if isinstance(_results[2], Exception):
             logger.warning(f"Speculative RAG failed (non-fatal): {_results[2]}")
 
         # 1. Update session signals from LLM analysis
-        if analysis.get("life_domain") and analysis["life_domain"] != "unknown":
-            session.memory.story.life_area = analysis["life_domain"]
-            session.add_signal(SignalType.LIFE_DOMAIN, analysis["life_domain"], 0.95)
+        collect_signals_from_analysis(session, analysis)
 
-        if analysis.get("emotion") and analysis["emotion"] != "neutral":
-            session.memory.story.emotional_state = analysis["emotion"]
-            session.add_signal(SignalType.EMOTION, analysis["emotion"], 0.9)
-
-        # Populate dharmic concepts from emotion when empty
-        if not session.memory.relevant_concepts and session.memory.story.emotional_state:
-            from services.context_synthesizer import EMOTION_TO_CONCEPTS
-            emotion_key = session.memory.story.emotional_state.lower()
-            concepts = EMOTION_TO_CONCEPTS.get(emotion_key, [])
-            if concepts:
-                session.memory.relevant_concepts = concepts[:5]
-
-        # 2. Enrich story with extracted entities and summary
-        entities = analysis.get("entities", {})
-        if entities.get("deity"):
-            session.memory.story.preferred_deity = entities["deity"]
-        if entities.get("ritual"):
-            session.memory.story.primary_concern = f"Performing {entities['ritual']}"
-
-        if analysis.get("summary"):
-            session.memory.story.primary_concern = analysis["summary"]
-
-        # 3. Store in Long-Term Memory if significant
+        # 2. Store in Long-Term Memory if significant
         is_significant_update = (
             len(message) > 30 or
             analysis.get("urgency") in ["high", "crisis"] or
@@ -401,43 +239,16 @@ class CompanionEngine:
                 mem_anchor = analysis.get("summary", message)
                 await self.memory_service.store_memory(user_id, mem_anchor)
 
-        # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase
+        # 🚀 CORE LOGIC: Decide if we should go to GUIDANCE phase (via FSM)
         intent = analysis.get("intent")
-
-        # Direct questions and explicit requests bypass turn gate so users get
-        # immediate answers instead of being held in listening phase
-        is_explicit_request = intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH) or \
-                              "Verse Request" in turn_topics or "Product Inquiry" in turn_topics or \
-                              analysis.get("recommend_products", False) or \
-                              analysis.get("needs_direct_answer", False)
-        # General guidance/info needs enough listening turns first
-        is_guidance_ask = (intent in (IntentType.SEEKING_GUIDANCE, IntentType.ASKING_INFO) or
-                           "Routine Request" in turn_topics or "Puja Guidance" in turn_topics or
-                           "Diet Plan" in turn_topics)
-        detected_emotion = (analysis.get("emotion") or "").lower()
-        min_turns = session.min_clarification_turns if detected_emotion in _DISTRESS_EMOTIONS else 2
-        is_direct_ask = is_explicit_request or (is_guidance_ask and session.turn_count >= min_turns)
-
-        current_phase = ConversationPhase.CLARIFICATION
-        if intent == IntentType.CLOSURE:
-            current_phase = ConversationPhase.CLOSURE
-
-        if intent == IntentType.CLOSURE:
-            is_ready = False
-            readiness_trigger = "closure"
-        elif is_explicit_request:
-            is_ready = True
-            readiness_trigger = "explicit_request"
-        elif is_guidance_ask and session.turn_count >= min_turns:
-            is_ready = True
-            readiness_trigger = "user_asked_for_guidance"
-        elif self._assess_readiness(session):
-            is_ready = True
-            readiness_trigger = "signals_accumulated"
-        else:
-            is_ready = False
-            readiness_trigger = "listening"
+        fsm = ConversationFSM(session)
+        is_ready, readiness_trigger = fsm.evaluate(analysis, turn_topics)
         session.readiness_trigger = readiness_trigger
+
+        current_phase = ConversationPhase.CLOSURE if intent == IntentType.CLOSURE else ConversationPhase.CLARIFICATION
+
+        # is_direct_ask preserved for downstream use (acknowledgement selection)
+        is_direct_ask = is_ready and readiness_trigger in ("explicit_request", "user_asked_for_guidance")
 
         # ------------------------------------------------------------------
         # Ready for wisdom → prepare acknowledgement + context docs + products
@@ -475,96 +286,24 @@ class CompanionEngine:
                         max_docs=settings.RERANK_TOP_K,
                     )
                     logger.info(f"Guidance: reused {len(context_docs)} speculative RAG docs (skipped redundant search)")
-                else:
+                elif not _speculative_rag_eligible:
+                    # Speculative RAG wasn't eligible (trivial/panchang) — run sequential search
                     try:
                         context_docs, _top_score = await self._retrieve_and_validate(
                             session, message, analysis, intent, "guidance",
                         )
                     except Exception as e:
                         logger.warning(f"Guidance-phase RAG/validation failed: {e}")
+                else:
+                    # Speculative RAG ran but returned empty — proceed without scripture docs
+                    logger.info("Guidance: speculative RAG returned empty, proceeding without scripture context")
 
-            # 🛍️ PRODUCT RECOMMENDATION (with throttling)
-            products = []
-            self._detect_product_rejection(session, message, analysis)
-
-            is_explicit_product_request = (
-                "Product Inquiry" in turn_topics
-                or analysis.get("intent") == IntentType.PRODUCT_SEARCH
+            # 🛍️ PRODUCT RECOMMENDATION (delegated to ProductRecommender)
+            products = await self.product_recommender.recommend(
+                session, message, analysis, turn_topics,
+                is_ready_for_wisdom=True,
+                life_domain=analysis.get("life_domain", "unknown"),
             )
-            recommend_from_intent = analysis.get("recommend_products", False)
-
-            # Guard: override LLM hallucination — never recommend products for
-            # informational / philosophical / verse-request intents
-            _no_product_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
-            if recommend_from_intent and (
-                intent in _no_product_intents
-                or "Verse Request" in turn_topics
-                or (intent == IntentType.SEEKING_GUIDANCE
-                    and (analysis.get("life_domain") or "").lower() == "spiritual"
-                    and not analysis.get("entities", {}).get("item")
-                    and not analysis.get("entities", {}).get("ritual"))
-            ):
-                logger.info(f"Product guard: overriding recommend_products=True for intent={intent}, topics={turn_topics}")
-                recommend_from_intent = False
-
-            # Explicit user request — bypasses all gates except crisis
-            if is_explicit_product_request:
-                if not self._should_suppress_products(session, analysis, is_explicit_request=True):
-                    search_terms = " ".join(analysis.get("product_search_keywords", []))
-                    if not search_terms:
-                        context_terms = self._build_context_search_terms(analysis, session)
-                        if context_terms:
-                            search_terms = " ".join(context_terms[:6])
-                        else:
-                            general_kw = self.DOMAIN_PRODUCT_MAP.get("general", [])
-                            search_terms = " ".join(general_kw) if general_kw else message
-                    life_domain = analysis.get("life_domain", "unknown")
-                    logger.info(f"Explicit product request in guidance phase: {search_terms} | Domain: {life_domain}")
-                    products = await self.product_service.search_products(
-                        search_terms, life_domain=life_domain,
-                        emotion=analysis.get("emotion", ""),
-                        deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
-                    )
-                    if not products:
-                        products = await self.product_service.get_recommended_products(
-                            category=life_domain if life_domain != "unknown" else None)
-                    if products:
-                        session.product_event_count += 1
-
-            # Intent agent says recommend — now gated through gatekeeper
-            elif recommend_from_intent:
-                if not self._should_suppress_products(session, analysis, is_explicit_request=False):
-                    search_terms = " ".join(analysis.get("product_search_keywords", []))
-                    if not search_terms:
-                        context_terms = self._build_context_search_terms(analysis, session)
-                        if context_terms:
-                            search_terms = " ".join(context_terms[:6])
-                        else:
-                            logger.info("Intent recommended products but no specific search terms — skipping")
-                            search_terms = ""
-                    if search_terms:
-                        life_domain = analysis.get("life_domain", "unknown")
-                        logger.info(f"Intent-recommended products in guidance phase: {search_terms} | Domain: {life_domain}")
-                        products = await self.product_service.search_products(
-                            search_terms, life_domain=life_domain,
-                            emotion=analysis.get("emotion", ""),
-                            deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
-                            allow_category_fallback=False,
-                        )
-                        if products:
-                            session.last_proactive_product_turn = session.turn_count
-                            session.product_event_count += 1
-
-            # Proactive inference — fully gated; skip for informational/philosophical intents
-            _skip_proactive_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
-            if not products and intent not in _skip_proactive_intents and "Verse Request" not in turn_topics:
-                products = await self._infer_proactive_products(
-                    session, message, analysis.get("life_domain", "unknown"),
-                    analysis=analysis, is_guidance_phase=True)
-
-            if products:
-                products = self._filter_shown_products(session, products)
-                self._record_shown_products(session, products)
 
             # Model routing decision
             routing = self.model_router.route(
@@ -598,11 +337,12 @@ class CompanionEngine:
             skip_rag_intents = {IntentType.GREETING, IntentType.CLOSURE}
             # Skip RAG for emotional expressions in early turns — they need presence, not scripture
             skip_rag_early = session.turn_count <= 2 and intent == IntentType.EXPRESSING_EMOTION
-            # Skip RAG for short acknowledgments (thanks, ok, got it) — no scripture needed
+            # Skip RAG for short acknowledgments (ok, thanks, sure, fine) — no scripture needed
             _msg_words = len(message.strip().split())
             _positive_emotions = {"joy", "gratitude", "hope", "neutral"}
             _detected_emotion = (analysis.get("emotion") or "").lower()
-            skip_rag_short = _msg_words <= 8 and _detected_emotion in _positive_emotions
+            _is_short_ack = _msg_words <= 3  # "ok", "ok fine", "sure", "thanks"
+            skip_rag_short = _is_short_ack or (_msg_words <= 8 and _detected_emotion in _positive_emotions)
             panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
             _is_panchang = any(k in message.lower() for k in panchang_keywords)
             if intent in skip_rag_intents or skip_rag_early or skip_rag_short:
@@ -620,62 +360,28 @@ class CompanionEngine:
                     max_docs=settings.RERANK_TOP_K,
                 )
                 logger.info(f"Listening: reused {len(context_docs)} speculative RAG docs")
-            else:
+            elif not _speculative_rag_eligible:
+                # Speculative RAG wasn't eligible — run sequential search
                 try:
                     context_docs, _top_score = await self._retrieve_and_validate(
                         session, message, analysis, intent, "listening",
                     )
                 except Exception as e:
                     logger.warning(f"Listening-phase RAG/validation failed: {e}")
+            else:
+                # Speculative RAG ran but returned empty — proceed without scripture docs
+                logger.info("Listening: speculative RAG returned empty, proceeding without scripture context")
 
         user_profile = build_user_profile(session.memory, session)
         if past_memories:
             user_profile["past_memories"] = past_memories
 
-        # 🛍️ SELECTIVE PRODUCT RECOMMENDATION logic (Listening Phase — with throttling)
-        products = []
-        self._detect_product_rejection(session, message, analysis)
-
-        is_explicit_product = (
-            analysis.get("intent") == IntentType.PRODUCT_SEARCH
-            or "Product Inquiry" in turn_topics
+        # 🛍️ PRODUCT RECOMMENDATION (listening phase — delegated to ProductRecommender)
+        products = await self.product_recommender.recommend(
+            session, message, analysis, turn_topics,
+            is_ready_for_wisdom=False,
+            life_domain=analysis.get("life_domain", "unknown"),
         )
-
-        # Only explicit PRODUCT_SEARCH gets products in listening phase
-        if is_explicit_product:
-            if not self._should_suppress_products(session, analysis, is_explicit_request=True):
-                search_terms = " ".join(analysis.get("product_search_keywords", []))
-                if not search_terms:
-                    context_terms = self._build_context_search_terms(analysis, session)
-                    if context_terms:
-                        search_terms = " ".join(context_terms[:6])
-                    else:
-                        general_kw = self.DOMAIN_PRODUCT_MAP.get("general", [])
-                        search_terms = " ".join(general_kw) if general_kw else message
-                life_domain = analysis.get("life_domain", "unknown")
-                logger.info(f"Explicit product request in listening phase: {search_terms} | Domain: {life_domain}")
-                products = await self.product_service.search_products(
-                    search_terms, life_domain=life_domain,
-                    emotion=analysis.get("emotion", ""),
-                    deity=(analysis.get("entities", {}).get("deity", "") or session.memory.story.preferred_deity or ""),
-                )
-                if not products:
-                    products = await self.product_service.get_recommended_products(
-                        category=life_domain if life_domain != "unknown" else None)
-                if products:
-                    session.product_event_count += 1
-
-        # Proactive product inference in listening phase (disabled by default via config)
-        # Skip for informational/philosophical intents
-        _skip_proactive_intents = {IntentType.ASKING_INFO, IntentType.GREETING, IntentType.CLOSURE}
-        if not products and intent not in _skip_proactive_intents and "Verse Request" not in turn_topics:
-            products = await self._infer_proactive_products(
-                session, message, analysis.get("life_domain", "unknown"),
-                analysis=analysis, is_guidance_phase=False)
-
-        if products:
-            products = self._filter_shown_products(session, products)
-            self._record_shown_products(session, products)
 
         # Model routing decision
         routing = self.model_router.route(
@@ -770,403 +476,6 @@ class CompanionEngine:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _should_suppress_products(self, session: SessionState, analysis: Dict = None, is_explicit_request: bool = False) -> bool:
-        """
-        Central product gatekeeper — 6 gates. Returns True to block products.
-        Explicit PRODUCT_SEARCH intent bypasses all except crisis gate.
-        """
-        # Gate 1: Crisis — always block, even explicit requests
-        if analysis and analysis.get("urgency") == "crisis":
-            logger.info(f"Product gate: BLOCKED by crisis gate (session {session.session_id})")
-            return True
-
-        # Explicit user request ("show me products") bypasses remaining gates
-        if is_explicit_request:
-            return False
-
-        # Gate 2: Emotional — suppress during grief/despair/hopelessness/crisis/shame
-        current_emotion = (analysis.get("emotion", "") if analysis else "").lower()
-        if current_emotion in self._suppress_emotion_set:
-            logger.info(f"Product gate: BLOCKED by emotional gate (emotion={current_emotion}, session {session.session_id})")
-            return True
-
-        # Gate 3: Rejection — user dismissed products
-        if session.user_dismissed_products:
-            logger.info(f"Product gate: BLOCKED by hard dismissal (session {session.session_id})")
-            return True
-        if session.product_rejection_count >= 2:
-            logger.info(f"Product gate: BLOCKED by rejection count ({session.product_rejection_count}, session {session.session_id})")
-            return True
-        # Respect cooldown after a rejection
-        if session.product_rejection_turn >= 0:
-            turns_since_rejection = session.turn_count - session.product_rejection_turn
-            if turns_since_rejection < settings.PRODUCT_COOLDOWN_AFTER_REJECTION:
-                logger.info(f"Product gate: BLOCKED by rejection cooldown ({turns_since_rejection}/{settings.PRODUCT_COOLDOWN_AFTER_REJECTION} turns, session {session.session_id})")
-                return True
-
-        # Gate 4: Session cap
-        if session.product_event_count >= settings.PRODUCT_SESSION_CAP:
-            logger.info(f"Product gate: BLOCKED by session cap ({session.product_event_count}/{settings.PRODUCT_SESSION_CAP}, session {session.session_id})")
-            return True
-
-        # Gate 5: Cooldown — min turns between proactive product events
-        if session.last_proactive_product_turn >= 0:
-            turns_since_last = session.turn_count - session.last_proactive_product_turn
-            if turns_since_last < settings.PRODUCT_COOLDOWN_TURNS:
-                logger.info(f"Product gate: BLOCKED by cooldown ({turns_since_last}/{settings.PRODUCT_COOLDOWN_TURNS} turns, session {session.session_id})")
-                return True
-
-        # Gate 6: Min turn — no products in first N turns
-        if session.turn_count < settings.PRODUCT_MIN_TURN_FOR_PROACTIVE:
-            logger.info(f"Product gate: BLOCKED by min turn ({session.turn_count}/{settings.PRODUCT_MIN_TURN_FOR_PROACTIVE}, session {session.session_id})")
-            return True
-
-        return False
-
-    def _detect_product_rejection(self, session: SessionState, message: str, analysis: Dict = None) -> None:
-        """Detect and record product rejection from user message. Called early in every turn."""
-        msg_lower = message.lower().strip()
-
-        # Hard-dismiss phrases → immediate full block, even on first occurrence
-        hard_dismiss_phrases = [
-            "stop suggesting products", "stop recommending", "stop showing products",
-            "stop products", "don't show products", "don't recommend products",
-            "no more products", "enough products",
-        ]
-        if any(phrase in msg_lower for phrase in hard_dismiss_phrases):
-            session.user_dismissed_products = True
-            session.product_rejection_count += 1
-            session.product_rejection_turn = session.turn_count
-            logger.info(f"Product HARD dismissal (phrase match, session {session.session_id})")
-            return
-
-        # Soft rejection — LLM-detected or keyword match
-        is_rejection = analysis.get("product_rejection", False) if analysis else False
-
-        soft_rejection_phrases = [
-            "don't want products", "no products", "not interested in shopping",
-            "no recommendations", "i don't need products", "no need for products",
-            "not interested in buying",
-        ]
-        if any(phrase in msg_lower for phrase in soft_rejection_phrases):
-            is_rejection = True
-
-        if is_rejection:
-            session.product_rejection_count += 1
-            session.product_rejection_turn = session.turn_count
-            logger.info(f"Product soft rejection (count={session.product_rejection_count}, session {session.session_id})")
-
-            # 2 soft rejections → hard dismiss
-            if session.product_rejection_count >= 2:
-                session.user_dismissed_products = True
-                logger.info(f"Product hard dismissal via cumulative rejections (session {session.session_id})")
-
-    @staticmethod
-    def _is_acceptance(message: str) -> bool:
-        """Check if a message is an acceptance/acknowledgment of a suggestion.
-        Requires explicit acceptance keywords — short messages alone are NOT acceptance."""
-        msg = message.lower().strip()
-        words = msg.split()
-
-        if len(words) > 30:
-            return False
-
-        rejection_keywords = [
-            "no", "don't want", "nahi", "not interested", "something else",
-            "nah", "don't think", "not now", "later", "not really",
-            "don't need", "no need",
-        ]
-        if any(kw in msg for kw in rejection_keywords):
-            return False
-
-        acceptance_keywords = [
-            "ok", "okay", "fine", "sure", "alright", "yes", "haan", "theek",
-            "accha", "will do", "will try", "thanks", "got it", "sounds good",
-            "thank you", "ji", "shukriya", "dhanyavaad",
-            "ok i will try", "haan karunga", "haan karungi",
-            "zaroor", "bilkul", "thik hai", "i will",
-        ]
-        if any(kw in msg for kw in acceptance_keywords):
-            return True
-
-        return False
-
-    def _get_practice_from_history(self, session: SessionState, role: str = "assistant", lookback: int = 2) -> List[str]:
-        """Scan recent messages for practice-related keywords that map to products.
-        Args:
-            role: 'assistant' for practice suggestions, 'user' for item mentions
-            lookback: number of recent messages to scan
-        """
-        msgs = [
-            m["content"].lower()
-            for m in session.conversation_history
-            if m.get("role") == role
-        ]
-        recent = msgs[-lookback:] if len(msgs) >= lookback else msgs
-
-        matched_keywords: List[str] = []
-        for msg_text in recent:
-            for practice_info in self.PRACTICE_PRODUCT_MAP.values():
-                if any(kw in msg_text for kw in practice_info["detect"]):
-                    for sk in practice_info["search_keywords"]:
-                        if sk not in matched_keywords:
-                            matched_keywords.append(sk)
-
-        return matched_keywords
-
-    def _get_user_item_mentions(self, session: SessionState) -> List[str]:
-        """Scan recent user messages for explicit item/product mentions."""
-        return self._get_practice_from_history(session, role="user", lookback=4)
-
-    # Map _update_memory domain labels → DOMAIN_PRODUCT_MAP keys
-    DOMAIN_NORMALIZE = {
-        "self-improvement": "education",
-        "career & finance": "career",
-        "physical health": "health",
-        "spiritual growth": "spiritual",
-        "meditation & mind": "meditation & mind",
-        "yoga practice": "yoga practice",
-        "ayurveda & wellness": "ayurveda & wellness",
-        "panchang & astrology": "spiritual",
-        "general life": None,
-    }
-
-    def _build_context_search_terms(self, analysis: Dict, session: SessionState) -> List[str]:
-        """Derive product search keywords from conversation context.
-
-        Only uses strong, conversation-grounded signals:
-        - Practice suggestions in assistant messages (japa→mala, puja→thali)
-        - Explicit item mentions in user messages
-        - Deity products ONLY when conversation is about worship/practice (not just mentioning a deity)
-
-        Removed: emotion maps, domain maps, concept maps — these produced
-        irrelevant products that felt salesy (e.g., anxiety→crystals).
-        """
-        terms = []
-
-        # 1. Practice keywords from assistant history (highest signal — companion suggested a practice)
-        terms.extend(self._get_practice_from_history(session))
-
-        # 2. Practice/item keywords from user messages (user explicitly mentions items)
-        terms.extend(self._get_user_item_mentions(session))
-
-        # 3. Deity products ONLY if a ritual/worship context is present (not just philosophical mention)
-        entities = analysis.get("entities", {}) if analysis else {}
-        has_worship_context = bool(entities.get("ritual") or entities.get("item"))
-        if has_worship_context:
-            deity = (entities.get("deity", "") or session.memory.story.preferred_deity or "").lower()
-            if deity:
-                terms.extend(self.DEITY_PRODUCT_MAP.get(deity, []))
-
-        # Deduplicate preserving order, cap at 6
-        seen = set()
-        unique = []
-        for t in terms:
-            if t.lower() not in seen:
-                seen.add(t.lower())
-                unique.append(t)
-        return unique[:6]
-
-    def _filter_shown_products(self, session: SessionState, products: List[Dict]) -> List[Dict]:
-        """Remove already-shown products. Returns empty list if all filtered (no re-shows)."""
-        return [p for p in products if p.get("_id") not in session.shown_product_ids]
-
-    def _record_shown_products(self, session: SessionState, products: List[Dict]) -> None:
-        """Track shown product IDs in the session state."""
-        for p in products:
-            if p.get("_id"):
-                session.shown_product_ids.add(p["_id"])
-
-    def record_suggestion(self, session: SessionState, assistant_text: str) -> None:
-        """Scan assistant's response for practice keywords and record for later product matching."""
-        text_lower = assistant_text.lower()
-        for practice_name, practice_info in self.PRACTICE_PRODUCT_MAP.items():
-            if any(kw in text_lower for kw in practice_info["detect"]):
-                entry = {
-                    "turn": session.turn_count,
-                    "practice": practice_name,
-                    "product_keywords": practice_info["search_keywords"],
-                }
-                session.last_suggestions.append(entry)
-                if len(session.last_suggestions) > 3:
-                    session.last_suggestions = session.last_suggestions[-3:]
-                break  # Record first match only (strongest signal)
-
-    def _get_keywords_from_suggestions(self, session: SessionState) -> List[str]:
-        """Get product keywords from tracked suggestions (preferred over raw text scan)."""
-        keywords = []
-        for entry in session.last_suggestions:
-            for kw in entry["product_keywords"]:
-                if kw not in keywords:
-                    keywords.append(kw)
-        return keywords
-
-    async def _infer_proactive_products(
-        self,
-        session: SessionState,
-        message: str,
-        life_domain: str,
-        analysis: Dict = None,
-        is_guidance_phase: bool = False,
-    ) -> List[Dict]:
-        """Proactively suggest products when user acknowledges a practice suggestion
-        or when conversation context provides strong product signals (guidance phase).
-
-        All proactive paths are gated through _should_suppress_products().
-        """
-        # Central gatekeeper — check all 6 gates
-        if self._should_suppress_products(session, analysis, is_explicit_request=False):
-            return []
-
-        # Listening phase: disabled by default via config
-        if not is_guidance_phase and not settings.PRODUCT_LISTENING_PROACTIVE_ENABLED:
-            return []
-
-        # Path A: Acceptance-based (both phases)
-        # Only trigger if user accepted AND the prior suggestions involve items (mala, diya, thali)
-        is_acceptance = self._is_acceptance(message)
-        if is_acceptance:
-            # Only use practice-to-product mappings — not generic suggestion keywords
-            keywords = self._get_practice_from_history(session)
-            if keywords:
-                search_query = " ".join(keywords[:6])
-                logger.info(f"Proactive product inference (acceptance): searching '{search_query}' for session {session.session_id}")
-                products = await self.product_service.search_products(
-                    search_query, life_domain=life_domain,
-                    emotion=(analysis.get("emotion", "") if analysis else ""),
-                    deity=((analysis.get("entities", {}).get("deity", "") if analysis else "")
-                           or session.memory.story.preferred_deity or ""),
-                    allow_category_fallback=False,
-                )
-                if products:
-                    session.last_proactive_product_turn = session.turn_count
-                    session.product_event_count += 1
-                    logger.info(f"Proactive products found: {len(products)} items for session {session.session_id}")
-                    return products
-
-        # Path B: Context-based (GUIDANCE phase only)
-        # Only trigger when the companion's response suggests a practice that needs
-        # physical items (diya, mala, thali, etc.) OR user explicitly mentioned an item.
-        # Merely mentioning a deity or life domain is NOT enough — that feels salesy.
-        if is_guidance_phase and settings.PRODUCT_GUIDANCE_CONTEXT_ENABLED and analysis:
-            entities = analysis.get("entities", {})
-            # Strong signal: user mentioned a specific item or ritual that needs items
-            has_item_signal = bool(entities.get("item") or entities.get("ritual"))
-            # Also check if user explicitly mentioned wanting/needing something
-            _item_intent_phrases = ["need a", "want a", "buy", "get a", "where can i find", "purchase"]
-            has_purchase_intent = any(p in message.lower() for p in _item_intent_phrases)
-
-            if has_item_signal or has_purchase_intent:
-                # Only use practice-based search terms (not emotion/domain maps)
-                practice_terms = self._get_practice_from_history(session)
-                user_terms = self._get_user_item_mentions(session)
-                context_terms = practice_terms + user_terms
-                if not context_terms and entities.get("ritual"):
-                    # Fallback: use ritual name as search term
-                    context_terms = [entities["ritual"]]
-                if context_terms:
-                    search_query = " ".join(context_terms[:6])
-                    logger.info(f"Proactive product inference (context): searching '{search_query}' for session {session.session_id}")
-                    products = await self.product_service.search_products(
-                        search_query, life_domain=life_domain,
-                        emotion=analysis.get("emotion", ""),
-                        deity=(entities.get("deity", "") or session.memory.story.preferred_deity or ""),
-                        allow_category_fallback=False,
-                    )
-                    if products:
-                        session.last_proactive_product_turn = session.turn_count
-                        session.product_event_count += 1
-                        return products
-
-        return []
-
-    def _assess_readiness(self, session: SessionState) -> bool:
-        """
-        Decide if we should transition to ANSWERING phase.
-        Requires more listening turns for emotionally intense situations.
-        """
-        readiness = session.memory.readiness_for_wisdom
-        emotional_state = session.memory.story.emotional_state
-
-        # High-intensity emotions require more listening before guidance
-        high_intensity_emotions = ['sadness', 'anger', 'anxiety', 'hopelessness', 'grief', 'despair']
-        requires_extra_listening = emotional_state in high_intensity_emotions
-
-        last_msg = ""
-        if session.conversation_history and session.conversation_history[-1]["role"] == "user":
-            last_msg = session.conversation_history[-1]["content"]
-        msg_lower = last_msg.lower()
-
-        # EXPLICIT spiritual request — user clearly asks for mantra/practice/verse
-        explicit_spiritual_keywords = [
-            "mantra", "shloka", "verse", "prayer", "pooja", "puja", "vrat",
-            "chant", "suggest a practice", "spiritual help", "koi upay",
-            "mantra batao", "kuch batao", "what should i chant",
-            "give me a mantra", "suggest me", "guide me spiritually",
-        ]
-        is_explicit_spiritual = any(kw in msg_lower for kw in explicit_spiritual_keywords)
-
-        # General guidance request — "what should I do", "help me with this"
-        guidance_phrases = [
-            "what should i do", "what can i do", "how do i fix",
-            "help me with", "give me advice", "suggest a solution",
-            "way out", "way to deal", "how to overcome",
-        ]
-        is_guidance_request = any(phrase in msg_lower for phrase in guidance_phrases)
-
-        if is_explicit_spiritual:
-            # Explicit spiritual request — allow guidance from turn 2+
-            min_turns_for_guidance = 2 if requires_extra_listening else 1
-            logger.info(f"Session {session.session_id}: Explicit spiritual request detected.")
-        elif is_guidance_request:
-            # General guidance ask — need more listening first
-            min_turns_for_guidance = 4 if requires_extra_listening else 3
-        else:
-            # No explicit ask — require significant listening
-            min_turns_for_guidance = 5 if requires_extra_listening else 3
-        
-        # Log the assessment
-        logger.info(
-            f"Session {session.session_id}: readiness={readiness:.2f}, turns={session.turn_count}, "
-            f"emotion={emotional_state}, min_turns={min_turns_for_guidance}, explicit_spiritual={is_explicit_spiritual}, guidance_req={is_guidance_request}"
-        )
-        
-        # STRICT RULE: Require minimum turn count even if signals are collected
-        if session.turn_count < min_turns_for_guidance:
-             return False
-
-        # Ensure spacing between guidance turns (Oscillation Logic)
-        # BUT: Allow override if user explicitly demands immediate guidance
-        MIN_SPACING = 3
-        last_guidance = getattr(session, 'last_guidance_turn', 0) or 0
-        
-        # Check for URGENT guidance requests that should bypass spacing
-        urgent_keywords = ["please guide", "suggest me", "tell me what", "give me some", "show me", "what should i"]
-        is_urgent_request = any(keyword in last_msg.lower() for keyword in urgent_keywords)
-        
-        if last_guidance > 0 and (session.turn_count - last_guidance) < MIN_SPACING:
-            if is_urgent_request:
-                # User is explicitly demanding guidance NOW - override spacing
-                logger.info(
-                    f"Session {session.session_id}: URGENT guidance request detected, "
-                    f"bypassing spacing requirement (last={last_guidance}, current={session.turn_count})"
-                )
-            else:
-                # Normal oscillation - enforce spacing
-                logger.info(
-                    f"Session {session.session_id}: deferring guidance due to spacing "
-                    f"(last={last_guidance}, current={session.turn_count}, needed={MIN_SPACING})"
-                )
-                return False
-
-        # Now check if we should force transition due to signal density/max turns
-        if session.should_force_transition():
-            logger.info(
-                f"Session {session.session_id}: forced wisdom after {session.turn_count} turns"
-            )
-            return True
-
-        return readiness >= 0.7
 
     async def _retrieve_and_validate(
         self, session, message: str, analysis: Dict, intent, phase_label: str,
@@ -1307,295 +616,12 @@ class CompanionEngine:
         logger.info(f"Memory reconstruction complete. User messages: {user_msg_count}. Story concern: {session.memory.story.primary_concern[:50]}...")
 
     def _update_memory(self, memory: ConversationMemory, session: SessionState, text: str) -> List[str]:
-        """Extract signals and update narrative story"""
-        text = text.lower().strip()
-        
-        # Track topics detected IN THIS TURN specifically
-        turn_topics = []
+        """Extract signals and update narrative story. Delegates to memory_updater module."""
+        return _update_memory_impl(memory, session, text)
 
-        if not memory.story.primary_concern and len(text) > 10:
-            memory.story.primary_concern = text[:200]
-
-        # ------------------------------------------------------------------
-        # RICH SIGNAL DETECTION
-        # ------------------------------------------------------------------
-        
-        # Use regex for strict word boundaries
-        def has_word(keywords, text):
-            pattern = r'\b(' + '|'.join(map(re.escape, keywords)) + r')\b'
-            return bool(re.search(pattern, text))
-            
-        # 1. EMOTIONAL STATES (Deeply Expanded & Scored)
-        emotions = {
-            "Sadness & Grief": ["sad", "low", "lonely", "depressed", "hurt", "grief", "despair", "mourning", "loss", "lost", "crying", "tears", "heavy", "hopeless", "empty", "alone", "ache", "inadequate", "unhappy", "hurts", "loneliness", "irritable", "disconnected"],
-            "Anxiety & Fear": ["anxious", "anxiety", "worried", "stressed", "overwhelmed", "panic", "fear", "scared", "nervous", "tension", "uneasy", "restless", "deadline", "deadlines", "fraud", "fraudulent", "fail", "failing", "burnout", "burned out", "burning out", "panic", "panic attack", "guilty", "guilt", "burn", "burning", "paralyzed", "concentration", "exam", "exams", "insomnia", "high-stress"],
-            "Anger & Frustration": ["angry", "frustrated", "irritated", "furious", "mad", "stupid", "annoying", "rage", "resentment", "hate", "fight", "yell", "hostile", "credit", "irritable"],
-            "Confusion & Doubt": ["confused", "lost", "doubt", "uncertain", "directionless", "stuck", "don't know", "unsure", "clarity", "missing", "purpose", "meaning", "existential", "fraud", "fraudulent", "unethical", "guilty", "guilt", "mirror", "wondering", "failing", "ethics", "void", "search"],
-            "Gratitude & Peace": ["happy", "grateful", "peace", "calm", "content", "blessed", "thankful", "joy", "serene", "better", "morning", "inspiration", "humility", "humble", "meditation"],
-        }
-        
-        emotion_scores = {}
-        for label, keywords in emotions.items():
-            # Weighted matches: find unique matches
-            matched_keywords = [kw for kw in keywords if has_word([kw], text)]
-            if matched_keywords:
-                # Basic score is count of unique matches
-                score = len(matched_keywords)
-                # Specific deep-nuance weights
-                if label == "Confusion & Doubt":
-                    if has_word(["unethical", "existential", "mirror", "wondering", "if i should", "purpose", "meaning", "failing", "fail", "lost"], text):
-                        score += 5
-                    if "failing as a parent" in text or "fail as a parent" in text or "dharma" in text:
-                        score += 15
-                    if has_word(["lost"], text) and has_word(["happiness", "dream", "success", "reached", "bought"], text):
-                        score += 15
-                if label == "Anxiety & Fear":
-                    if has_word(["fraud", "fraudulent", "panic", "guilty", "guilt", "burnout", "burned out", "deadline", "deadlines", "fraud"], text):
-                        score += 5
-                    if "burning me out" in text or "burning out" in text:
-                        score += 10
-                if label == "Sadness & Grief":
-                    if has_word(["lonely", "ache", "empty", "loneliness"], text):
-                        score += 3
-                        
-                emotion_scores[label] = score
-                # print(f"DEBUG: Emotion Match: {label} (Score: {score})")
-                if label not in turn_topics:
-                    turn_topics.append(label)
-                if label not in memory.story.detected_topics:
-                    memory.story.detected_topics.append(label)
-
-        if emotion_scores:
-            # Conditional Tie-breakers (only hit if multiple signals detected)
-            ids = list(emotion_scores.keys())
-            
-            # Use explicit phrasal overrides first
-            if "paralyzed" in text or "exams" in text or "exam" in text:
-                emotion_scores["Anxiety & Fear"] = emotion_scores.get("Anxiety & Fear", 0) + 30
-            if "irritable" in text or "fight" in text or "stressed" in text:
-                # Give a small boost to anxiety if stressed is present
-                if "stressed" in text:
-                    emotion_scores["Anxiety & Fear"] = emotion_scores.get("Anxiety & Fear", 0) + 5
-                if "irritable" in text:
-                    emotion_scores["Anger & Frustration"] = emotion_scores.get("Anger & Frustration", 0) + 20
-                
-            # 1. Anxiety vs Confusion (Imposter/Parenting/Dilemma/Care)
-            if "Anxiety & Fear" in ids and "Confusion & Doubt" in ids:
-                 # UC11: Imposter Syndrome -> Anxiety wins
-                 if has_word(["fraud", "fraudulent", "lead", "promoted"], text):
-                     emotion_scores["Anxiety & Fear"] += 30
-                 # UC12: Parenting/Moral Dilemma -> Confusion wins
-                 if has_word(["values", "traditions", "learn our", "screens", "parent"], text):
-                     emotion_scores["Confusion & Doubt"] += 40
-                 # UC16: Caregiver Guilt -> Anxiety/Stress wins
-                 if has_word(["care", "parents", "aging", "balancing", "burn", "burning"], text):
-                     emotion_scores["Anxiety & Fear"] += 30
-            
-            # 2. Confusion vs Sadness (Existential Crisis / Grief)
-            if "Confusion & Doubt" in ids and "Sadness & Grief" in ids:
-                 # UC14: Existential crisis -> Confusion wins
-                 if has_word(["purpose", "meaning", "reached", "bought", "happiness", "void"], text):
-                     emotion_scores["Confusion & Doubt"] += 40
-                 # UC3: Grief -> Sadness wins (even with traditions)
-                 if has_word(["grandfather", "lost my", "last week"], text):
-                     emotion_scores["Sadness & Grief"] += 40
-                 # UC17: Startup failure / Starting over -> Confusion wins
-                 if has_word(["startup", "start over", "should i", "savings", "confidence"], text):
-                     emotion_scores["Confusion & Doubt"] += 40
-            
-            # 3. Gratitude vs anything (UC28: Pride case / UC22: Inspiration case)
-            if "Gratitude & Peace" in ids:
-                if has_word(["humility", "success", "doer", "full of myself"], text):
-                    emotion_scores["Gratitude & Peace"] += 40
-                if has_word(["morning", "meditation", "inspiration", "beautiful"], text) and not has_word(["fear", "anxious", "low", "lost", "stuck", "angry", "hostile", "resentful", "frustrated"], text) and "Routine Request" not in turn_topics:
-                    emotion_scores["Gratitude & Peace"] += 40
-
-            # Last-resort safety check before max
-            if emotion_scores:
-                best_emotion = max(emotion_scores, key=emotion_scores.get)
-                memory.story.emotional_state = best_emotion
-                session.add_signal(SignalType.EMOTION, best_emotion, 0.85)
-
-
-
-
-        # 2. LIFE DOMAINS (Deeply Expanded with scoring)
-        domains = {
-            "Career & Finance": ["work", "job", "office", "career", "boss", "colleague", "promotion", "salary", "money", "finance", "debt", "business", "startup", "interview", "hiring", "deadline", "deadlines", "workplace", "hostile", "inflation", "balance", "desk"],
-            "Relationships": ["relationship", "partner", "marriage", "wife", "husband", "dating", "boyfriend", "girlfriend", "breakup", "divorce", "love", "crush", "ex", "fight", "social circle"],
-            "Family": ["family", "parents", "children", "mother", "father", "son", "daughter", "sister", "brother", "kids", "mom", "dad", "grandparents", "home", "grandfather", "grandmother", "traditions", "parenting", "elderly", "parents", "aging", "kids", "baby", "sleep", "birthday", "gift"],
-            "Physical Health": ["health", "digestion", "tired", "sleep", "body", "pain", "disease", "symptom", "weight", "exercise", "energy", "fatigue", "sick", "hurting", "burnout", "fever", "weak", "gut", "insomnia"],
-            "Ayurveda & Wellness": ["ayurveda", "dosha", "pitta", "kapha", "vata", "herbs", "remedy", "cleanse", "routine", "dinacharya", "oil", "massage", "natural", "tea", "rejuvenate", "supplement", "diet", "meal"],
-            "Yoga Practice": ["yoga", "asana", "posture", "flexibility", "strength", "surya", "namaskar", "hatha", "vinyasa", "routine", "yogic"],
-            "Meditation & Mind": ["meditation", "focus", "mind", "concentration", "mindfulness", "dhyana", "awareness", "stillness", "thoughts", "distraction", "mental", "soul", "eternal", "meditated", "mindful"],
-            "Spiritual Growth": ["dharma", "karma", "god", "soul", "spirit", "enlightenment", "purpose", "meaning", "faith", "prayer", "devotion", "bhakti", "divine", "sacred", "scripture", "gita", "missing", "ethical", "unethical", "values", "house", "dream", "existential", "void", "search", "philosophy", "upanishad", "humility", "humble"],
-            "Panchang & Astrology": ["panchang", "tithi", "nakshatra", "muhurat", "shubh", "calendar", "festival", "vedic astrology", "jyotish", "moon", "waxing", "waning"],
-            "Self-Improvement": ["discipline", "growth", "learning", "habits", "productivity", "goals", "confidence", "motivation", "success", "failure", "study", "instagram", "fraud", "fraudulent", "started", "starting", "inadequate", "startup", "fail", "failed", "exam", "exams", "concentration", "focus", "journal", "reflection"],
-            "General Life": ["lonely", "moving", "city", "new place", "weekend", "weekends", "phone", "staring", "everyone", "anyone", "understand", "understands"],
-        }
-
-        domain_scores = {}
-        for label, keywords in domains.items():
-            matches = [kw for kw in keywords if has_word([kw], text)]
-            if matches:
-                score = len(matches)
-                # Influence weights for deep scenarios
-                if label == "Spiritual Growth" and has_word(["unethical", "ethical", "dream", "house", "meaning", "purpose"], text):
-                    score += 5
-                if label == "Self-Improvement" and has_word(["instagram", "fraud", "fail", "failed", "startup"], text):
-                    score += 5
-                if label == "General Life" and has_word(["understand", "understands", "lonely"], text):
-                    score += 5
-                
-                domain_scores[label] = score
-                if label not in turn_topics:
-                    turn_topics.append(label)
-                if label not in memory.story.detected_topics:
-                    memory.story.detected_topics.append(label)
-
-        if domain_scores:
-            # Domain tie-breakers
-            dids = domain_scores.keys()
-            
-            # UC 21/Self-Improvement/General Life
-            if has_word(["exam", "exams", "concentration", "focus", "study", "studies"], text):
-                if "Self-Improvement" in dids:
-                    domain_scores["Self-Improvement"] += 30
-            
-            # UC 25/28/30 Spiritual Growth Wins over Career/Family/Self-Imp
-            if has_word(["gita", "upanishad", "dharma", "ethics", "unethical", "ethics", "humility", "void", "meaning", "purpose"], text):
-                if "Spiritual Growth" in dids:
-                    domain_scores["Spiritual Growth"] += 50
-
-            # Procedural Tie-breakers
-            if "Diet Plan" in turn_topics and "Ayurveda & Wellness" in dids:
-                domain_scores["Ayurveda & Wellness"] += 40
-            if "Routine Request" in turn_topics:
-                if "Yoga Practice" in dids:
-                    domain_scores["Yoga Practice"] += 40
-                if "Meditation & Mind" in dids:
-                    domain_scores["Meditation & Mind"] += 40
-            if "Puja Guidance" in turn_topics:
-                if "Family" in dids:
-                    domain_scores["Family"] += 40
-                if "Spiritual Growth" in dids:
-                    domain_scores["Spiritual Growth"] += 40
-
-            # UC 24: Family vs Ayurveda
-            if "Family" in dids and has_word(["baby", "parenting", "kids"], text):
-                domain_scores["Family"] += 30
-
-            # Pick the domain with the highest score
-            best_domain = max(domain_scores, key=domain_scores.get)
-            memory.story.life_area = best_domain
-            session.add_signal(SignalType.LIFE_DOMAIN, best_domain, 0.9)
-            found_domain = True
-        else:
-            found_domain = False
-
-        
-        # Fallback if no specific domain found but text is substantial
-        if not found_domain and len(text.split()) > 5:
-             if not memory.story.life_area:
-                 memory.story.life_area = "General Life"
-                 session.add_signal(SignalType.LIFE_DOMAIN, "General Life", 0.5)
-                 if "General Life" not in turn_topics:
-                     turn_topics.append("General Life")
-
-        # 3. SPECIAL INTENTS
-        temple_keywords = ["temple", "mandir", "pilgrimage", "shrine", "darshan", "puri", "kashi", "tirupati", "badrinath", "kedarnath", "dwarka", "rameswaram", "somnath", "visit"]
-        if has_word(temple_keywords, text):
-            memory.story.temple_interest = text[:100]
-            session.add_signal(SignalType.INTENT, "Temple & Pilgrimage", 0.8)
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.35)
-            
-        breathing_keywords = ["breath", "breathing", "pranayama", "inhale", "exhale", "lungs", "air"]
-        if has_word(breathing_keywords, text):
-            session.add_signal(SignalType.INTENT, "Pranayama (Breathwork)", 0.8)
-            # Tag as Yoga Practice if not already set
-            if not found_domain:
-                memory.story.life_area = "Yoga Practice"
-                session.add_signal(SignalType.LIFE_DOMAIN, "Yoga Practice", 0.9)
-
-        # 4. VERSE & SCRIPTURE INTENTS (checked before product detection to prevent false triggers)
-        verse_keywords = ["verse", "verses", "scripture", "scriptures", "gita", "upanishad", "upanishads", "mantra", "mantras", "remind me", "wisdom", "sloka", "shloka", "philosophy"]
-        intent_keywords = ["give", "tell", "provide", "share", "need", "want", "love", "send", "suggest", "provide me", "how to", "show", "read", "?"]
-        if has_word(verse_keywords, text) and (any(w in text for w in intent_keywords)):
-            session.add_signal(SignalType.INTENT, "Verse Request", 0.9)
-            if "Verse Request" not in turn_topics:
-                turn_topics.append("Verse Request")
-            # Boost readiness significantly for direct scripture requests
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
-
-        # 5. PRODUCT & SERVICE INTENTS
-        # Skip product detection entirely if this is a verse/scripture request
-        if "Verse Request" not in turn_topics:
-            buy_keywords = ["buy", "purchase", "order", "price", "cost", "shop", "store", "where can i", "how much", "products", "item", "items"]
-            product_items = ["rudraksha", "mala", "diya", "incense", "dhoop", "havan", "idol", "thali", "book", "yantra", "murti", "gangajal", "oil", "tea", "supplement", "herbs", "ayurvedic", "journal", "pendant", "bracelet"]
-
-            is_explicit_product_inquiry = False
-            if has_word(buy_keywords, text) or (has_word(product_items, text) and ("?" in text or "want" in text or "need" in text or "is there" in text or "suggest" in text or "love" in text or "get" in text)):
-                is_explicit_product_inquiry = True
-
-            if is_explicit_product_inquiry:
-                session.add_signal(SignalType.INTENT, "Product Inquiry", 0.9)
-                if "Product Inquiry" not in turn_topics:
-                    turn_topics.append("Product Inquiry")
-                # Boost readiness as user is asking for specific items
-                memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.6)
-
-        # 6. PROCEDURAL & ROUTINE INTENTS
-        # Routine Request
-        routine_keywords = ["routine", "plan", "program", "schedule", "daily", "day", "morning", "evening", "night", "breaks", "habit", "starter"]
-        routine_activity = ["yoga", "meditation", "breaks", "exercise", "sleep", "nidra", "yogic", "meditated", "mindful", "moon", "phases", "alignment"]
-        if has_word(routine_keywords, text) and (has_word(routine_activity, text) or has_word(["how", "give", "create", "provide"], text)):
-            session.add_signal(SignalType.INTENT, "Routine Request", 0.9)
-            if "Routine Request" not in turn_topics:
-                turn_topics.append("Routine Request")
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
-
-        # Puja Guidance
-        puja_keywords = ["puja", "pooja", "ritual", "ceremony", "altar", "mandir", "home temple", "worship", "spiritual corner"]
-        puja_action = ["plan", "how", "steps", "items", "setup", "prepare", "perform", "instructions", "direction", "essential"]
-        if has_word(puja_keywords, text) and (has_word(puja_action, text) or "?" in text):
-            session.add_signal(SignalType.INTENT, "Puja Guidance", 0.9)
-            if "Puja Guidance" not in turn_topics:
-                turn_topics.append("Puja Guidance")
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
-            # Prevent Product Inquiry from taking over in setup context
-            if "Product Inquiry" in turn_topics and has_word(["setup", "direction", "corner"], text):
-                turn_topics.remove("Product Inquiry")
-
-        # Diet Plan
-        diet_keywords = ["diet", "food", "eat", "meal", "meals", "breakfast", "lunch", "dinner", "prep", "nutrition"]
-        diet_context = ["plan", "routine", "ayurvedic", "sattvic", "pitta", "kapha", "vata", "dosha"]
-        if has_word(diet_keywords, text) and has_word(diet_context, text):
-            session.add_signal(SignalType.INTENT, "Diet Plan", 0.9)
-            if "Diet Plan" not in turn_topics:
-                turn_topics.append("Diet Plan")
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.5)
-
-        # Longer quotes for better recall
-        memory.add_user_quote(session.turn_count, text[:500])
-
-        if memory.story.emotional_state:
-            memory.record_emotion(
-                session.turn_count,
-                memory.story.emotional_state,
-                "moderate",
-            )
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.15)
-        
-        # Boost readiness for long messages
-        if len(text) > 100:
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.2)
-        
-        # Boost readiness for direct "how to" or specific questions
-        wellness_query_keywords = ["how do i", "what is", "routine", "technique", "practice", "method", "steps"]
-        if any(w in text for w in wellness_query_keywords) and "?" in text:
-            memory.readiness_for_wisdom = min(1.0, memory.readiness_for_wisdom + 0.3)
-
-        return turn_topics
+    def record_suggestion(self, session: SessionState, assistant_text: str) -> None:
+        """Delegate to ProductRecommender for practice suggestion tracking."""
+        self.product_recommender.record_suggestion(session, assistant_text)
 
 
 # ------------------------------------------------------------------

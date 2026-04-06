@@ -3,7 +3,7 @@
  * Clean, deterministic session management for Spiritual Companion
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 /* =======================
    Types
@@ -109,6 +109,19 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Mounted guard — prevents setState after unmount (Fix 3)
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  // Fix 5: AbortController for cancelling in-flight non-streaming requests
+  const messageAbortRef = useRef<AbortController | null>(null);
+
+  // Fix 6: Ref for authHeader to avoid stale closures in callbacks
+  const authHeaderRef = useRef(authHeader);
+  useEffect(() => { authHeaderRef.current = authHeader; }, [authHeader]);
+
   /* =======================
      Restore session once
   ======================= */
@@ -140,11 +153,15 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
 
   const sendMessage = useCallback(
     async (message: string, language: string = 'en'): Promise<ConversationalResponse> => {
+      // Fix 5: Cancel any in-flight request before starting a new one
+      messageAbortRef.current?.abort();
+      messageAbortRef.current = new AbortController();
+
       setIsLoading(true);
       setError(null);
 
       try {
-        const body: any = {
+        const body: Record<string, unknown> = {
           session_id: session.sessionId,
           message,
           language,
@@ -155,15 +172,18 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
           body.user_profile = userProfile;
         }
 
+        // Fix 6: Use ref for fresh authHeader (avoid stale closure)
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
-          ...authHeader,
+          ...(authHeaderRef.current || {}),
         };
 
         const res = await fetch(`${API_URL}/api/conversation`, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
+          signal: messageAbortRef.current.signal,
+          credentials: 'include',  // Fix 4: httpOnly cookie auth
         });
 
         if (!res.ok) {
@@ -211,21 +231,22 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
       setError(null);
 
       try {
-        const body: any = { session_id: session.sessionId, message, language };
+        const body: Record<string, unknown> = { session_id: session.sessionId, message, language };
         if (session.turnCount === 0 && userProfile) {
           body.user_profile = userProfile;
         }
 
+        // Fix 6: Use ref for fresh authHeader
         const headers: Record<string, string> = {
           'Content-Type': 'application/json',
-          ...authHeader,
+          ...(authHeaderRef.current || {}),
         };
 
-        // AbortController for timeout — cancel request if no data for 30s
+        // AbortController for timeout — cancel request if no data for 180s
         const controller = new AbortController();
         let lastDataTime = Date.now();
         const timeoutInterval = setInterval(() => {
-          if (Date.now() - lastDataTime > 30000) {
+          if (Date.now() - lastDataTime > 180000) {
             controller.abort();
             clearInterval(timeoutInterval);
           }
@@ -234,6 +255,7 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
         const res = await fetch(`${API_URL}/api/conversation/stream`, {
           method: 'POST',
           headers,
+          credentials: 'include',  // Fix 4: httpOnly cookie auth
           body: JSON.stringify(body),
           signal: controller.signal,
         });
@@ -266,8 +288,8 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
                 try {
                   const data = JSON.parse(line.slice(6));
                   if (currentEvent === 'metadata') {
-                    // Update session state from backend metadata (essential when session is created inline)
-                    if (data.session_id || data.phase || data.turn_count !== undefined) {
+                    // Guard: only update state if component is still mounted (Fix 3)
+                    if (mountedRef.current && (data.session_id || data.phase || data.turn_count !== undefined)) {
                       setSession((prev) => ({
                         ...prev,
                         sessionId: data.session_id || prev.sessionId,
@@ -290,7 +312,8 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
             }
           }
         } finally {
-          clearInterval(timeoutInterval);
+          clearInterval(timeoutInterval);  // Fix 1: always clear interval
+          reader.releaseLock();            // Fix 2: release SSE reader
         }
       } catch (e: any) {
         setError(e.message || 'Stream failed');
@@ -327,8 +350,9 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
     try {
       const res = await fetch(`${API_URL}/api/user/conversations/${sessionId}`, {
         method: 'GET',
+        credentials: 'include',  // Fix 4: httpOnly cookie auth
         headers: {
-          ...authHeader,
+          ...(authHeaderRef.current || {}),
         },
       });
 

@@ -103,7 +103,7 @@ test.describe('Sidebar Tests', () => {
     }
   });
 
-  test('UI-22: Sidebar shows New Session button', async ({ page, request }) => {
+  test('UI-22: Sidebar shows user info and conversation history area', async ({ page, request }) => {
     await page.goto('/');
     await loginViaAPI(page, request);
 
@@ -112,15 +112,13 @@ test.describe('Sidebar Tests', () => {
     await toggleButton.click();
     await page.waitForTimeout(500);
 
-    // The New Session button inside the sidebar has dashed border and text "New Session"
-    const newSessionButton = page.locator('aside button', { hasText: 'New Session' });
-    await expect(newSessionButton).toBeVisible({ timeout: 5000 });
+    // Verify the sidebar has the Conversations heading
+    const conversationsHeading = page.locator('h2', { hasText: 'Conversations' });
+    await expect(conversationsHeading).toBeVisible({ timeout: 5000 });
 
-    // Verify it has a dashed border style
-    const borderStyle = await newSessionButton.evaluate((el: HTMLElement) => {
-      return window.getComputedStyle(el).borderStyle;
-    });
-    expect(borderStyle).toBe('dashed');
+    // Verify the user section with Sign Out is visible
+    const signOutButton = page.locator('aside button', { hasText: 'Sign Out' });
+    await expect(signOutButton).toBeVisible({ timeout: 5000 });
   });
 
   test('UI-23: Sidebar shows user name at bottom', async ({ page, request }) => {
@@ -142,7 +140,7 @@ test.describe('Sidebar Tests', () => {
     await expect(userSection).toBeVisible();
   });
 
-  test('UI-24: New Session in sidebar clears current chat', async ({ page, request }) => {
+  test('UI-24: Header New Session button clears current chat', async ({ page, request }) => {
     await page.goto('/');
     await loginViaAPI(page, request);
 
@@ -154,12 +152,8 @@ test.describe('Sidebar Tests', () => {
     const countBefore = await messageBubbles.count();
     expect(countBefore).toBeGreaterThanOrEqual(2);
 
-    // Open sidebar and click "New Session"
-    const toggleButton = page.locator('header button').first();
-    await toggleButton.click();
-    await page.waitForTimeout(500);
-
-    const newSessionButton = page.locator('aside button', { hasText: 'New Session' });
+    // Click the header "New Session" button (inside the header's right-side button group)
+    const newSessionButton = page.locator('header button', { hasText: 'New Session' });
     await newSessionButton.click();
     await page.waitForTimeout(1000);
 

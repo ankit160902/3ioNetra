@@ -104,6 +104,8 @@ def build_user_profile(memory: ConversationMemory, session=None) -> Dict:
     if session:
         if getattr(session, "last_suggestions", None):
             profile["last_suggestions"] = session.last_suggestions
+        if getattr(session, "suggested_verses", None):
+            profile["suggested_verses"] = session.suggested_verses
 
     # Panchang context — uses module-level daily cache (avoids recomputing 4-6x per request)
     panchang_snapshot = _get_panchang_snapshot()

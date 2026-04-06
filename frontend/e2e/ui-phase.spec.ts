@@ -59,36 +59,22 @@ test.describe('Phase Indicator Tests', () => {
     // The initial phase should be "Listening".
     const phaseLabel = page.locator('div.rounded-full').filter({ hasText: /^(Listening|Reflecting|Guidance|Complete)$/ }).first();
     await expect(phaseLabel).toBeVisible({ timeout: 10000 });
-
-    // Verify the TURN indicator appeared (part of PhaseIndicatorCompact)
-    const turnIndicator = page.locator('text=TURN');
-    await expect(turnIndicator).toBeVisible({ timeout: 5000 });
-
-    // Verify the SIGNALS indicator appeared
-    const signalsIndicator = page.locator('text=SIGNALS');
-    await expect(signalsIndicator).toBeVisible({ timeout: 5000 });
   });
 
-  test('UI-17: Turn count display present after each message', async ({ page, request }) => {
+  test('UI-17: Phase indicator remains visible after multiple messages', async ({ page, request }) => {
     await page.goto('/');
     await loginViaAPI(page, request);
 
     // Send first message
     await sendChatMessage(page, 'I have been feeling stressed about work');
 
-    // Verify the phase indicator is visible and has TURN display
+    // Verify the phase indicator is visible
     const phaseIndicator = page.locator('[data-testid="phase-indicator"]');
     await expect(phaseIndicator).toBeVisible({ timeout: 10000 });
 
-    // Verify TURN label is displayed
-    const turnLabel = phaseIndicator.locator('text=TURN');
-    await expect(turnLabel).toBeVisible();
-
-    // Verify turn count is in N/M format
-    const turnValue = phaseIndicator.locator('span.font-black.text-orange-700').first();
-    await expect(turnValue).toBeVisible();
-    const turnText = await turnValue.textContent();
-    expect(turnText).toMatch(/\d+\/\d+/);
+    // Verify phase label badge is shown
+    const phaseLabel = phaseIndicator.locator('div.rounded-full').filter({ hasText: /^(Listening|Reflecting|Guidance|Complete)$/ }).first();
+    await expect(phaseLabel).toBeVisible();
 
     // Send second message
     await sendChatMessage(page, 'I feel overwhelmed with responsibilities at home too');

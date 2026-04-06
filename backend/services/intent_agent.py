@@ -4,6 +4,7 @@ import json
 from typing import Dict, Any, Optional
 from config import settings
 from models.session import IntentType
+from models.llm_schemas import IntentAnalysis, extract_json
 from services.cache_service import _LRUCache
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,12 @@ class IntentAgent:
         - Each variant should capture a different semantic angle of the user's concern.
         - Return empty list [] ONLY for GREETING, CLOSURE, PRODUCT_SEARCH, or trivial messages.
 
+    12. "expected_length": How long the response should be. Choose ONE:
+        - "brief": greetings, yes/no answers, acknowledgments, closures, "ok", "thanks"
+        - "moderate": emotional sharing, simple questions, most conversation turns
+        - "detailed": guidance requests, how-to questions, explanations, deeper topics
+        - "full_text": user explicitly asks for complete text (full chalisa, full prayer, complete stotra, all steps of a ritual)
+
     Respond ONLY with the valid JSON object.
     """
 
@@ -133,25 +140,24 @@ class IntentAgent:
             "entities": {}, "urgency": "low", "summary": "",
             "needs_direct_answer": False, "recommend_products": False,
             "product_search_keywords": [], "product_rejection": False,
-            "query_variants": [],
+            "query_variants": [], "expected_length": "moderate",
         }
 
         # (a) GREETING — exact match or short greeting pattern
         if msg_lower in self._GREETING_SET:
-            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown"}
-        # Catch "Namaste ji", "Hello everyone", etc. (short messages starting with greeting word)
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown", "expected_length": "brief"}
         first_word = msg_lower.split()[0] if msg_lower else ""
         if first_word in {"hi", "hey", "hello", "namaste", "namaskar", "pranam", "hii", "hiii"} and len(msg_lower.split()) <= 4:
-            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown"}
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown", "expected_length": "brief"}
 
         # (b) CLOSURE
         if msg_lower in self._CLOSURE_SET:
-            return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude", "life_domain": "unknown"}
+            return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude", "life_domain": "unknown", "expected_length": "brief"}
 
         # (c) ASKING_PANCHANG — substring check
         if any(kw in msg_lower for kw in self._PANCHANG_KEYWORDS):
             return {**_base, "intent": IntentType.ASKING_PANCHANG, "emotion": "neutral",
-                    "life_domain": "spiritual", "needs_direct_answer": True}
+                    "life_domain": "spiritual", "needs_direct_answer": True, "expected_length": "detailed"}
 
         # (d) EXPRESSING_EMOTION — short messages with emotion keywords
         words = msg_lower.split()
@@ -163,17 +169,17 @@ class IntentAgent:
                         if keyword in remainder:
                             return {**_base, "intent": IntentType.EXPRESSING_EMOTION,
                                     "emotion": emotion, "life_domain": "unknown",
-                                    "summary": msg_lower}
-                    break  # matched a pattern prefix but no emotion keyword — fall through
+                                    "summary": msg_lower, "expected_length": "moderate"}
+                    break
 
         # (e) ASKING_INFO — starts with question prefix
         for prefix in self._INFO_PREFIXES:
             if msg_lower.startswith(prefix):
                 return {**_base, "intent": IntentType.ASKING_INFO, "emotion": "curiosity",
                         "life_domain": "unknown", "needs_direct_answer": True,
-                        "summary": msg_lower}
+                        "summary": msg_lower, "expected_length": "detailed"}
 
-        return None  # no fast-path match
+        return None
 
     async def analyze_intent(self, message: str, context_summary: str = "") -> Dict[str, Any]:
         """Analyze intent using LLM (fast model for low latency)."""
@@ -214,14 +220,16 @@ class IntentAgent:
             response_text = await asyncio.to_thread(_sync_call)
 
             raw_text = response_text.text.strip()
-            # Handle potential markdown code blocks in response
-            if raw_text.startswith("```json"):
-                raw_text = raw_text.replace("```json", "", 1).replace("```", "", 1).strip()
+            parsed = extract_json(raw_text)
+            if parsed is None:
+                logger.warning(f"IntentAgent: JSON extraction failed for '{message[:30]}...'")
+                return self._fallback_analysis(message)
 
-            data = json.loads(raw_text)
+            # Validate with Pydantic model (coerces enums, applies defaults)
+            analysis = IntentAnalysis(**parsed)
+            data = analysis.to_dict()
             data["intent"] = IntentType(data.get("intent", "OTHER"))
             logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
-            # Cache successful LLM result for repeat messages
             self._cache.set(msg_lower, data, 1800)  # 30-min TTL
             return data
 

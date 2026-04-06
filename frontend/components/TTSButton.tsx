@@ -4,7 +4,7 @@
  * Uses Indian Hindi female voice for authentic Sanskrit/Hindi verse reading.
  */
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
@@ -21,7 +21,7 @@ interface TTSButtonProps {
     className?: string;
 }
 
-type PlayState = 'idle' | 'loading' | 'playing' | 'paused';
+type PlayState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
 export default function TTSButton({
     text,
@@ -33,11 +33,12 @@ export default function TTSButton({
     const [state, setState] = useState<PlayState>('idle');
     const audioRef = useRef<HTMLAudioElement | null>(null);
     const blobUrlRef = useRef<string | null>(null);
+    const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const cleanup = useCallback(() => {
         if (audioRef.current) {
             audioRef.current.pause();
-            audioRef.current.removeAttribute('src');
+            audioRef.current.src = '';  // Fix 15: clear src properly
             audioRef.current = null;
         }
         if (blobUrlRef.current) {
@@ -45,6 +46,15 @@ export default function TTSButton({
             blobUrlRef.current = null;
         }
     }, []);
+
+    const clearErrorTimeout = useCallback(() => {
+        if (errorTimeoutRef.current) { clearTimeout(errorTimeoutRef.current); errorTimeoutRef.current = null; }
+    }, []);
+
+    // Fix 15: Cleanup audio on unmount (prevents orphaned audio elements)
+    useEffect(() => {
+        return () => { cleanup(); clearErrorTimeout(); };
+    }, [cleanup, clearErrorTimeout]);
 
     const handleClick = useCallback(async () => {
         // If playing → pause
@@ -89,17 +99,21 @@ export default function TTSButton({
             };
 
             audio.onerror = () => {
-                console.error('Audio playback error');
-                setState('idle');
+                if (process.env.NODE_ENV === 'development') console.error('Audio playback error');
+                setState('error');
                 cleanup();
+                clearErrorTimeout();
+                errorTimeoutRef.current = setTimeout(() => setState('idle'), 2500);
             };
 
             await audio.play();
             setState('playing');
         } catch (err) {
             console.error('TTS error:', err);
-            setState('idle');
+            setState('error');
             cleanup();
+            clearErrorTimeout();
+            errorTimeoutRef.current = setTimeout(() => setState('idle'), 2500);
         }
     }, [state, text, lang, cleanup]);
 
@@ -131,11 +145,13 @@ export default function TTSButton({
             case 'loading': return <LoadingIcon />;
             case 'playing': return <PauseIcon />;
             case 'paused': return <PlayIcon />;
+            case 'error': return <span className="text-[9px] font-black">!</span>;
             default: return <PlayIcon />;
         }
     };
 
     const getLabelText = () => {
+        if (state === 'error') return 'unavailable';
         if (label) return label;
         if (isMantra) {
             switch (state) {
@@ -167,16 +183,16 @@ export default function TTSButton({
 
     const colorClasses = isVerse
         ? state === 'playing'
-            ? 'bg-amber-100/50 text-amber-800 border-amber-300/50 shadow-inner ring-4 ring-amber-500/5'
-            : 'bg-white text-amber-700 border-amber-100 hover:bg-amber-50 hover:border-amber-200'
+            ? 'bg-amber-100/50 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200 border-amber-300/50 dark:border-amber-700 shadow-inner ring-4 ring-amber-500/5'
+            : 'bg-white dark:bg-gray-800 text-amber-700 dark:text-amber-400 border-amber-100 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-900/30 hover:border-amber-200 dark:hover:border-amber-700'
         : state === 'playing'
-            ? 'bg-orange-100/50 text-orange-800 border-orange-300/50 shadow-inner ring-4 ring-orange-500/5'
-            : 'bg-white text-orange-700 border-orange-100 hover:bg-orange-50 hover:border-orange-200';
+            ? 'bg-orange-100/50 dark:bg-orange-900/30 text-orange-800 dark:text-orange-200 border-orange-300/50 dark:border-orange-700 shadow-inner ring-4 ring-orange-500/5'
+            : 'bg-white dark:bg-gray-800 text-orange-700 dark:text-orange-400 border-orange-100 dark:border-orange-800 hover:bg-orange-50 dark:hover:bg-orange-900/30 hover:border-orange-200 dark:hover:border-orange-700';
 
     return (
         <button
             onClick={handleClick}
-            disabled={state === 'loading'}
+            disabled={state === 'loading' || state === 'error'}
             className={`${baseClasses} ${colorClasses} ${className} active:scale-90`}
             title={isMantra ? 'Play mantra in Hindi' : isVerse ? 'Play verse in Hindi' : 'Play response in Hindi'}
         >

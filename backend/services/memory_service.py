@@ -138,49 +138,57 @@ class LongTermMemoryService:
             # Generate embedding for the current query
             query_vec = await self.rag_pipeline.generate_embeddings(query)
 
-            # Vectorized similarity: batch all memory vectors into a matrix for single matmul
-            mem_matrix = np.array([mem["embedding"] for mem in memories], dtype=np.float32)
-            norms = np.linalg.norm(mem_matrix, axis=1)
-            norms[norms == 0] = 1e-9
-            query_norm = np.linalg.norm(query_vec) + 1e-9
-            similarities = (mem_matrix @ query_vec) / (norms * query_norm)
+            # Offload CPU-intensive similarity + dedup to thread pool
+            def _rank_and_dedup():
+                # Vectorized similarity: batch all memory vectors into a matrix for single matmul
+                mem_matrix = np.array([mem["embedding"] for mem in memories], dtype=np.float32)
+                norms = np.linalg.norm(mem_matrix, axis=1)
+                norms[norms == 0] = 1e-9
+                query_norm = np.linalg.norm(query_vec) + 1e-9
+                similarities = (mem_matrix @ query_vec) / (norms * query_norm)
 
-            # Pre-filter: only keep above threshold, then argsort descending
-            mask = similarities >= settings.MEMORY_SIMILARITY_THRESHOLD
-            if not np.any(mask):
+                # Pre-filter: only keep above threshold, then argsort descending
+                mask = similarities >= settings.MEMORY_SIMILARITY_THRESHOLD
+                if not np.any(mask):
+                    return []
+
+                valid_indices = np.where(mask)[0]
+                valid_sims = similarities[valid_indices]
+                sorted_order = np.argsort(-valid_sims)
+                sorted_indices = valid_indices[sorted_order]
+
+                # Deduplicate with vectorized dot-product checks
+                deduped = []
+                deduped_vecs = []
+                for idx in sorted_indices:
+                    vec = mem_matrix[idx]
+
+                    # Vectorized dedup: compare against all kept vectors at once
+                    if deduped_vecs:
+                        kept_matrix = np.array(deduped_vecs, dtype=np.float32)
+                        kept_norms = np.linalg.norm(kept_matrix, axis=1)
+                        kept_norms[kept_norms == 0] = 1e-9
+                        vec_norm = np.linalg.norm(vec) + 1e-9
+                        dup_sims = (kept_matrix @ vec) / (kept_norms * vec_norm)
+                        if np.any(dup_sims > settings.MEMORY_DEDUP_THRESHOLD):
+                            continue
+
+                    mem = memories[int(idx)]
+                    date_str = mem.get("created_at", "").split("T")[0]
+                    deduped.append(f"[{date_str}]: {mem['text']}")
+                    deduped_vecs.append(vec)
+                    if len(deduped) >= settings.MEMORY_MAX_RESULTS:
+                        break
+
+                return deduped, len(sorted_indices)
+
+            result = await asyncio.to_thread(_rank_and_dedup)
+            if not result:
                 return []
+            deduped, candidate_count = result
 
-            valid_indices = np.where(mask)[0]
-            valid_sims = similarities[valid_indices]
-            sorted_order = np.argsort(-valid_sims)
-            sorted_indices = valid_indices[sorted_order]
-
-            # Deduplicate with vectorized dot-product checks
-            deduped = []
-            deduped_vecs = []
-            for idx in sorted_indices:
-                score = float(similarities[idx])
-                vec = mem_matrix[idx]
-
-                # Vectorized dedup: compare against all kept vectors at once
-                if deduped_vecs:
-                    kept_matrix = np.array(deduped_vecs, dtype=np.float32)
-                    kept_norms = np.linalg.norm(kept_matrix, axis=1)
-                    kept_norms[kept_norms == 0] = 1e-9
-                    vec_norm = np.linalg.norm(vec) + 1e-9
-                    dup_sims = (kept_matrix @ vec) / (kept_norms * vec_norm)
-                    if np.any(dup_sims > settings.MEMORY_DEDUP_THRESHOLD):
-                        continue
-
-                mem = memories[int(idx)]
-                date_str = mem.get("created_at", "").split("T")[0]
-                deduped.append(f"[{date_str}]: {mem['text']}")
-                deduped_vecs.append(vec)
-                if len(deduped) >= settings.MEMORY_MAX_RESULTS:
-                    break
-
-            if len(sorted_indices) > len(deduped):
-                logger.info(f"Memory dedup: {len(sorted_indices)} candidates → {len(deduped)} unique memories")
+            if candidate_count > len(deduped):
+                logger.info(f"Memory dedup: {candidate_count} candidates → {len(deduped)} unique memories")
 
             return deduped
 

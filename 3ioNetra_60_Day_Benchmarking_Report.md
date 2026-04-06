@@ -147,6 +147,7 @@
 | temple | 7 | 0.905 | 100% | 0.571 | 0.857 | 1,353ms |
 | yoga | 5 | 0.800 | 100% | 0.533 | 0.800 | 1,378ms |
 
+
 ### QA Response Quality (Mar 18, 260 questions, 21 categories)
 
 | Dimension | Score (/5) |
@@ -263,6 +264,7 @@
 | Session create | 0.4–0.5s | PASS |
 | Save conversation | 0.4s | PASS |
 | List conversations | 0.5s | PASS |
+
 
 ### Conversation Latency by Type (when Gemini API stable)
 

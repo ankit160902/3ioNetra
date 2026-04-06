@@ -6,25 +6,18 @@ pydantic-settings
 pymongo
 
 # LLM
-google-genai>=1.61.0
+google-genai==1.61.0
 gunicorn==21.2.0
 
 # Embeddings (REQUIRED runtime deps)
-sentence-transformers==3.0.1
+sentence-transformers[onnx]>=3.4.0
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
-transformers==4.41.2
-huggingface-hub==0.23.5
-
-# RAG / LangChain
-langchain
-langchain-community
+transformers>=4.41.2,<5.0.0
+huggingface-hub>=0.23.5,<1.0.0
 
 # Vector DB client (USED IN CODE)
 qdrant-client
-
-# Database
-pymongo
 
 # Voice
 gtts
@@ -50,6 +43,9 @@ aiosqlite
 
 # Concept ontology graph
 networkx
+
+# Conversation state machine
+transitions
 
 # Multi-model evaluation (optional)
 anthropic>=0.39.0

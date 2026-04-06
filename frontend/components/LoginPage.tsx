@@ -2,8 +2,9 @@
  * Login/Register Page Component with Extended Profile Collection
  */
 import { useState, useEffect } from 'react';
-import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Moon, Sun } from 'lucide-react';
 import SearchableMultiSelect from './SearchableMultiSelect';
+import { useTheme } from '../hooks/useTheme';
 
 const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 const LOGIN_API_URL = rawApiUrl.endsWith('/') ? rawApiUrl.slice(0, -1) : rawApiUrl;
@@ -94,11 +95,12 @@ const templeOptions = [
   'Trimbakeshwar', 'Ujjain Mahakal', 'Amarnath',
 ];
 
-const selectClass = 'w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none appearance-none cursor-pointer';
-const inputClass = 'w-full px-5 py-3.5 bg-gray-50/50 border border-orange-100 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 focus:bg-white text-sm font-bold transition-all outline-none';
-const labelClass = 'block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1.5 ml-1';
+const selectClass = 'w-full px-5 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 dark:focus:border-orange-700 focus:bg-white dark:focus:bg-gray-800 text-sm font-bold text-gray-900 dark:text-gray-100 transition-all outline-none appearance-none cursor-pointer';
+const inputClass = 'w-full px-5 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 dark:focus:border-orange-700 focus:bg-white dark:focus:bg-gray-800 text-sm font-bold text-gray-900 dark:text-gray-100 transition-all outline-none';
+const labelClass = 'block text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5 ml-1';
 
 export default function LoginPage({ onLogin, onRegister, isLoading, error }: LoginPageProps) {
+  const { theme, toggleTheme } = useTheme();
   const [isRegisterMode, setIsRegisterMode] = useState(false);
   const [registrationStep, setRegistrationStep] = useState(1); // 1: basic info, 2: profile details, 3: spiritual profile
 
@@ -141,10 +143,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
       setLocalError('Please enter your name');
       return false;
     }
-    if (!email.trim() || !email.includes('@')) {
+    // Fix 10: Proper email regex validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email.trim() || !emailRegex.test(email)) {
       setLocalError('Please enter a valid email address');
       return false;
     }
+    // Fix 9: Stronger password validation
     if (password.length < 8) {
       setLocalError('Password must be at least 8 characters');
       return false;
@@ -157,6 +162,15 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
       setLocalError('Password must contain at least one number');
       return false;
     }
+    if (!/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(password)) {
+      setLocalError('Password must contain at least one special character');
+      return false;
+    }
+    const commonPasswords = ['password', '12345678', 'qwerty', 'abc123', 'letmein', 'welcome', 'admin'];
+    if (commonPasswords.some(common => password.toLowerCase().includes(common))) {
+      setLocalError('Password is too common — please choose a stronger one');
+      return false;
+    }
     if (password !== confirmPassword) {
       setLocalError('Passwords do not match');
       return false;
@@ -165,8 +179,10 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
   };
 
   const validateStep2 = (): boolean => {
-    if (!phone.trim() || phone.length < 10) {
-      setLocalError('Please enter a valid phone number');
+    // Fix 11: Enforce 10-digit minimum for Indian phone numbers
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (!cleanPhone || cleanPhone.length < 10 || cleanPhone.length > 15) {
+      setLocalError('Please enter a valid phone number (10-15 digits)');
       return false;
     }
     if (!gender) {
@@ -219,6 +235,34 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     } else if (registrationStep === 2 && validateStep2()) {
       setRegistrationStep(3);
     }
+  };
+
+  const handleSkipStep = () => {
+    setLocalError(null);
+    if (registrationStep === 2) {
+      setRegistrationStep(3);
+    } else if (registrationStep === 3) {
+      // Submit with whatever is filled so far
+      handleSubmitWithDefaults();
+    }
+  };
+
+  const handleSubmitWithDefaults = async () => {
+    await onRegister({
+      name,
+      email,
+      password,
+      phone: phone || '',
+      gender: gender || '',
+      dob: dob || '',
+      profession: profession || '',
+      preferred_deity: preferredDeity.length > 0 ? preferredDeity.join(', ') : '',
+      rashi: rashi || '',
+      gotra: gotra || '',
+      nakshatra: nakshatra || '',
+      favorite_temples: favoriteTemples,
+      past_purchases: pastPurchases,
+    });
   };
 
   const handlePrevStep = () => {
@@ -289,28 +333,48 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     .toISOString().split('T')[0];
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-br from-orange-50/50 via-white to-amber-50/50 flex items-center justify-center p-6 font-['Inter']">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-orange-50/50 via-white to-amber-50/50 dark:from-gray-950 dark:via-[#0a0a0a] dark:to-gray-950 flex items-center justify-center p-6 font-['Inter'] relative">
+      <button
+        onClick={toggleTheme}
+        className="absolute top-6 right-6 p-2.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm border border-orange-100 dark:border-gray-700 rounded-xl shadow-sm hover:shadow-md transition-all text-gray-600 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 z-10"
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+      >
+        {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+      </button>
       <div className="w-full max-w-[400px] animate-fade-in">
         {/* Logo Text */}
         <div className="text-center mb-8 flex flex-col items-center">
-          <img src="/logo-full.png" alt="3ioNetra" className="h-20 object-contain mb-2" />
+          <img src={theme === 'dark' ? '/logo-full-dark.png' : '/logo-full.png'} alt="3ioNetra" className="h-20 object-contain mb-2 dark:drop-shadow-[0_0_15px_rgba(255,255,255,0.12)]" />
           <p className="text-[11px] font-black uppercase tracking-[0.3em] text-orange-600">Elevate Your Spirit</p>
         </div>
 
         {/* Login/Register Form */}
-        <div data-testid="auth-form" className="bg-white/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 p-7 md:p-8 border border-orange-100/50">
-          <h2 data-testid="auth-heading" className="text-base font-black text-gray-900 mb-6 text-center uppercase tracking-widest opacity-80">
+        <div data-testid="auth-form" className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl rounded-[2rem] shadow-2xl shadow-orange-900/5 dark:shadow-black/20 p-7 md:p-8 border border-orange-100/50 dark:border-gray-800">
+          <h2 data-testid="auth-heading" className="text-base font-black text-gray-900 dark:text-gray-100 mb-1 text-center uppercase tracking-widest opacity-80">
             {isRegisterMode
               ? (registrationStep === 1 ? 'Create Account' : registrationStep === 2 ? 'Complete Profile' : 'Spiritual Profile')
               : 'Welcome Back'}
           </h2>
+          {isRegisterMode && registrationStep > 1 && (
+            <p className="text-[9px] font-bold text-gray-400 dark:text-gray-500 text-center mb-4 uppercase tracking-wider">Optional &mdash; you can skip this step</p>
+          )}
+          {isRegisterMode && registrationStep === 1 && <div className="mb-5" />}
 
           {/* Progress indicator for registration */}
           {isRegisterMode && (
-            <div data-testid="step-indicators" className="flex items-center justify-center gap-2 mb-6">
-              <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 1 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
-              <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 2 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
-              <div className={`w-2 h-2 rounded-full transition-all duration-500 ${registrationStep >= 3 ? 'bg-orange-500 w-4' : 'bg-gray-200'}`} />
+            <div data-testid="step-indicators" className="flex items-center justify-center gap-1.5 mb-6">
+              {[1, 2, 3].map(step => (
+                <div key={step} className="flex items-center gap-1.5">
+                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-[9px] font-black transition-all duration-500 ${
+                    registrationStep > step ? 'bg-orange-500 text-white' :
+                    registrationStep === step ? 'bg-orange-500 text-white ring-4 ring-orange-500/20' :
+                    'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                  }`}>
+                    {registrationStep > step ? '\u2713' : step}
+                  </div>
+                  {step < 3 && <div className={`w-8 h-0.5 rounded-full transition-all duration-500 ${registrationStep > step ? 'bg-orange-500' : 'bg-gray-200 dark:bg-gray-700'}`} />}
+                </div>
+              ))}
             </div>
           )}
 
@@ -361,7 +425,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-orange-600 transition-colors"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
                     >
                       {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                     </button>
@@ -486,8 +550,8 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
             {/* Error Display */}
             {(error || localError) && (
-              <div className="bg-red-50/50 border border-red-100 rounded-2xl p-4 animate-fade-in">
-                <p className="text-[11px] font-black uppercase tracking-tighter text-red-600 text-center">{localError || error}</p>
+              <div className="bg-red-50/50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-2xl p-4 animate-fade-in">
+                <p className="text-[11px] font-black uppercase tracking-tighter text-red-600 dark:text-red-400 text-center">{localError || error}</p>
               </div>
             )}
 
@@ -497,7 +561,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                 <button
                   type="button"
                   onClick={handlePrevStep}
-                  className="flex-1 py-4 bg-white border border-orange-100 text-orange-600 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-orange-50 transition-all active:scale-95 shadow-sm"
+                  className="flex-1 py-4 bg-white dark:bg-gray-800 border border-orange-100 dark:border-gray-700 text-orange-600 dark:text-orange-400 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:bg-orange-50 dark:hover:bg-gray-700 transition-all active:scale-95 shadow-sm"
                 >
                   Back
                 </button>
@@ -516,15 +580,26 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                   'Sign In'
                 )}
               </button>
+
+              {isRegisterMode && registrationStep > 1 && (
+                <button
+                  type="button"
+                  onClick={handleSkipStep}
+                  disabled={isLoading}
+                  className="flex-1 py-4 bg-white dark:bg-gray-800 border border-dashed border-gray-200 dark:border-gray-700 text-gray-400 dark:text-gray-500 font-black uppercase tracking-widest text-[10px] rounded-2xl hover:text-orange-600 dark:hover:text-orange-400 hover:border-orange-200 dark:hover:border-orange-700 transition-all active:scale-95"
+                >
+                  Skip
+                </button>
+              )}
             </div>
           </form>
 
           <div className="mt-8 text-center">
-            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
+            <p className="text-[11px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
               {isRegisterMode ? 'Already a member?' : "New here?"}
               <button
                 onClick={switchMode}
-                className="ml-2 text-orange-600 hover:text-orange-700 transition-colors underline underline-offset-4"
+                className="ml-2 text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 transition-colors underline underline-offset-4"
               >
                 {isRegisterMode ? 'Sign In' : 'Create Account'}
               </button>
@@ -533,7 +608,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
         </div>
 
         {/* Footer */}
-        <p className="text-center text-[9px] font-black uppercase tracking-[0.3em] text-gray-300 mt-10 opacity-60">
+        <p className="text-center text-[9px] font-black uppercase tracking-[0.3em] text-gray-300 dark:text-gray-600 mt-10 opacity-60">
           Nexus of Ancient Wisdom & Modern Soul
         </p>
       </div>
