@@ -23,6 +23,13 @@ qdrant-client
 gtts
 pydub
 
+# Panchang / Vedic astrology (powers /api/panchang/today)
+# Versions verified locally on Python 3.13: ps.available=True, returns
+# tithi/nakshatra/yoga/karana/etc. Skyfield pulls in jplephem + sgp4,
+# jyotishganit pulls in pandas + python-dateutil — let pip resolve those.
+jyotishganit==0.1.2
+skyfield==1.54
+
 # Data Processing
 numpy
 rank-bm25
