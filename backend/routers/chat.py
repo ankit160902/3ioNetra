@@ -16,7 +16,7 @@ from models.api_schemas import (
     SessionCreateResponse, SessionStateResponse,
     TextQuery, TextResponse, SaveConversationRequest,
     FeedbackRequest,
-    ConversationPhaseEnum, FlowMetadata
+    ConversationPhaseEnum, FlowMetadata, SourceReference,
 )
 from constants import TRIVIAL_MESSAGES
 from models.session import SessionState, ConversationPhase, SignalType
@@ -24,6 +24,7 @@ from services.session_manager import get_session_manager
 from services.companion_engine import get_companion_engine
 from services.context_synthesizer import get_context_synthesizer
 from services.safety_validator import get_safety_validator
+from services.crisis_response_composer import get_crisis_response_composer
 from services.response_composer import get_response_composer
 from services.auth_service import get_conversation_storage, get_auth_service
 from models.dharmic_query import QueryType
@@ -34,6 +35,71 @@ from services.retrieval_judge import get_retrieval_judge
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["chat"])
+
+# Heavy emotions that should keep an early-turn conversation marked as
+# incomplete so the frontend continues to invite follow-up. Mirrors the
+# distress sets in safety_validator.py and conversation_fsm.py — kept here
+# as a separate frozenset because chat.py is intentionally decoupled from
+# the FSM internals.
+_HEAVY_EMOTIONS = frozenset({
+    "grief", "despair", "anger", "anxiety", "hopelessness",
+    "loneliness", "shame", "guilt", "fear", "panic", "trauma",
+})
+
+
+def _compute_is_complete(session: SessionState, active_phase: ConversationPhase) -> bool:
+    """Determine whether the conversation should signal completion to the frontend.
+
+    Rules (in priority order):
+    1. CLOSURE phase → True (user said goodbye, conversation done)
+    2. LISTENING phase → False (always invites continuation)
+    3. GUIDANCE phase + heavy emotion + early turns → False (keep invitation open)
+    4. GUIDANCE phase otherwise → True
+
+    `is_complete` is a hint to the frontend about whether to render a fresh
+    conversation invitation. Marking an emotionally heavy first-turn response
+    as "complete" makes the user feel dismissed; this helper prevents that.
+    """
+    if active_phase == ConversationPhase.CLOSURE:
+        return True
+    if active_phase == ConversationPhase.LISTENING:
+        return False
+    # GUIDANCE phase: check emotional context
+    emotional_state = (session.memory.story.emotional_state or "").lower()
+    if emotional_state in _HEAVY_EMOTIONS and session.turn_count <= 2:
+        return False
+    return True
+
+
+def _build_sources(context_docs: list) -> list:
+    """Map RAG-validated context_docs to SourceReference objects for the API.
+
+    The schema field has been part of ConversationalResponse since the start,
+    but no code populated it. This helper does the trivial mapping so the
+    frontend can render scripture attribution.
+
+    Returns an empty list (which gets converted to None at the call site)
+    when there are no docs or when every doc is malformed.
+    """
+    if not context_docs:
+        return []
+    sources: list = []
+    for doc in context_docs:
+        try:
+            sources.append(SourceReference(
+                scripture=doc.get("scripture") or "Unknown",
+                reference=doc.get("reference") or doc.get("source") or "",
+                context_text=(doc.get("meaning") or doc.get("text") or "")[:240],
+                relevance_score=round(
+                    float(doc.get("score") or doc.get("_metadata_score") or 0.0),
+                    3,
+                ),
+            ))
+        except (TypeError, ValueError) as e:
+            logger.debug(f"Skipping malformed source doc: {e}")
+            continue
+    return sources
+
 
 # ----------------------------------------------------------------------------
 # Helper to populate session with auth user and profile data
@@ -274,21 +340,46 @@ def _init_services():
 
 
 async def _preflight(query, user, session_manager, companion_engine, safety_validator):
-    """Session create/restore + user context population + crisis check.
+    """Session create/restore + user context population + safety preflight checks.
 
-    Returns (session, is_crisis, crisis_response).
+    Runs two safety gates: prompt-injection detection and crisis detection.
+    Both share the (is_blocked, canned_response) tuple shape so this function
+    can collapse them into a single return contract for the caller.
+
+    Returns (session, is_blocked, canned_response).
     """
     session = await _get_or_create_session(query, user, session_manager, companion_engine)
+
+    # Prompt injection is checked synchronously (regex-only, microseconds) so we
+    # don't waste async overhead on it. It runs BEFORE crisis check because
+    # injection attempts should never be evaluated as a crisis pattern match.
+    is_injection, injection_response = safety_validator.check_prompt_injection(query.message)
+
     # Parallelize: user context population and crisis check are independent
     _, (is_crisis, crisis_response) = await asyncio.gather(
         _populate_session_with_user_context(session, user, query.user_profile),
         safety_validator.check_crisis_signals(session, query.message),
     )
+
+    # Injection takes precedence over crisis for the canned-response path,
+    # but we always update the session so the user message is recorded.
+    if is_injection:
+        session.add_message('user', query.message)
+        session.add_message('assistant', injection_response)
+        await session_manager.update_session(session)
+        return session, True, injection_response
+
     if is_crisis:
         session.add_message('user', query.message)
         # Populate emotion signal for crisis — IntentAgent is skipped in crisis path
         from models.session import Signal
         session.signals_collected[SignalType.EMOTION] = Signal(signal_type=SignalType.EMOTION, value='despair')
+        # Replace the canned safety_validator template with the
+        # CrisisResponseComposer's progression-aware response. This is the
+        # single point at which the crisis text is generated for the API
+        # response — safety_validator.check_crisis_signals is now used
+        # purely as a detector.
+        crisis_response = get_crisis_response_composer().compose(session, query.message)
         session.add_message('assistant', crisis_response)
         await session_manager.update_session(session)
     return session, is_crisis, crisis_response
@@ -350,11 +441,23 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     needs_help, help_type = safety_validator.check_needs_professional_help(session, query_message)
     if needs_help:
         final_text = safety_validator.append_professional_help(final_text, help_type, False)
+    # Dependency redirect is independent of professional-help appendage and runs
+    # only on the current message — it widens the user's support network without
+    # rejecting them. Skip if professional help was already appended (avoids
+    # double-stacking helpline blocks in one response).
+    elif safety_validator.check_dependency_signals(query_message):
+        final_text = safety_validator.append_dependency_redirect(final_text)
     session.add_message('assistant', final_text)
     # Record practice suggestions for future product inference
     companion_engine.record_suggestion(session, final_text)
-    # Record verse/mantra history for diversity (anti-repetition)
-    from services.verse_tracker import record_suggested_verses
+    # Record verse/mantra history for diversity (anti-repetition).
+    # detect_repetition runs BEFORE record_suggested_verses so it compares the
+    # new response against the prior history (not against itself). It only
+    # logs — it does NOT block or regenerate, since regeneration would double
+    # the response latency. The warning gives us telemetry on how often the
+    # LLM ignores the strengthened anti-repetition prompt rules.
+    from services.verse_tracker import record_suggested_verses, detect_repetition
+    detect_repetition(session, final_text)
     record_suggested_verses(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
@@ -430,11 +533,25 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         # Design intent: re-generation intentionally reuses the same retrieved_docs
         # so the LLM is forced to constrain its citations to actually-available sources
         # rather than hallucinating references not present in the corpus.
+        #
+        # We also run grounding when the response contains [VERSE] tags but
+        # retrieved_docs is empty — this catches the failure mode where the LLM
+        # fabricates a citation under prompt-injection or out-of-context queries
+        # (e.g. fabricated "Gita 10.19" with invented Sanskrit text).
         judge = get_retrieval_judge()
-        if judge.available and settings.GROUNDING_ENABLED and retrieved_docs:
-            grounding = await judge.verify_grounding(response_text, retrieved_docs)
+        _has_verse_tags = "[VERSE]" in response_text
+        _should_check_grounding = (
+            judge.available
+            and settings.GROUNDING_ENABLED
+            and (retrieved_docs or _has_verse_tags)
+        )
+        if _should_check_grounding:
+            grounding = await judge.verify_grounding(response_text, retrieved_docs or [])
             if not grounding.grounded and grounding.confidence < settings.GROUNDING_MIN_CONFIDENCE:
-                logger.warning(f"Response not grounded: {grounding.issues}")
+                logger.warning(
+                    f"Response not grounded (retrieved_docs={len(retrieved_docs or [])}, "
+                    f"has_verse_tags={_has_verse_tags}): {grounding.issues}"
+                )
                 grounding_config = {**(route_config or {}), "grounding_instruction": True}
                 response_text = await response_composer.compose_with_memory(
                     dharmic_query=dharmic_query,
@@ -464,13 +581,15 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
 
         _elapsed = (time.perf_counter() - _t_start) * 1000
         logger.info(f"REQUEST_END | cid={cid} | phase=guidance | {_elapsed:.0f}ms | turn={session.turn_count}")
+        _sources = _build_sources(context_docs_used)
         return ConversationalResponse(
             session_id=session.session_id,
             phase=ConversationPhaseEnum.guidance,
             response=response_text,
             signals_collected=session.get_signals_summary(),
             turn_count=session.turn_count,
-            is_complete=True,
+            is_complete=_compute_is_complete(session, ConversationPhase.GUIDANCE),
+            sources=_sources or None,
             recommended_products=recommended_products,
             flow_metadata=_make_flow_metadata(session, turn_topics),
         )
@@ -488,10 +607,24 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             )
 
         _elapsed = (time.perf_counter() - _t_start) * 1000
-        logger.info(f"REQUEST_END | cid={cid} | phase=listening | {_elapsed:.0f}ms | turn={session.turn_count}")
+        logger.info(f"REQUEST_END | cid={cid} | phase={active_phase.value} | {_elapsed:.0f}ms | turn={session.turn_count}")
+        # Honor the FSM's active_phase (could be CLOSURE), not just listening,
+        # so closure intents like "thanks bye" surface the correct phase and
+        # mark the conversation as complete.
+        _response_phase = (
+            ConversationPhaseEnum.closure
+            if active_phase == ConversationPhase.CLOSURE
+            else ConversationPhaseEnum.listening
+        )
+        _sources = _build_sources(context_docs_used)
         return ConversationalResponse(
-            session_id=session.session_id, phase=ConversationPhaseEnum.listening, response=companion_response,
-            signals_collected=session.get_signals_summary(), turn_count=session.turn_count, is_complete=False,
+            session_id=session.session_id,
+            phase=_response_phase,
+            response=companion_response,
+            signals_collected=session.get_signals_summary(),
+            turn_count=session.turn_count,
+            is_complete=_compute_is_complete(session, active_phase),
+            sources=_sources or None,
             recommended_products=recommended_products,
             flow_metadata=_make_flow_metadata(session, turn_topics),
         )
@@ -702,7 +835,18 @@ async def get_conversation(conversation_id: str, user: dict = Depends(get_curren
 async def save_conversation(request: SaveConversationRequest, user: dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=401)
-    
+
+    # ConversationStorage.save_conversation uses conversation_id as the
+    # session_id key for upsert. If it's missing, the storage layer silently
+    # returns "" and nothing is persisted — but the route used to still
+    # report {"message": "Saved"}, which is a contract lie. Validate up front
+    # so callers get a clear 400 instead of a phantom success.
+    if not request.conversation_id:
+        raise HTTPException(
+            status_code=400,
+            detail="conversation_id is required (use the active session_id)",
+        )
+
     # 1. Get memory snapshot if active session exists
     session_manager = get_session_manager()
     session = await session_manager.get_session(request.conversation_id)
