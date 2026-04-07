@@ -21,14 +21,12 @@ from rag.pipeline import RAGPipeline
 from routers import auth, chat, admin
 from routers.dependencies import set_rag_pipeline
 
-# Setup logging with correlation ID support
-from services.observability import CorrelationFilter
-logging.basicConfig(
-    level=settings.LOG_LEVEL,
-    format="%(asctime)s - %(name)s - %(levelname)s - [%(correlation_id)s] %(message)s"
-)
-# Add correlation filter to root logger so all log lines include request ID
-logging.getLogger().addFilter(CorrelationFilter())
+# Setup logging via dictConfig — see logging_config.py for the rationale.
+# This must run before the first logger.info() call so every log line
+# (including ones from uvicorn child loggers) goes through the correlation
+# filter and uses the format string that requires the correlation_id field.
+from logging_config import configure as configure_logging
+configure_logging()
 logger = logging.getLogger(__name__)
 
 @asynccontextmanager
@@ -103,6 +101,8 @@ app = FastAPI(
 
 # Request latency middleware — pure ASGI (does NOT buffer response bodies, preserving SSE streaming)
 # NOTE: BaseHTTPMiddleware buffers the entire response before sending, which breaks StreamingResponse.
+# IMPORTANT: The early-return below for non-`http` scopes (e.g. ASGI lifespan) is required;
+# do not remove it or the app will fail to start.
 class LatencyMiddleware:
     def __init__(self, app):
         self.app = app

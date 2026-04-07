@@ -109,9 +109,21 @@ export function useSession(userProfile?: UserProfile, authHeader?: Record<string
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mounted guard — prevents setState after unmount (Fix 3)
+  // Mounted guard — prevents setState after unmount (Fix 3).
+  //
+  // The body MUST set mountedRef.current=true on every effect run so the
+  // hook works under React 18 StrictMode (and Next.js dev mode). StrictMode
+  // intentionally runs the effect cleanup once during the initial mount
+  // before re-running the effect, to surface incorrect cleanup logic. If
+  // the body doesn't set the ref back to true, the cleanup's
+  // `mountedRef.current = false` sticks and every subsequent setState
+  // guarded by `mountedRef.current && ...` is silently dropped — including
+  // the SSE metadata handler that persists session.sessionId to
+  // localStorage. The user-visible symptom: chat works but session ID is
+  // never restored on reload.
   const mountedRef = useRef(true);
   useEffect(() => {
+    mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
