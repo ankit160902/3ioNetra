@@ -4,7 +4,7 @@ Production AI spiritual companion rooted in Sanatan Dharma. Users converse with 
 
 **Stack:** FastAPI (Python 3.11) + Next.js (TypeScript) + MongoDB + Redis + Qdrant (optional) + Google Gemini 2.5 Pro
 **Version:** 1.1.3
-**Live:** https://3iomitra.3iosetu.com | https://3io-netra.vercel.app
+**Live:** https://ionetra-frontend-snh4yqlhmq-el.a.run.app | https://3io-netra.vercel.app
 
 ---
 

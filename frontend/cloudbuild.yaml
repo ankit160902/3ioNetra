@@ -1,0 +1,60 @@
+# Cloud Build config for the 3ioNetra Next.js frontend.
+#
+# Why this exists: 'gcloud builds submit --tag ...' uses Kaniko, which
+# does NOT pass build args. Without --build-arg NEXT_PUBLIC_API_URL,
+# the Dockerfile's default (http://localhost:8080) is inlined into the
+# Next.js client bundle at build time, breaking every API call from
+# the browser in production.
+#
+# This config uses gcr.io/cloud-builders/docker (standard Docker
+# daemon) and explicitly passes --build-arg via the _API_URL
+# substitution.
+#
+# Usage:
+#   cd frontend
+#   gcloud builds submit \
+#     --config=cloudbuild.yaml \
+#     --substitutions=_TAG=v3.2,_API_URL=https://ionetra-backend-snh4yqlhmq-el.a.run.app \
+#     .
+#
+# After build, deploy with:
+#   gcloud run deploy ionetra-frontend \
+#     --image asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:v3.2 \
+#     --region asia-south1
+
+steps:
+  # Step 1: Build the image with the correct backend URL baked in.
+  # The --build-arg overrides the Dockerfile's ARG default of
+  # http://localhost:8080, so Next.js inlines the live backend URL
+  # into the client bundle.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build
+    args:
+      - 'build'
+      - '--build-arg=NEXT_PUBLIC_API_URL=${_API_URL}'
+      - '--tag=asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:${_TAG}'
+      - '--file=Dockerfile'
+      - '.'
+
+  # Step 2: Push to Artifact Registry over Google's internal network.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:${_TAG}'
+
+substitutions:
+  _TAG: 'v3.2'
+  _API_URL: 'https://ionetra-backend-snh4yqlhmq-el.a.run.app'
+
+images:
+  - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/frontend:${_TAG}'
+
+options:
+  # Standard Docker doesn't have Kaniko's memory cap; E2_HIGHCPU_8 is
+  # plenty for the small Next.js build (no model bake step).
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 20
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '900s'

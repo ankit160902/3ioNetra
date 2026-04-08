@@ -1,10 +1,10 @@
 # How to Use 3ioNetra Mitra - Your Spiritual Companion
 
 ```
-  +---------------------+
-  |   Open the App      |
-  | 3iomitra.3iosetu.com|
-  +---------------------+
+  +-----------------------------+
+  |        Open the App         |
+  | (Cloud Run frontend URL)    |
+  +-----------------------------+
             |
             v
   +---------------------+       +---------------------+

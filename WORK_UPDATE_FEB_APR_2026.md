@@ -1,6 +1,6 @@
 # Work Update — Feb 7 to Apr 7, 2026
 
-**Project:** 3ioNetra (Spiritual Companion app at `3iomitra.3iosetu.com`)
+**Project:** 3ioNetra (Spiritual Companion app on Google Cloud Run)
 **Activity:** 66 commits, 318 files changed, +625K / −440K lines, sole contributor
 
 ---

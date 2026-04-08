@@ -474,7 +474,6 @@ r += 1
 write_sub(ws, r, "Networking & Security", COLS); r += 1
 write_row(ws, r, ["Item", "Details", "Low (USD/mo)", "High (USD/mo)", "Notes"], HEADER_FONT, HEADER_FILL); r += 1
 prod_net = [
-    ["Custom domain", "3iomitra.3iosetu.com", "$0", "$0", "Existing domain"],
     ["Domain renewal", ".com annual renewal", "$1", "$1", "$12/year"],
     ["SSL certificate", "AWS Certificate Manager (free with ALB)", "$0", "$0", "Free"],
     ["Cloudflare DNS", "Free plan", "$0", "$0", "DNS + basic DDoS"],

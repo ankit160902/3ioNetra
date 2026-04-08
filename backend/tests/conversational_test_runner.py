@@ -27,7 +27,7 @@ from typing import Optional
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-DEFAULT_BASE_URL = "https://3iomitra.3iosetu.com"
+DEFAULT_BASE_URL = "https://ionetra-backend-snh4yqlhmq-el.a.run.app"
 TEST_EMAIL = "test_mitra_eval@test.com"
 TEST_PASSWORD = "TestMitra2026!"
 TEST_NAME = "Mitra Evaluator"
