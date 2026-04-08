@@ -110,6 +110,28 @@ class CompanionEngine:
         # 1. Update session signals and story from intent analysis
         collect_signals_from_analysis(session, analysis)
 
+        # 1a. Off-topic short-circuit — yield the redirect from YAML and stop.
+        # Detector wraps IntentAgent.is_off_topic so the call site never has
+        # to know which dict key holds the boolean.
+        from services.off_topic_detector import get_off_topic_detector
+        _off_topic = get_off_topic_detector()
+        if _off_topic.is_off_topic(analysis):
+            logger.info(
+                f"Off-topic intent in stream (session={session.session_id}); "
+                f"yielding canned redirect"
+            )
+            yield {
+                "type": "control",
+                "is_ready_for_wisdom": False,
+                "phase": ConversationPhase.LISTENING.value,
+                "turn_topics": turn_topics,
+            }
+            yield {
+                "type": "token",
+                "content": _off_topic.get_redirect_message(),
+            }
+            return
+
         # 🚀 Decide phase (via FSM)
         intent = analysis.get("intent")
         fsm = ConversationFSM(session)
@@ -224,6 +246,33 @@ class CompanionEngine:
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
 
+        # 1a. Off-topic short-circuit — if the intent agent (or fast-path) flagged
+        # the message as outside spiritual/life-guidance scope, return a gentle
+        # redirect immediately. This avoids running RAG, product search, or
+        # routing the LLM through the guidance pipeline for queries the
+        # companion shouldn't engage with at all (coding help, sports scores, etc.).
+        from services.off_topic_detector import get_off_topic_detector
+        _off_topic_detector = get_off_topic_detector()
+        if _off_topic_detector.is_off_topic(analysis):
+            logger.info(
+                f"Off-topic intent detected (session={session.session_id}); "
+                f"returning canned redirect"
+            )
+            return {
+                "is_ready_for_wisdom": False,
+                "readiness_trigger": "off_topic",
+                "context_docs": [],
+                "turn_topics": turn_topics,
+                "recommended_products": [],
+                "active_phase": ConversationPhase.LISTENING,
+                "user_profile": build_user_profile(session.memory, session),
+                "past_memories": past_memories or [],
+                "analysis": analysis,
+                "model_override": None,
+                "config_override": None,
+                "off_topic_response": _off_topic_detector.get_redirect_message(),
+            }
+
         # 2. Store in Long-Term Memory if significant
         is_significant_update = (
             len(message) > 30 or
@@ -268,6 +317,21 @@ class CompanionEngine:
                     "I see what you are seeking. Let me look that up for you."
                 ]
 
+            # 🛍️ PRODUCT RECOMMENDATION (kicked off in parallel with the
+            # context-doc work below). The recommender reads only intent +
+            # turn_topics + life_domain — none of which depend on the RAG
+            # context that's about to be computed. Running both in parallel
+            # cuts ~2-3s off slow-path latency. The recommender catches its
+            # own exceptions and returns [] on failure, so awaiting the task
+            # at the end is safe.
+            product_task = asyncio.create_task(
+                self.product_recommender.recommend(
+                    session, message, analysis, turn_topics,
+                    is_ready_for_wisdom=True,
+                    life_domain=analysis.get("life_domain", "unknown"),
+                )
+            )
+
             # 📚 SCRIPTURE RETRIEVAL — use speculative RAG if available (already ran in parallel with intent)
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
@@ -298,12 +362,9 @@ class CompanionEngine:
                     # Speculative RAG ran but returned empty — proceed without scripture docs
                     logger.info("Guidance: speculative RAG returned empty, proceeding without scripture context")
 
-            # 🛍️ PRODUCT RECOMMENDATION (delegated to ProductRecommender)
-            products = await self.product_recommender.recommend(
-                session, message, analysis, turn_topics,
-                is_ready_for_wisdom=True,
-                life_domain=analysis.get("life_domain", "unknown"),
-            )
+            # Now await the product recommendation that's been running in
+            # parallel with the RAG/validation work above.
+            products = await product_task
 
             # Model routing decision
             routing = self.model_router.route(
@@ -416,6 +477,14 @@ class CompanionEngine:
              recommended_products, active_phase, model_override, config_override, past_memories)
         """
         meta = await self.process_message_preamble(session, message)
+
+        # Off-topic short-circuit: return canned redirect, skip LLM call entirely.
+        if meta.get("off_topic_response"):
+            return (
+                meta["off_topic_response"], False, [],
+                meta["turn_topics"], [], ConversationPhase.LISTENING,
+                None, None, meta.get("past_memories", []),
+            )
 
         if meta["is_ready_for_wisdom"]:
             return (

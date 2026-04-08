@@ -301,11 +301,18 @@ class ProductService:
         for p in sorted_products:
             p.pop("_text_score", None)
 
-        # ── Semantic Reranking via Embeddings ──
+        # ── Semantic Reranking via Embeddings (BATCHED) ──
         # Use the RAG pipeline's embedding model to compute cosine similarity
         # between the conversation context and each product's name+description.
         # This ensures products are semantically relevant (e.g., Vishnu products
         # rank higher when talking about Vishnu, not random Durga murtis).
+        #
+        # Performance: encodes ALL products in a single batched call instead of
+        # one-call-per-product. The previous loop did N+1 forward passes through
+        # the SentenceTransformer model (~500ms each on CPU), adding 5-8s to
+        # every product query. Batching collapses that into 2 forward passes
+        # (one for the context, one for all products) — same math, same scores,
+        # same final ordering, just faster.
         try:
             from routers.dependencies import get_rag_pipeline
             rag = get_rag_pipeline()
@@ -316,6 +323,7 @@ class ProductService:
                 if deity:
                     context = f"{deity} {context}"
 
+                # Single forward pass for the query context.
                 context_vec = rag._embedding_model.encode(
                     [f"query: {context}"], convert_to_tensor=False, show_progress_bar=False
                 )[0]
@@ -324,24 +332,35 @@ class ProductService:
                 if context_norm > 0:
                     context_vec /= context_norm
 
-                for p in sorted_products:
-                    product_text = f"{p.get('name', '')} {p.get('description', '')[:200]}"
-                    prod_vec = rag._embedding_model.encode(
-                        [f"passage: {product_text}"], convert_to_tensor=False, show_progress_bar=False
-                    )[0]
-                    prod_vec = np.asarray(prod_vec, dtype="float32")
-                    prod_norm = np.linalg.norm(prod_vec)
-                    if prod_norm > 0:
-                        prod_vec /= prod_norm
-                    sim = float(np.dot(context_vec, prod_vec))
-                    # Blend: 40% keyword score + 60% semantic similarity (scaled to ~100)
+                # Single batched forward pass for ALL product passages.
+                product_texts = [
+                    f"passage: {p.get('name', '')} {(p.get('description') or '')[:200]}"
+                    for p in sorted_products
+                ]
+                prod_vecs = rag._embedding_model.encode(
+                    product_texts, convert_to_tensor=False, show_progress_bar=False
+                )
+                prod_vecs = np.asarray(prod_vecs, dtype="float32")
+                # Vectorized L2-normalization (per-row).
+                prod_norms = np.linalg.norm(prod_vecs, axis=1, keepdims=True)
+                prod_norms = np.where(prod_norms > 0, prod_norms, 1.0)
+                prod_vecs = prod_vecs / prod_norms
+
+                # Vectorized cosine similarity (each product · context).
+                sims = prod_vecs @ context_vec  # shape (N,)
+
+                # Blend keyword + semantic score (same 40/60 mix as before).
+                for p, sim in zip(sorted_products, sims):
                     keyword_score = calculate_score(p)
-                    p["_final_score"] = 0.4 * keyword_score + 0.6 * (sim * 100)
+                    p["_final_score"] = 0.4 * keyword_score + 0.6 * (float(sim) * 100)
 
                 sorted_products = sorted(sorted_products, key=lambda x: x.get("_final_score", 0), reverse=True)
                 for p in sorted_products:
                     p.pop("_final_score", None)
-                logger.info(f"Product semantic reranking applied for context='{context[:40]}'")
+                logger.info(
+                    f"Product semantic reranking applied (batched, {len(sorted_products)} products) "
+                    f"for context='{context[:40]}'"
+                )
         except Exception as e:
             logger.warning(f"Semantic reranking skipped (non-fatal): {e}")
 
