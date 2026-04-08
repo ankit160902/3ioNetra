@@ -2,7 +2,6 @@
 Response Composer - Single authority for response generation
 """
 import hashlib
-import re
 from typing import List, Dict, Optional
 import logging
 import numpy as np
@@ -21,7 +20,12 @@ class ResponseComposer:
 
     def __init__(self):
         from llm.service import get_llm_service
+        from services.response_validator import get_response_validator
         self.llm = get_llm_service()
+        # Final-stage gate. Runs after llm.generate_response and may trigger
+        # one regeneration with corrective hints if a HIGH-severity check
+        # fails. See services/response_validator.py for the contract.
+        self.validator = get_response_validator()
         self.available = self.llm.available
         self._embedding_model = None
         logger.info(f"ResponseComposer initialized (LLM available={self.available})")
@@ -38,34 +42,91 @@ class ResponseComposer:
                 pass
         return self._embedding_model
 
-    def _build_cache_key(self, query: str, phase: Optional[ConversationPhase], emotion: str, life_domain: str, turn_count: int = 0) -> str:
-        """Build a deterministic cache key from query semantics + context.
+    def _user_fingerprint(self, memory: ConversationMemory, user_id: Optional[str]) -> str:
+        """Hash of user identity + profile fields that affect personalization.
+
+        The cache key MUST be scoped per-user. Without this, cached responses
+        with personalized text (name, rashi, deity, mantra suggestions) leak
+        across users — found Apr 8 2026 in a live multi-persona test where
+        the first persona's cached response was returned to all subsequent
+        users with their personal data baked in.
+
+        Authenticated users use their user_id directly. Anonymous users get a
+        fingerprint based on profile fields visible to the engine so two
+        anonymous users with different profiles don't collide either.
+        """
+        if user_id:
+            return user_id[:16]
+        story = memory.story if memory and memory.story else None
+        parts = [
+            (memory.user_name if memory else "") or "",
+            (getattr(story, "preferred_deity", "") if story else "") or "",
+            (getattr(story, "rashi", "") if story else "") or "",
+            (getattr(story, "nakshatra", "") if story else "") or "",
+            (getattr(story, "gender", "") if story else "") or "",
+        ]
+        raw = "|".join(parts).strip("|")
+        if not raw:
+            return "anon"
+        return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+    def _build_cache_key(
+        self,
+        query: str,
+        phase: Optional[ConversationPhase],
+        emotion: str,
+        life_domain: str,
+        turn_count: int = 0,
+        user_fingerprint: str = "anon",
+    ) -> str:
+        """Build a deterministic cache key from query semantics + context + user identity.
 
         Includes turn_count so same-session queries never hit stale cached responses.
-        Different turns always produce different keys → fresh LLM call → diverse mantras.
+        Includes user_fingerprint so cached personalized text never leaks across users.
+        Different turns or different users always produce different keys → fresh
+        LLM call → no cross-user data leak.
         """
         phase_val = phase.value if phase else "unknown"
-        key_str = f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}|turn{turn_count}"
+        key_str = (
+            f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
+            f"|turn{turn_count}|u{user_fingerprint}"
+        )
         return hashlib.md5(key_str.encode()).hexdigest()
 
-    async def _check_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory, turn_count: int = 0) -> Optional[str]:
-        """Check if a semantically similar query has a cached response."""
+    async def _check_response_cache(
+        self,
+        query: str,
+        phase: Optional[ConversationPhase],
+        memory: ConversationMemory,
+        turn_count: int = 0,
+        user_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Check if a semantically similar query has a cached response (per-user)."""
         if not settings.RESPONSE_CACHE_ENABLED:
             return None
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
+        fp = self._user_fingerprint(memory, user_id)
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count, fp)
         cached = await cache.get("response_semantic", key=cache_key)
         if cached and isinstance(cached, dict):
-            logger.info(f"Response cache HIT for query='{query[:40]}' (exact key match)")
+            logger.info(f"Response cache HIT for query='{query[:40]}' user_fp={fp}")
             return cached.get("response")
         return None
 
-    async def _store_response_cache(self, query: str, phase: Optional[ConversationPhase], memory: ConversationMemory, response: str, turn_count: int = 0) -> None:
-        """Cache a generated response for future semantic matches."""
+    async def _store_response_cache(
+        self,
+        query: str,
+        phase: Optional[ConversationPhase],
+        memory: ConversationMemory,
+        response: str,
+        turn_count: int = 0,
+        user_id: Optional[str] = None,
+    ) -> None:
+        """Cache a generated response (scoped to the calling user via fingerprint)."""
         if not settings.RESPONSE_CACHE_ENABLED:
             return
         # Don't cache very short or fallback responses
@@ -74,25 +135,17 @@ class ResponseComposer:
 
         emotion = (memory.story.emotional_state or "").lower()
         life_domain = (memory.story.life_area or "").lower()
+        fp = self._user_fingerprint(memory, user_id)
 
         cache = get_cache_service()
-        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count)
+        cache_key = self._build_cache_key(query, phase, emotion, life_domain, turn_count, fp)
         await cache.set(
             "response_semantic",
             {"response": response, "query": query},
             ttl=settings.RESPONSE_CACHE_TTL,
             key=cache_key,
         )
-        logger.debug(f"Response cache SET for query='{query[:40]}'")
-
-    def _personalize_cached_response(self, response: str, memory: ConversationMemory) -> str:
-        """Light personalization of a cached response (swap user name if present)."""
-        name = memory.user_name
-        if not name:
-            return response
-        # If the cached response has a generic "friend" reference, replace with name
-        response = re.sub(r'\bfriend\b', name, response, count=1, flags=re.IGNORECASE)
-        return response
+        logger.debug(f"Response cache SET for query='{query[:40]}' user_fp={fp}")
 
     async def compose_with_memory(
         self,
@@ -129,9 +182,16 @@ class ResponseComposer:
             return self._compose_fallback(dharmic_query)
 
         # Check response cache before expensive LLM call
-        cached_response = await self._check_response_cache(llm_query, phase, memory)
+        # Per-user caching: user_id (or anonymous fingerprint) is part of the
+        # key so cached personalized text never leaks across users.
+        _turn_count = getattr(memory, "turn_count", 0) or 0
+        cached_response = await self._check_response_cache(
+            llm_query, phase, memory,
+            turn_count=_turn_count,
+            user_id=user_id,
+        )
         if cached_response:
-            return self._personalize_cached_response(cached_response, memory)
+            return cached_response
 
         # Optionally thin out the scripture context when a user is very
         # distressed – we still keep a couple of strong anchors.
@@ -158,12 +218,85 @@ class ResponseComposer:
                 model_override=model_override,
                 config_override=config_override,
             )
-            # Cache the response for future similar queries
-            await self._store_response_cache(llm_query, phase, memory, response)
+            # Final gate: run ResponseValidator and optionally regenerate
+            # once with corrective hints if a HIGH-severity check fails.
+            response = await self._validate_and_repair(
+                response,
+                phase=phase,
+                regenerate=lambda hints: self.llm.generate_response(
+                    query=llm_query,
+                    context_docs=context_docs,
+                    conversation_history=conversation_history,
+                    user_profile=user_profile,
+                    phase=phase,
+                    memory_context=memory,
+                    model_override=model_override,
+                    config_override=self._merge_correction_hints(config_override, hints),
+                ),
+            )
+            # Cache the response for future similar queries (per-user)
+            await self._store_response_cache(
+                llm_query, phase, memory, response,
+                turn_count=_turn_count,
+                user_id=user_id,
+            )
             return response
 
         logger.info("LLM unavailable, using fallback")
         return self._compose_fallback(dharmic_query)
+
+    async def _validate_and_repair(
+        self,
+        response: str,
+        *,
+        phase: Optional[ConversationPhase],
+        regenerate,
+    ) -> str:
+        """Run the ResponseValidator and optionally regenerate.
+
+        Behavior:
+            * Apply any in-place repairs (e.g. verse auto-wrap) to the text.
+            * If a HIGH-severity check fails AND retries remain in the budget
+              (config.LLM_REGENERATION_RETRIES), call ``regenerate`` with the
+              correction hints, then re-validate.
+            * Return the best version we have. We never return raw text that
+              still contains a known scratchpad leak — that's the contract.
+        """
+        phase_value = phase.value if phase else None
+        report = self.validator.validate(response, phase=phase_value)
+        attempts = 0
+        max_attempts = max(0, int(settings.LLM_REGENERATION_RETRIES))
+
+        while not report.passed and report.needs_regeneration and attempts < max_attempts:
+            attempts += 1
+            hints = report.correction_hints
+            logger.info(
+                f"ResponseComposer: regenerating (attempt {attempts}/{max_attempts}) — hints: {hints}"
+            )
+            try:
+                response = await regenerate(hints)
+            except Exception as exc:
+                logger.warning(f"Regeneration failed: {exc} — keeping original response")
+                break
+            report = self.validator.validate(response, phase=phase_value)
+
+        # Verse auto-wrap and similar in-place repairs are baked into report.text
+        return report.text
+
+    @staticmethod
+    def _merge_correction_hints(
+        config_override: Optional[Dict],
+        hints: List[str],
+    ) -> Dict:
+        """Inject correction hints into the LLM config_override so the next
+        generation pass sees them as additional system instructions. Keeps
+        the regenerate path declarative — no string surgery on prompts here.
+        """
+        merged = dict(config_override or {})
+        if hints:
+            existing = merged.get("correction_hints") or []
+            merged["correction_hints"] = list(existing) + list(hints)
+        return merged
 
     async def compose_stream(
         self,
@@ -188,11 +321,16 @@ class ResponseComposer:
             yield self._compose_fallback(dharmic_query)
             return
 
-        # Check response cache — if hit, yield in word-sized chunks to preserve streaming UX
-        cached_response = await self._check_response_cache(llm_query, phase, memory)
+        # Check response cache (per-user) — if hit, yield in word-sized chunks
+        # to preserve streaming UX.
+        _turn_count = getattr(memory, "turn_count", 0) or 0
+        cached_response = await self._check_response_cache(
+            llm_query, phase, memory,
+            turn_count=_turn_count,
+            user_id=user_id,
+        )
         if cached_response:
-            text = self._personalize_cached_response(cached_response, memory)
-            for word in text.split(' '):
+            for word in cached_response.split(' '):
                 yield word + ' '
             return
 
@@ -219,9 +357,13 @@ class ResponseComposer:
             ):
                 full_response_parts.append(chunk)
                 yield chunk
-            # Cache the full response after streaming completes
+            # Cache the full response after streaming completes (per-user)
             full_response = "".join(full_response_parts)
-            await self._store_response_cache(llm_query, phase, memory, full_response)
+            await self._store_response_cache(
+                llm_query, phase, memory, full_response,
+                turn_count=_turn_count,
+                user_id=user_id,
+            )
         else:
             yield self._compose_fallback(dharmic_query)
 
