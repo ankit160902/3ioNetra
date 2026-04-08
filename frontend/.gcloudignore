@@ -1,0 +1,39 @@
+# gcloudignore — files NOT uploaded to Cloud Build
+# (the Dockerfile installs deps + builds inside the container, so we
+#  don't need to ship the local build artifacts or node_modules)
+
+# Node
+node_modules/
+.next/
+out/
+
+# Tests / Playwright artifacts
+test-results/
+playwright-report/
+playwright-results.json
+e2e/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Git
+.git
+.gitignore

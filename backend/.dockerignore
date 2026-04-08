@@ -58,6 +58,13 @@ logs/
 
 # ML models and data (if large) - NOT the Python models/ package
 ml_models/
+# Cached HuggingFace model weights from local dev runs.
+# The Dockerfile downloads these inside the container via
+# scripts/download_models.py at build time, so shipping the local
+# 6.3 GB cache is redundant AND it bloats the build context which
+# OOMs Kaniko's COPY step on small Cloud Build workers.
+models/embeddings/
+models/reranker/
 data/
 !data/processed/
 !data/processed/*.json

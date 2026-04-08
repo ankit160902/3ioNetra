@@ -72,10 +72,14 @@ ml_models/
 *.pkl
 *.onnx
 
-# Data — include only processed
+# Data — include only the active processed files used by RAG at runtime
 data/raw/
 data/qdrant_storage/
 data/vector_db/
+data/processed/processed_backup/
+data/processed.zip
+data.zip
+hip_main.dat
 
 # OS
 .DS_Store

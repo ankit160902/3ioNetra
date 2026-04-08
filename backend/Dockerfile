@@ -23,6 +23,11 @@ ENV PIP_NO_CACHE_DIR=1
 RUN mkdir -p /app/models/embeddings /app/models/reranker
 
 COPY requirements.txt .
+# Note: uv was tried here but its strict resolver rejects the existing
+# dep conflicts (google-genai wants websockets<15.1 but project pulls 16.0;
+# gtts wants click<8.2 but project pulls 8.3.2). --resolution=lowest-direct
+# fell into ancient package versions with Python 2 print syntax. Sticking
+# with pip + legacy-resolver until requirements.txt is properly pinned.
 RUN pip install --use-deprecated=legacy-resolver -r requirements.txt
 
 COPY . .

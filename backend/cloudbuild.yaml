@@ -1,0 +1,51 @@
+# Cloud Build config — uses standard Docker builder (NOT Kaniko).
+#
+# Why not `gcloud builds submit --tag`? That uses Kaniko, which has a
+# fixed internal memory limit (~6-8 GB) regardless of the VM machine
+# type. Snapshotting an 8 GB filesystem (base + pip + models) blows
+# past that limit and OOMs even on E2_HIGHCPU_32 (32 GB VM RAM).
+#
+# This config uses gcr.io/cloud-builders/docker which gets full access
+# to the VM RAM via the regular Docker daemon. Combined with
+# --machine-type=E2_HIGHCPU_32 (set via --substitutions or --machine-type
+# at submit time), the build has 32 GB to work with.
+#
+# Usage:
+#   gcloud builds submit --config=cloudbuild.yaml \
+#                        --machine-type=E2_HIGHCPU_32 \
+#                        --substitutions=_TAG=v3.6 \
+#                        .
+
+steps:
+  # Step 1: Build the image with standard Docker
+  - name: 'gcr.io/cloud-builders/docker'
+    id: build
+    args:
+      - 'build'
+      - '--tag=asia-south1-docker.pkg.dev/ionetra/ionetra-docker/backend:${_TAG}'
+      - '--file=Dockerfile'
+      - '.'
+
+  # Step 2: Push the image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/backend:${_TAG}'
+
+substitutions:
+  _TAG: 'v3.6'
+
+# Tell Cloud Build to record the produced image
+images:
+  - 'asia-south1-docker.pkg.dev/ionetra/ionetra-docker/backend:${_TAG}'
+
+options:
+  # 32 vCPU, 32 GB RAM (Docker builder has full access — no Kaniko cap)
+  machineType: 'E2_HIGHCPU_32'
+  # Increase disk to comfortably hold the build context + intermediate
+  # layers + final image (~10 GB total)
+  diskSizeGb: 100
+  logging: CLOUD_LOGGING_ONLY
+
+timeout: '1800s'
