@@ -55,38 +55,36 @@ class UserContext:
 # Utilities
 # --------------------------------------------------
 
-def strip_markdown(text: str) -> str:
-    """Remove all markdown formatting from text, preserving structural tags.
+def strip_disallowed_markdown(text: str) -> str:
+    """Remove the markdown elements forbidden by the Mitra style guide.
 
-    Per CLAUDE.md rule #2 ("No markdown in LLM responses. Flowing sentences
-    only"), Mitra's responses must be plain prose. This function is the
-    belt-and-braces enforcement: even if a future prompt drift or LLM
-    quirk reintroduces ``**bold**``, ``# headers``, or list markers, this
-    runs unconditionally on every response and the user never sees them.
+    Per CLAUDE.md rule #2 (revised Apr 2026), Mitra responses use a
+    *restricted* markdown subset. This function is the belt-and-braces
+    enforcement: it strips the disallowed elements while preserving the
+    allowed ones, so even if a prompt drift or LLM quirk introduces a
+    forbidden form, the user never sees it.
 
-    Preserves: ``[VERSE]...[/VERSE]`` and ``[MANTRA]...[/MANTRA]`` blocks
-    (those are structural markup the frontend renders specially, not
-    markdown).
+    Allowed (PRESERVED):
+    - **bold** — for emphasis on key terms (1-2 per response)
+    - "- " bullet lists at line start — for short step sequences (2-5 items)
+    - "---" horizontal rules on their own line — once per response, max
+    - [VERSE]...[/VERSE] and [MANTRA]...[/MANTRA] structural tags
 
-    Strips:
-    - Bold: ``**text**``, ``__text__``
-    - Italic: ``*text*``, ``_text_``
-    - Inline code: `` `text` ``
-    - Headers: ``# text``, ``## text`` (only at line start, with space)
-    - Blockquotes: ``> text`` (only at line start)
-    - Bullet lists: ``- text``, ``* text``, ``+ text`` (only at line start)
-    - Numbered lists: ``1. text``, ``2. text`` (only at line start)
+    Forbidden (STRIPPED):
+    - *italic* / _italic_ — competes with verse italic styling
+    - `inline code` — out of place in spiritual chat
+    - # headers — too clinical, breaks warm tone
+    - > blockquotes — [VERSE] handles quoted scripture
+    - 1. numbered lists — verbose; use prose or "- " bullets
+    - "* " and "+ " bullets — normalized to "- " for consistency
 
     Does NOT strip: lone asterisks/underscores in math/identifiers, em
-    dashes (those are handled by the dehyphenation step in clean_response),
-    or anything inside [VERSE]/[MANTRA] tags.
+    dashes, or anything inside [VERSE]/[MANTRA] tags.
     """
     if not text:
         return ""
 
-    # Protect structural tags so we don't strip markdown inside them.
-    # Different placeholder prefix from clean_response's dehyphen step
-    # so the two protection passes don't interfere if they're chained.
+    # Protect structural tags so we don't rewrite anything inside them.
     placeholders: list[str] = []
 
     def _protect(match):
@@ -99,28 +97,70 @@ def strip_markdown(text: str) -> str:
         text,
     )
 
-    # Inline emphasis. **bold** before *italic* so the bold pattern wins.
-    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-    text = re.sub(r"__(.+?)__", r"\1", text)
-    # *italic* — require non-word boundary on both sides so ``a*b`` (math)
-    # and ``*.py`` (glob) survive. The (?<!\s) on the inner edges avoids
-    # matching across whole sentences with stray asterisks.
-    text = re.sub(r"(?<!\w)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w)", r"\1", text)
+    # Protect "---" horizontal rules from any later regex pass.
+    text = re.sub(r"^---\s*$", "\x00HR\x00", text, flags=re.MULTILINE)
+
+    # Strip *italic* (single asterisk) WITHOUT touching **bold** spans.
+    # Two-pass scan: skip past balanced **...** spans, strip lone *...*.
+    def _strip_italic(t: str) -> str:
+        out: list[str] = []
+        i = 0
+        n = len(t)
+        while i < n:
+            # Pass through **bold** spans untouched
+            if i + 1 < n and t[i] == "*" and t[i + 1] == "*":
+                end = t.find("**", i + 2)
+                if end != -1:
+                    out.append(t[i:end + 2])
+                    i = end + 2
+                    continue
+            # Try to match a single-* italic span: *word(s)*
+            if (
+                t[i] == "*"
+                and i + 1 < n
+                and t[i + 1] != "*"
+                and not t[i + 1].isspace()
+            ):
+                close = t.find("*", i + 1)
+                if (
+                    close != -1
+                    and close - i <= 200
+                    and "\n" not in t[i + 1:close]
+                ):
+                    out.append(t[i + 1:close])
+                    i = close + 1
+                    continue
+            out.append(t[i])
+            i += 1
+        return "".join(out)
+
+    text = _strip_italic(text)
+    # _italic_ — strip with the same word-boundary guards as before
     text = re.sub(r"(?<!\w)_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)", r"\1", text)
     # `inline code` → unwrap
     text = re.sub(r"`([^`\n]+)`", r"\1", text)
 
-    # Line-leading markers — remove the marker, keep the content.
+    # Line-leading FORBIDDEN markers — remove the marker, keep the content.
     text = re.sub(r"^[ \t]*#{1,6}[ \t]+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^[ \t]*>[ \t]+", "", text, flags=re.MULTILINE)
-    text = re.sub(r"^[ \t]*[-*+][ \t]+", "", text, flags=re.MULTILINE)
     text = re.sub(r"^[ \t]*\d+\.[ \t]+", "", text, flags=re.MULTILINE)
+    # Normalize "* " and "+ " bullets to "- " (canonical allowed form).
+    # Crucially, this only matches at line start with trailing space —
+    # so it cannot eat into a "**bold**" span (which has no trailing space).
+    text = re.sub(r"^[ \t]*[*+][ \t]+", "- ", text, flags=re.MULTILINE)
 
-    # Restore protected tag blocks.
+    # Restore horizontal-rule placeholders.
+    text = text.replace("\x00HR\x00", "---")
+    # Restore structural tag placeholders.
     for i, block in enumerate(placeholders):
         text = text.replace(f"\x00SM{i}\x00", block)
 
     return text
+
+
+# Backwards-compat alias — many callers and tests still import the old
+# name. New code should prefer ``strip_disallowed_markdown``.
+strip_markdown = strip_disallowed_markdown
 
 
 def clean_response(text: str) -> str:
@@ -131,11 +171,13 @@ def clean_response(text: str) -> str:
     # Simply return the text cleaned of whitespace initially
     text = text.strip()
 
-    # CLAUDE.md rule #2: no markdown in LLM responses. The prompt forbids
-    # it, but strip_markdown is the belt-and-braces enforcement so a
-    # prompt drift or LLM quirk never leaks bold/headers/lists to users.
-    # Tags ([VERSE]/[MANTRA]) are preserved by strip_markdown internally.
-    text = strip_markdown(text)
+    # CLAUDE.md rule #2 (revised Apr 2026): restricted markdown in LLM
+    # responses. **bold**, "- " bullets, and "---" rules are PRESERVED;
+    # headers, blockquotes, italic, code, and numbered lists are stripped.
+    # Belt-and-braces enforcement so a prompt drift or LLM quirk never
+    # leaks forbidden elements to users. Tags ([VERSE]/[MANTRA]) are
+    # preserved by strip_disallowed_markdown internally.
+    text = strip_disallowed_markdown(text)
 
     # Robustly clean content inside [VERSE] tags to prevent markdown artifacts
     def clean_verse_content(match):

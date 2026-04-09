@@ -279,6 +279,58 @@ class TestPromptContextLeakDetection:
         assert "prompt_context_leak" in names
 
 
+# ---------------------------------------------------------------------------
+# Markdown-aware word count — Apr 2026 contract change
+# ---------------------------------------------------------------------------
+# Mitra responses now contain restricted markdown (bold, dash bullets,
+# horizontal rules). Word count must NOT inflate from formatting syntax,
+# otherwise the 30-110 word ceiling is artificially tight.
+
+
+class TestWordCountMarkdownAware:
+    def test_word_count_unwraps_bold(self):
+        """**important** should count as 1 word, not 3."""
+        from services.response_validator import _word_count
+        assert _word_count("This is **important** advice") == 4
+
+    def test_word_count_strips_dash_bullet_prefix(self):
+        """Bullet "- " markers themselves shouldn't add to the count."""
+        from services.response_validator import _word_count
+        assert _word_count("- first\n- second\n- third") == 3
+
+    def test_word_count_drops_horizontal_rule(self):
+        """The "---" separator is a visual break, not a word."""
+        from services.response_validator import _word_count
+        assert _word_count("Take a breath.\n\n---\n\nNow continue.") == 5
+
+    def test_word_count_combines_all_markdown_strips(self):
+        """A realistic restricted-markdown response counts only the prose."""
+        from services.response_validator import _word_count
+        text = (
+            "**Today is Shukravar**, sacred to Goddess Lakshmi.\n\n"
+            "- Sit facing east\n"
+            "- Light a diya\n"
+            "- Chant eleven times\n\n"
+            "---\n\n"
+            "Even five minutes steadies the day."
+        )
+        # Words to count:
+        #   "Today is Shukravar, sacred to Goddess Lakshmi." = 7
+        #   "Sit facing east" = 3
+        #   "Light a diya" = 3
+        #   "Chant eleven times" = 3
+        #   "Even five minutes steadies the day." = 6
+        # Total = 22
+        assert _word_count(text) == 22
+
+    def test_word_count_still_strips_verse_blocks(self):
+        """Existing behavior — [VERSE] / [MANTRA] blocks excluded — still works."""
+        from services.response_validator import _word_count
+        text = "Try this [MANTRA]Om Namah Shivaya[/MANTRA] before bed"
+        # "Try this before bed" = 4 words
+        assert _word_count(text) == 4
+
+
 class TestSingleton:
     def test_singleton_identity(self):
         a = get_response_validator()

@@ -83,13 +83,15 @@ class ResponseComposer:
 
         Includes turn_count so same-session queries never hit stale cached responses.
         Includes user_fingerprint so cached personalized text never leaks across users.
-        Different turns or different users always produce different keys → fresh
-        LLM call → no cross-user data leak.
+        Includes a format version (`fmt=md1`) so the cache invalidates when the
+        response format contract changes — bumped Apr 2026 when we switched
+        from plain-text to restricted-markdown responses. Plain-text cached
+        entries will miss and regenerate cleanly.
         """
         phase_val = phase.value if phase else "unknown"
         key_str = (
             f"{query.strip().lower()}|{phase_val}|{emotion}|{life_domain}"
-            f"|turn{turn_count}|u{user_fingerprint}"
+            f"|turn{turn_count}|u{user_fingerprint}|fmt=md1"
         )
         return hashlib.md5(key_str.encode()).hexdigest()
 

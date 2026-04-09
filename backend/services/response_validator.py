@@ -181,10 +181,22 @@ def check_prompt_context_leak(text: str) -> CheckResult:
 # ---------------------------------------------------------------------------
 
 def _word_count(text: str) -> int:
-    """Word count that ignores [VERSE]/[MANTRA] block contents so a long
-    Sanskrit shloka doesn't blow the budget on the surrounding prose.
+    """Word count that ignores formatting noise.
+
+    Strips both:
+    - [VERSE] / [MANTRA] block contents (a long shloka shouldn't blow
+      the budget on the surrounding prose)
+    - Allowed-markdown syntax tokens (Apr 2026): **bold** wrappers,
+      leading "- " bullet markers, and "---" horizontal rules. The
+      formatting itself shouldn't consume the user-facing word budget.
     """
     stripped = re.sub(r'\[(VERSE|MANTRA)\][\s\S]*?\[/\1\]', '', text, flags=re.IGNORECASE)
+    # Unwrap **bold** so the asterisks don't add fake characters.
+    stripped = re.sub(r'\*\*([^*\n]+?)\*\*', r'\1', stripped)
+    # Strip "- " bullet prefixes — keep the item content as words.
+    stripped = re.sub(r'^[ \t]*-[ \t]+', '', stripped, flags=re.MULTILINE)
+    # Drop "---" horizontal rules — they're not words.
+    stripped = re.sub(r'^---\s*$', '', stripped, flags=re.MULTILINE)
     return len(stripped.split())
 
 
