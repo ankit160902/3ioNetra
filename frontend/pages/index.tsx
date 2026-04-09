@@ -13,6 +13,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 /* ============================================================================
+   Helpers
+   ============================================================================ */
+
+/**
+ * Fix inline bullets — inserts newlines before "- " that appears mid-line.
+ * Handles: (a) old stored conversations generated before the markdown change,
+ * (b) edge cases where Gemini emits bullets on one line despite the prompt
+ * saying "each bullet on its own line". Without this, react-markdown treats
+ * inline "- " as plain text instead of rendering a <ul><li> list.
+ */
+function fixInlineBullets(text: string): string {
+  // Match "- " preceded by sentence-ending punctuation or a word char and
+  // optional whitespace — i.e. a bullet marker that isn't already at line
+  // start. Replace with a newline before the dash.
+  return text.replace(/([.!?:;)\]'"a-zA-Z0-9])\s+- /g, '$1\n- ');
+}
+
+/* ============================================================================
    Components
    ============================================================================ */
 
@@ -856,7 +874,7 @@ export default function Home() {
                                     </div>
                                   ) : (
                                     <div key={si} className="prose prose-sm md:prose-base dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:my-1.5 prose-strong:text-orange-700 dark:prose-strong:text-amber-400 prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{seg.content}</ReactMarkdown>
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{fixInlineBullets(seg.content)}</ReactMarkdown>
                                       {isProcessing && index === messages.length - 1 && si === textAndVerseSegs.length - 1 && seg.type === 'text' && (
                                         <span className="streaming-cursor" />
                                       )}

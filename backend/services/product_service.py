@@ -371,8 +371,10 @@ class ProductService:
                     p["_final_score"] = 0.4 * keyword_score + 0.6 * (float(sim) * 100)
 
                 sorted_products = sorted(sorted_products, key=lambda x: x.get("_final_score", 0), reverse=True)
-                for p in sorted_products:
-                    p.pop("_final_score", None)
+                # NOTE: _final_score is intentionally NOT popped here.
+                # It's kept on each product so the downstream gap-policy
+                # calculation (line ~432) can use the blended score for
+                # smarter relevance filtering. Popped after the gap filter.
                 logger.info(
                     f"Product semantic reranking applied (batched, {len(sorted_products)} products) "
                     f"for context='{context[:40]}'"
@@ -380,10 +382,19 @@ class ProductService:
         except Exception as e:
             logger.warning(f"Semantic reranking skipped (non-fatal): {e}")
 
+        # Score helper: prefer blended score (_final_score from semantic
+        # reranking) when available, fall back to raw keyword score. The
+        # blended score encodes semantic similarity (deity match, topical
+        # relevance) which raw keyword scoring misses when a generic term
+        # like "murti" matches every candidate equally. Apr 2026 fix.
+        def _score(p):
+            fs = p.get("_final_score")
+            return fs if fs is not None else calculate_score(p)
+
         # Minimum relevance gate: drop products below the score floor
         min_score = getattr(settings, 'PRODUCT_MIN_RELEVANCE_SCORE', 15.0)
         pre_filter_count = len(sorted_products)
-        sorted_products = [p for p in sorted_products if calculate_score(p) >= min_score]
+        sorted_products = [p for p in sorted_products if _score(p) >= min_score]
         if pre_filter_count > 0 and not sorted_products:
             logger.info(f"All {pre_filter_count} products below min relevance score ({min_score}) for query '{query_text[:40]}'")
             return []
@@ -429,9 +440,14 @@ class ProductService:
         if not diverse:
             return []
 
-        top_score = calculate_score(diverse[0])
+        top_score = _score(diverse[0])
         relevance_floor = max(min_score, top_score * settings.PRODUCT_RELEVANCE_GAP_RATIO)
-        gap_filtered = [p for p in diverse if calculate_score(p) >= relevance_floor]
+        gap_filtered = [p for p in diverse if _score(p) >= relevance_floor]
+
+        # Clean up the transient _final_score field before returning to
+        # callers — it's an internal scoring artifact, not product data.
+        for p in gap_filtered:
+            p.pop("_final_score", None)
         return gap_filtered[:limit]
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
