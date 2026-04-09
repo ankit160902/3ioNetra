@@ -1,35 +1,7 @@
-import { test, expect, Page, APIRequestContext } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import { loginViaAPI } from './helpers/auth';
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-const API_URL = process.env.API_URL || 'http://localhost:8080';
-
-/**
- * Registers a new user via the backend API, then sets localStorage tokens
- * so the frontend treats the session as authenticated.
- */
-async function loginViaAPI(page: Page, request: APIRequestContext) {
-  const email = `chattest_${Date.now()}@test.com`;
-  const regRes = await request.post(`${API_URL}/api/auth/register`, {
-    data: {
-      name: 'Chat Tester',
-      email,
-      password: 'TestPass123',
-      phone: '9876543210',
-      gender: 'Male',
-      dob: '1995-06-15',
-      profession: 'Working Professional',
-    },
-  });
-  const { token, user } = await regRes.json();
-  await page.evaluate(
-    ({ token, user }) => {
-      localStorage.setItem('auth_token', token);
-      localStorage.setItem('auth_user', JSON.stringify(user));
-    },
-    { token, user }
-  );
-  await page.reload();
-}
 
 test.describe('Chat Interface UI Tests', () => {
   test.beforeEach(async ({ page, request }) => {
@@ -151,23 +123,6 @@ test.describe('Chat Interface UI Tests', () => {
     // Verify messages are cleared — the welcome empty state should reappear
     const seekWisdom = page.getByText('Seek Wisdom');
     await expect(seekWisdom).toBeVisible({ timeout: 5000 });
-  });
-
-  test('UI-14: Phase indicator visible after first message', async ({ page }) => {
-    const chatInput = page.locator('#chat-input');
-    const sendButton = page.locator('form button[type="submit"]');
-
-    await chatInput.fill('Namaste');
-    await sendButton.click();
-
-    // Wait for assistant response to ensure the session has been established
-    const assistantBubble = page.locator('.justify-start .bg-white').first();
-    await expect(assistantBubble).toBeVisible({ timeout: 30000 });
-
-    // Verify the PhaseIndicatorCompact component is visible
-    // It renders when session.sessionId is truthy
-    const phaseIndicator = page.locator('[data-testid="phase-indicator"]');
-    await expect(phaseIndicator).toBeVisible({ timeout: 10000 });
   });
 
   test('UI-15: Chat input disabled while processing', async ({ page }) => {

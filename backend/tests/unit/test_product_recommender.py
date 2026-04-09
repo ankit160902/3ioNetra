@@ -431,3 +431,55 @@ class TestProductMaps:
 
 # Need to import settings for gate tests
 from config import settings
+
+
+# ---------------------------------------------------------------------------
+# recent_products tracking — Apr 2026 fix for "products not remembered across
+# turns". The recommender records name+category metadata so the LLM prompt can
+# surface it to the user via _build_prompt → "PRODUCTS YOU RECOMMENDED..."
+# ---------------------------------------------------------------------------
+
+
+class TestRecordShownPopulatesRecentProducts:
+    def test_record_shown_appends_name_and_category(self):
+        """Calling _record_shown must populate session.recent_products with
+        the product's _id, name, and category — not just the ID."""
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        products = [
+            {"_id": "p1", "name": "Rudraksha Mala", "category": "Mala"},
+            {"_id": "p2", "name": "Brass Diya", "category": "Diya"},
+        ]
+        pr._record_shown(session, products)
+
+        assert len(session.recent_products) == 2
+        names = {p["name"] for p in session.recent_products}
+        assert names == {"Rudraksha Mala", "Brass Diya"}
+        cats = {p["category"] for p in session.recent_products}
+        assert cats == {"Mala", "Diya"}
+        # IDs are also tracked in the dedupe set
+        assert session.shown_product_ids == {"p1", "p2"}
+
+    def test_record_shown_dedupes_repeat_calls(self):
+        """Calling _record_shown twice with the same product must NOT
+        create duplicate entries in recent_products."""
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        products = [{"_id": "p1", "name": "Rudraksha Mala", "category": "Mala"}]
+        pr._record_shown(session, products)
+        pr._record_shown(session, products)
+        assert len(session.recent_products) == 1
+
+    def test_record_shown_caps_at_5(self):
+        """recent_products is FIFO-capped at 5 to keep the LLM prompt small."""
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        products = [
+            {"_id": f"p{i}", "name": f"Product {i}", "category": "test"}
+            for i in range(7)
+        ]
+        pr._record_shown(session, products)
+        assert len(session.recent_products) == 5
+        # FIFO: oldest dropped, newest kept (p2..p6)
+        ids = [p["_id"] for p in session.recent_products]
+        assert ids == ["p2", "p3", "p4", "p5", "p6"]

@@ -160,6 +160,7 @@ class ResponseComposer:
         past_memories: List[str] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        session=None,
     ) -> str:
         """
         Compose a response using:
@@ -169,6 +170,9 @@ class ResponseComposer:
         - full conversation history (for context continuity)
         - current conversation phase
         - original user query (for natural response)
+        - session (optional) — surfaces last_suggestions, suggested_verses,
+          and recent_products into the LLM prompt. Without it those fields
+          are silently dropped (a bug fixed Apr 2026 — see profile_builder).
         """
 
         # Use original query for the LLM prompt if available,
@@ -200,8 +204,9 @@ class ResponseComposer:
         if reduce_scripture and len(retrieved_verses) > _distress_cap:
             context_docs = retrieved_verses[:_distress_cap]
 
-        # Build user profile from memory
-        user_profile = build_user_profile(memory)
+        # Build user profile from memory + session (session unlocks
+        # last_suggestions, suggested_verses, and recent_products fields)
+        user_profile = build_user_profile(memory, session=session)
 
         # Inject past memories into profile
         if past_memories:
@@ -311,9 +316,14 @@ class ResponseComposer:
         past_memories: List[str] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        session=None,
     ):
         """
         Stream response synthesis using LLMService.generate_response_stream.
+
+        ``session`` (optional) is forwarded to ``build_user_profile`` so the
+        prompt sees last_suggestions, suggested_verses, and recent_products.
+        Without it those fields are silently dropped (Apr 2026 fix).
         """
         llm_query = original_query or dharmic_query.build_search_query()
 
@@ -339,7 +349,9 @@ class ResponseComposer:
         if reduce_scripture and len(retrieved_verses) > _distress_cap:
             context_docs = retrieved_verses[:_distress_cap]
 
-        user_profile = build_user_profile(memory)
+        # Build user profile with session so last_suggestions /
+        # suggested_verses / recent_products reach the LLM (Apr 2026 fix).
+        user_profile = build_user_profile(memory, session=session)
         if past_memories:
             user_profile["past_memories"] = past_memories
 

@@ -31,6 +31,21 @@ class Settings(BaseSettings):
     RESPONSE_MAX_TOKENS: int = 2048
     INTENT_TEMPERATURE: float = 0.1
 
+    # LLM thinking-mode budget — Gemini 2.5/3 models default to thinking ON
+    # which (a) adds 5-15s latency, (b) can leak chain-of-thought into responses
+    # if SDK part filtering misses a frame. Default 0 disables thinking for the
+    # main conversational path. Internal callers (intent classifier, retrieval
+    # judge) that genuinely benefit from reasoning can opt in by passing an
+    # explicit thinking_budget kwarg to LLMService methods.
+    LLM_THINKING_BUDGET_DEFAULT: int = 0
+
+    # ResponseValidator regeneration budget — number of times the response
+    # composer is allowed to ask the LLM to rewrite a response that fails a
+    # validator check (length, hollow phrase, scratchpad leak, etc.). Hard
+    # backstop, not a target. After this many retries the last response is
+    # returned with a logged metric.
+    LLM_REGENERATION_RETRIES: int = 1
+
     # Token budget ceilings (used by TokenBudgetCalculator — adaptive system)
     TOKEN_CEILING_BRIEF: int = 512       # greetings, closures
     TOKEN_CEILING_MODERATE: int = 1024   # emotional shares, simple Qs
@@ -94,6 +109,12 @@ class Settings(BaseSettings):
     TRADITION_BONUS: float = 0.05
     SECTION_CHUNKS_ENABLED: bool = Field(default=True, env="SECTION_CHUNKS_ENABLED")
     SPLADE_ENABLED: bool = Field(default=True, env="SPLADE_ENABLED")
+    # When True AND SPLADE_ENABLED is True, a missing SPLADE index causes
+    # a hard startup failure with an actionable error. Use this in
+    # production deployments where silent degradation to BM25 would mask
+    # a corrupted ingest. Default False so dev environments without an
+    # index still boot in degraded mode.
+    SPLADE_REQUIRED: bool = Field(default=False, env="SPLADE_REQUIRED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
     RERANKER_ENABLED: bool = Field(default=True, env="RERANKER_ENABLED")
     MAX_RERANK_CANDIDATES: int = Field(default=10, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
@@ -161,6 +182,33 @@ class Settings(BaseSettings):
     SESSION_TTL_MINUTES: int = 60
     READINESS_POST_GUIDANCE: float = 0.3   # readiness reset after guidance phase
 
+    # FSM thresholds — promoted from conversation_fsm.py module constants so
+    # the FSM has a single source of truth and these are tunable without code
+    # changes. Used by ConversationFSM transition prerequisites.
+    MIN_DISTRESS_LISTEN_TURNS: int = 2          # turns to stay in LISTENING when latest signal severity is HIGH
+    GUIDANCE_OSCILLATION_COOLDOWN: int = 3      # turns required between successive GUIDANCE phases
+    EMOTIONAL_SEVERITIES_REQUIRE_LISTEN: str = "high,severe,crisis"  # comma-separated severity names that block early guidance
+
+    # ------------------------------------------------------------------
+    # Query preprocessing (QueryNormalizer seam)
+    # ------------------------------------------------------------------
+    # Spell correction was previously implemented inline in rag/pipeline.py
+    # using whole-string Levenshtein distance against a dharmic vocabulary.
+    # That approach mangled common English words into Sanskrit terms (e.g.
+    # "How"→"homa", "Give"→"gita") and biased off-topic queries toward
+    # scripture matches. Disabled by default — embedding model + reranker
+    # already handle morphology and fuzzy matching at the semantic layer.
+    SPELL_CORRECTION_ENABLED: bool = Field(default=False, env="SPELL_CORRECTION_ENABLED")
+
+    # ------------------------------------------------------------------
+    # Reranker cache
+    # ------------------------------------------------------------------
+    # Caches CrossEncoder rerank scores keyed by (query, doc_id) so repeated
+    # phrases in long conversations don't re-run the encoder. Backed by the
+    # existing Redis cache_service (DB 1).
+    RERANKER_CACHE_ENABLED: bool = Field(default=True, env="RERANKER_CACHE_ENABLED")
+    RERANKER_CACHE_TTL: int = Field(default=86400, env="RERANKER_CACHE_TTL")  # 24h
+
     # ------------------------------------------------------------------
     # Product Recommendation Throttling
     # ------------------------------------------------------------------
@@ -168,10 +216,24 @@ class Settings(BaseSettings):
     PRODUCT_COOLDOWN_TURNS: int = 7                 # Min turns between proactive product events
     PRODUCT_COOLDOWN_AFTER_REJECTION: int = 10      # Cooldown turns after user rejects products
     PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 2         # Allow products from turn 2 (not the very first message)
-    PRODUCT_SUPPRESS_EMOTIONS: str = "grief,despair,hopelessness,crisis,shame"
+    # Emotions where product recommendations are suppressed entirely.
+    # Showing a "buy this rudraksha" card to a user who is grieving, anxious,
+    # or angry undermines trust — the moment calls for presence, not commerce.
+    # Explicit user requests (PRODUCT_SEARCH intent, "Product Inquiry" topic)
+    # bypass this suppression because the user has unambiguously asked.
+    PRODUCT_SUPPRESS_EMOTIONS: str = (
+        "grief,despair,hopelessness,crisis,shame,"
+        "anger,anxiety,fear,panic,loneliness,guilt,humiliation,trauma,sadness"
+    )
     PRODUCT_GUIDANCE_CONTEXT_ENABLED: bool = True   # Allow context-based products in guidance phase
     PRODUCT_LISTENING_PROACTIVE_ENABLED: bool = False  # Disable proactive products in listening phase
     PRODUCT_MIN_RELEVANCE_SCORE: float = 15.0         # Min combined score to include a product (15 ≈ one name keyword match)
+    PRODUCT_RELEVANCE_GAP_RATIO: float = 0.55         # A product must score at least N% of the top item's score
+    # The gap ratio is the structural fix for "always returns 3 padded products."
+    # Tighter (0.7) = stricter (fewer products); looser (0.4) = more permissive.
+    # Drives both search_products and search_by_metadata. Replaces the
+    # "fill remaining slots regardless of relevance" fallback that was padding
+    # results with weakly-related items. Apr 2026 fix.
 
     # ------------------------------------------------------------------
     # Safety / Crisis

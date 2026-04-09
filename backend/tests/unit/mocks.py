@@ -170,7 +170,6 @@ class MockProduct:
         limit: int = 5,
         emotion: str = "",
         deity: str = "",
-        allow_category_fallback: bool = True,
     ) -> List[Dict[str, Any]]:
         self.search_count += 1
         return self._products[:limit]

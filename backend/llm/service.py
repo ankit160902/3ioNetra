@@ -14,6 +14,7 @@ from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 from config import settings
 from services.resilience import CircuitBreaker
+from services.language_detector import get_language_constraint
 from google.genai import types as genai_types
 from models.session import ConversationPhase
 
@@ -54,6 +55,74 @@ class UserContext:
 # Utilities
 # --------------------------------------------------
 
+def strip_markdown(text: str) -> str:
+    """Remove all markdown formatting from text, preserving structural tags.
+
+    Per CLAUDE.md rule #2 ("No markdown in LLM responses. Flowing sentences
+    only"), Mitra's responses must be plain prose. This function is the
+    belt-and-braces enforcement: even if a future prompt drift or LLM
+    quirk reintroduces ``**bold**``, ``# headers``, or list markers, this
+    runs unconditionally on every response and the user never sees them.
+
+    Preserves: ``[VERSE]...[/VERSE]`` and ``[MANTRA]...[/MANTRA]`` blocks
+    (those are structural markup the frontend renders specially, not
+    markdown).
+
+    Strips:
+    - Bold: ``**text**``, ``__text__``
+    - Italic: ``*text*``, ``_text_``
+    - Inline code: `` `text` ``
+    - Headers: ``# text``, ``## text`` (only at line start, with space)
+    - Blockquotes: ``> text`` (only at line start)
+    - Bullet lists: ``- text``, ``* text``, ``+ text`` (only at line start)
+    - Numbered lists: ``1. text``, ``2. text`` (only at line start)
+
+    Does NOT strip: lone asterisks/underscores in math/identifiers, em
+    dashes (those are handled by the dehyphenation step in clean_response),
+    or anything inside [VERSE]/[MANTRA] tags.
+    """
+    if not text:
+        return ""
+
+    # Protect structural tags so we don't strip markdown inside them.
+    # Different placeholder prefix from clean_response's dehyphen step
+    # so the two protection passes don't interfere if they're chained.
+    placeholders: list[str] = []
+
+    def _protect(match):
+        placeholders.append(match.group(0))
+        return f"\x00SM{len(placeholders) - 1}\x00"
+
+    text = re.sub(
+        r"\[(?:VERSE|MANTRA)\][\s\S]*?\[/(?:VERSE|MANTRA)\]",
+        _protect,
+        text,
+    )
+
+    # Inline emphasis. **bold** before *italic* so the bold pattern wins.
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    # *italic* — require non-word boundary on both sides so ``a*b`` (math)
+    # and ``*.py`` (glob) survive. The (?<!\s) on the inner edges avoids
+    # matching across whole sentences with stray asterisks.
+    text = re.sub(r"(?<!\w)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w)", r"\1", text)
+    text = re.sub(r"(?<!\w)_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)", r"\1", text)
+    # `inline code` → unwrap
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+
+    # Line-leading markers — remove the marker, keep the content.
+    text = re.sub(r"^[ \t]*#{1,6}[ \t]+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^[ \t]*>[ \t]+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^[ \t]*[-*+][ \t]+", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^[ \t]*\d+\.[ \t]+", "", text, flags=re.MULTILINE)
+
+    # Restore protected tag blocks.
+    for i, block in enumerate(placeholders):
+        text = text.replace(f"\x00SM{i}\x00", block)
+
+    return text
+
+
 def clean_response(text: str) -> str:
     """Remove trailing questions and clean formatting, especially from [VERSE] tags"""
     if not text:
@@ -62,8 +131,11 @@ def clean_response(text: str) -> str:
     # Simply return the text cleaned of whitespace initially
     text = text.strip()
 
-    # Markdown is now rendered by the frontend (react-markdown).
-    # Only clean markdown INSIDE [VERSE]/[MANTRA] tags (those are structural, not presentation).
+    # CLAUDE.md rule #2: no markdown in LLM responses. The prompt forbids
+    # it, but strip_markdown is the belt-and-braces enforcement so a
+    # prompt drift or LLM quirk never leaks bold/headers/lists to users.
+    # Tags ([VERSE]/[MANTRA]) are preserved by strip_markdown internally.
+    text = strip_markdown(text)
 
     # Robustly clean content inside [VERSE] tags to prevent markdown artifacts
     def clean_verse_content(match):
@@ -610,16 +682,36 @@ class LLMService:
         }
         phase = gen_config.pop("_phase", None)
         model = gen_config.pop("_model", settings.GEMINI_MODEL)
+        # Caller may pin a specific thinking budget (e.g. internal callers
+        # like the retrieval judge that genuinely benefit from reasoning).
+        # If absent, fall through to the global default in config.py.
+        thinking_budget_override = gen_config.pop("_thinking_budget", None)
         sys_instruction = self._get_system_instruction(phase)
         phase_key = "listening" if phase in (ConversationPhase.LISTENING, ConversationPhase.CLARIFICATION) else "full"
 
-        # Disable AFC and thinking — gemini-2.5 models default to thinking ON, adding 5-15s latency
+        # Disable AFC unconditionally — adds latency and we never use it.
         gen_config.pop("thinking_config", None)
         gen_config["automatic_function_calling"] = genai_types.AutomaticFunctionCallingConfig(disable=True)
-        # Cap thinking budget for gemini-2.5 models (default is unlimited, adding 10-15s)
-        # Budget 1024 gives reasoning ability while capping latency to ~1-2s extra
-        if "2.5" in model:
-            gen_config["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=1024)
+
+        # Thinking-mode policy.
+        #
+        # Gemini 2.5/3 models default to thinking ON, which (a) adds 5-15s of
+        # latency and (b) can leak chain-of-thought scratchpad into responses
+        # if the SDK part filtering misses a frame (we observed this in live
+        # E2E testing — see plan file C1). The default budget therefore comes
+        # from settings.LLM_THINKING_BUDGET_DEFAULT (default 0 = off) so the
+        # main conversational path never has scratchpad to leak. Internal
+        # callers that need reasoning can opt in via the ``_thinking_budget``
+        # gen_config kwarg.
+        budget = (
+            thinking_budget_override
+            if thinking_budget_override is not None
+            else settings.LLM_THINKING_BUDGET_DEFAULT
+        )
+        # Only set thinking_config on models that actually support it.
+        # gemini-2.5/3 family supports it; gemini-2.0-flash does not.
+        if budget > 0 and ("2.5" in model or "3-" in model or "3." in model):
+            gen_config["thinking_config"] = genai_types.ThinkingConfig(thinking_budget=budget)
 
         cache_name = self._get_or_create_cache(model, sys_instruction, phase_key)
         if cache_name:
@@ -826,9 +918,45 @@ class LLMService:
                     profile_parts.append(f"   • Turn {s['turn']}: You suggested {s['practice']}")
                 has_data = True
 
-            # Verse/mantra anti-repetition history (Layer 2 diversity)
+            # Products previously recommended in this session — surfaced so the
+            # LLM can answer follow-ups like "how do I use that mala?" with
+            # awareness of the actual item recommended. Added Apr 2026 because
+            # users were getting generic answers when referencing earlier
+            # product cards. Source: SessionState.recent_products (FIFO cap 5).
+            if user_profile.get('recent_products'):
+                recent_products = user_profile['recent_products']
+                profile_parts.append("\n   PRODUCTS YOU RECOMMENDED IN THIS SESSION:")
+                for p in recent_products[-5:]:
+                    name = p.get('name') or 'Unnamed product'
+                    category = p.get('category') or ''
+                    line = f"   • {name}"
+                    if category:
+                        line += f" ({category})"
+                    profile_parts.append(line)
+                profile_parts.append(
+                    "   If the user references one of these (e.g. 'that mala', "
+                    "'the diya you mentioned', 'how do I use it'), you know "
+                    "exactly which item they mean — answer specifically about it."
+                )
+                has_data = True
+
+            # Verse/mantra anti-repetition history (Layer 2 diversity).
+            # Wording is intentionally strong because Gemini's earlier
+            # "offer fresh alternatives" phrasing was treated as a soft hint
+            # and frequently ignored. The prohibition language below is
+            # paired with a per-entry FORBIDDEN marker to nudge the model
+            # toward picking from the broader 16-mantra approved list in the
+            # YAML prompt.
             if user_profile.get('suggested_verses'):
-                profile_parts.append("\n   PREVIOUSLY SUGGESTED (offer fresh alternatives — do NOT repeat):")
+                profile_parts.append(
+                    "\n   ===== MANTRAS / VERSES ALREADY GIVEN — DO NOT REPEAT ====="
+                )
+                profile_parts.append(
+                    "   You have already suggested the following in this conversation."
+                )
+                profile_parts.append(
+                    "   You MUST pick a DIFFERENT mantra or verse this turn:"
+                )
                 for entry in user_profile['suggested_verses'][-10:]:
                     parts = []
                     if entry.get("mantras"):
@@ -836,7 +964,13 @@ class LLMService:
                     if entry.get("references"):
                         parts.extend(entry["references"][:2])
                     if parts:
-                        profile_parts.append(f"   • Turn {entry.get('turn', '?')}: {' | '.join(parts)}")
+                        profile_parts.append(
+                            f"   ✗ Turn {entry.get('turn', '?')}: {' | '.join(parts)} (FORBIDDEN this turn)"
+                        )
+                profile_parts.append(
+                    "   If you catch yourself about to suggest one of the above, "
+                    "STOP and pick another mantra from the approved list."
+                )
                 has_data = True
 
             if has_data:
@@ -984,6 +1118,20 @@ class LLMService:
                 if len(original_text) < 5 and doc.get('text'):
                     original_text = doc.get('text')
 
+                # Defense against curated_concept docs that store the full
+                # 3,000+ char markdown document in their text/reference fields.
+                # Without this cap, Gemini regurgitates the markdown into the
+                # response — found Apr 2026 in a user screenshot showing
+                # "SOURCES: SANATAN SCRIPTURES SANATAN SCRIPTURES
+                # CURATED_CONCEPTS_GENERATED.## NANDI BULL SYMBOLISM..."
+                # leaking into the chat bubble. The real fix is data
+                # re-ingestion; this is the runtime guardrail.
+                if doc_type == "curated_concept":
+                    if original_text and len(original_text) > 400:
+                        original_text = original_text[:400].rstrip() + "…"
+                    if meaning and len(meaning) > 400:
+                        meaning = meaning[:400].rstrip() + "…"
+
                 # Type-aware label for LLM guidance
                 type_hints = {
                     "temple": "🏛️ TEMPLE REFERENCE — Use ONLY if user asked about pilgrimage, a specific temple, or nearby places to visit.",
@@ -996,7 +1144,12 @@ class LLMService:
                 scripture_context += f"Type: {doc_type.upper()} | {type_label}\n"
                 scripture_context += f"Source: {scripture}"
                 if reference:
-                    scripture_context += f" — {reference}"
+                    # Cap reference at 120 chars — real scripture refs are
+                    # under 60 chars (e.g. "Bhagavad Gita 2.47"), only the
+                    # curated_concepts entries have markdown bodies stuffed
+                    # into the field. Same Apr 2026 leak as above.
+                    _ref = reference if len(reference) <= 120 else reference[:120].rstrip() + "…"
+                    scripture_context += f" — {_ref}"
                 scripture_context += f"\n\nORIGINAL TEXT (Sanskrit/Hindi/Procedural): \"{original_text}\"\n"
 
                 if meaning:
@@ -1066,12 +1219,51 @@ CONTEXT & JOURNEY:
         _query_words = len(query.strip().split())
         _acceptance_words = {"ok", "okay", "sure", "fine", "sounds", "good", "thanks", "thank", "bye", "goodbye", "alright", "cool", "great", "perfect", "noted", "got"}
         _query_lower_words = set(query.strip().lower().split())
+
+        # Detect first emotional turn — the user's opening share of distress.
+        # On a first emotional message, the YAML prompt's adaptive-length
+        # guidance is too permissive and the model produces 150-250 word
+        # responses with verses + mantras + practices. The evaluation showed
+        # this overwhelms users who needed to feel heard first. Force a hard
+        # cap and explicitly forbid scripture/mantras on this turn.
+        _emotional_states = {
+            "grief", "anxiety", "anger", "fear", "despair",
+            "loneliness", "hopelessness", "shame",
+        }
+        _current_emotion = ""
+        if memory_context and memory_context.story:
+            _current_emotion = (memory_context.story.emotional_state or "").lower()
+        # User-turn count from history (assistant messages don't count toward
+        # the user's "first share").
+        _user_turns = sum(
+            1 for m in (conversation_history or []) if m.get("role") == "user"
+        )
+        _is_first_emotional_share = (
+            _current_emotion in _emotional_states
+            and _user_turns <= 1
+            and _query_words >= 10  # not a one-liner; the user is opening up
+        )
+
         if _query_words <= 4 and _query_lower_words & _acceptance_words:
             _length_hint = "LENGTH: The user's message is a brief acceptance or closing. Respond in 1-2 sentences only.\n"
         elif _query_words <= 3:
             _length_hint = "LENGTH: The user's message is very short. Keep your response to 1-3 sentences.\n"
+        elif _is_first_emotional_share:
+            _length_hint = (
+                "LENGTH: This is the user's FIRST emotional share in this session. "
+                "Respond in 2-3 short sentences (under 60 words total). Acknowledge "
+                "their pain specifically, then ask ONE gentle clarifying question. "
+                "Do NOT include any verse, mantra, scripture citation, or practice "
+                "prescription on this turn — just listen and be present. The depth "
+                "comes later, after they feel heard.\n"
+            )
         else:
             _length_hint = ""
+
+        # Programmatic language/script constraint — overrides Gemini's default
+        # mirror inference, which is unreliable when the system prompt contains
+        # heavy Hindi vocabulary. Computed from the actual user query script.
+        _language_constraint = get_language_constraint(query)
 
         # Context Budget Manager — trim variable sections if prompt is too large
         from services.context_budget import ContextBudgetManager
@@ -1120,6 +1312,7 @@ YOUR INSTRUCTIONS FOR THIS PHASE ({phase.value}):
 {phase_instructions}
 
 BEHAVIORAL CHECKS (apply before writing your response):
+- {_language_constraint}
 - SHORT ACKNOWLEDGMENT: If user's message is 1-3 words (ok, thanks, sure, fine, got it, sounds good) — respond with ONLY 1 warm sentence. NO verse, NO mantra, NO scripture, NO spiritual advice. Just acknowledge warmly.
 - REPETITION: If your last 2 responses already gave a mantra/practice/Gita reference and the user is STILL processing — ask a deeper question instead.
 - LISTENING PHASE: If phase is LISTENING and user is sharing pain — end with a QUESTION, not a practice.
@@ -1323,6 +1516,17 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     "without specific citations."
                 )
 
+            # Handle correction hints from ResponseValidator (regeneration path)
+            if effective_config and effective_config.get("correction_hints"):
+                hints = effective_config["correction_hints"] or []
+                effective_config = {k: v for k, v in effective_config.items() if k != "correction_hints"}
+                if hints:
+                    prompt += (
+                        "\n\nCRITICAL — your previous response failed validation. "
+                        "Regenerate the same answer addressing every point below:\n- "
+                        + "\n- ".join(hints)
+                    )
+
             _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
             gen_config = self._build_gen_config(_cfg or None)
 
@@ -1435,6 +1639,17 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     "If no suitable source exists, respond with general spiritual wisdom "
                     "without specific citations."
                 )
+
+            # Handle correction hints from ResponseValidator (regeneration path)
+            if effective_config and effective_config.get("correction_hints"):
+                hints = effective_config["correction_hints"] or []
+                effective_config = {k: v for k, v in effective_config.items() if k != "correction_hints"}
+                if hints:
+                    prompt += (
+                        "\n\nCRITICAL — your previous response failed validation. "
+                        "Regenerate the same answer addressing every point below:\n- "
+                        + "\n- ".join(hints)
+                    )
 
             _cfg = dict(effective_config or {}); _cfg["_phase"] = phase; _cfg["_model"] = active_model
             gen_config = self._build_gen_config(_cfg or None)

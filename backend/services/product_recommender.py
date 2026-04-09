@@ -307,7 +307,6 @@ class ProductRecommender:
             products = await self.product_service.search_products(
                 search_query, life_domain=life_domain,
                 emotion=emotion, deity=deity,
-                allow_category_fallback=False,
             )
 
         if products:
@@ -380,7 +379,6 @@ class ProductRecommender:
                     " ".join(keywords[:6]), life_domain=life_domain,
                     emotion=(analysis.get("emotion", "") if analysis else ""),
                     deity=self._get_conversation_deity(session, analysis),
-                    allow_category_fallback=False,
                 )
                 if products:
                     session.last_proactive_product_turn = session.turn_count
@@ -416,7 +414,6 @@ class ProductRecommender:
                         " ".join(context_terms[:6]), life_domain=life_domain,
                         emotion=analysis.get("emotion", ""),
                         deity=self._get_conversation_deity(session, analysis),
-                        allow_category_fallback=False,
                     )
                     if products:
                         session.last_proactive_product_turn = session.turn_count
@@ -637,6 +634,29 @@ class ProductRecommender:
         return [p for p in products if p.get("_id") not in session.shown_product_ids]
 
     def _record_shown(self, session, products):
+        """Record products as shown in this session.
+
+        Maintains two parallel structures:
+          * ``shown_product_ids`` (Set[str]) — fast O(1) dedupe gate for
+            ``_filter_shown``.
+          * ``recent_products`` (List[Dict]) — FIFO of last 5 products with
+            name + category metadata, surfaced to the LLM via the user
+            profile so follow-up questions like "how do I use that mala?"
+            land on the actual recommended item. Added Apr 2026.
+        """
         for p in products:
-            if p.get("_id"):
-                session.shown_product_ids.add(p["_id"])
+            pid = p.get("_id")
+            if not pid:
+                continue
+            session.shown_product_ids.add(pid)
+            # Skip if already in recent_products (within-batch + cross-turn dedupe).
+            if any(rp.get("_id") == pid for rp in session.recent_products):
+                continue
+            session.recent_products.append({
+                "_id": pid,
+                "name": p.get("name", ""),
+                "category": p.get("category", ""),
+            })
+        # FIFO cap — keep only the last 5 products visible to the LLM.
+        if len(session.recent_products) > 5:
+            session.recent_products = session.recent_products[-5:]

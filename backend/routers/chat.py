@@ -527,6 +527,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             past_memories=past_memories,
             model_override=route_model,
             config_override=route_config,
+            session=session,
         )
 
         # Grounding verification — regenerate if response cites non-existent sources.
@@ -565,6 +566,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                     past_memories=past_memories,
                     model_override=route_model,
                     config_override=grounding_config,
+                    session=session,
                 )
 
         response_text = await _postprocess_and_save(
@@ -699,6 +701,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     past_memories=meta.get("past_memories", []),
                     model_override=meta.get("model_override"),
                     config_override=meta.get("config_override"),
+                    session=session,
                 ):
                     full_text_parts.append(token)
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"

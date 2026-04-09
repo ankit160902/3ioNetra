@@ -85,6 +85,7 @@ def _load_product_service():
     mock_config = types.ModuleType("config")
     mock_config.settings = MagicMock()
     mock_config.settings.PRODUCT_MIN_RELEVANCE_SCORE = 15.0
+    mock_config.settings.PRODUCT_RELEVANCE_GAP_RATIO = 0.55
 
     mock_auth = types.ModuleType("services.auth_service")
     mock_auth.get_mongo_client = MagicMock(return_value=None)
@@ -193,3 +194,111 @@ async def test_get_recommended_products_fallback():
     assert len(result) == 1
     assert result[0]["name"] == "Default"
     assert call_count[0] == 2  # Primary + fallback
+
+
+# ---------------------------------------------------------------------------
+# Relevance-gap policy — Apr 2026 fix for "always returns 3 padded products"
+# ---------------------------------------------------------------------------
+# These tests lock in the structural fix: instead of fixed N or a category
+# fallback that fills slots regardless of relevance, the recommender returns
+# only products within PRODUCT_RELEVANCE_GAP_RATIO of the top item's score.
+# Tests focus on search_by_metadata where _metadata_score is fully
+# controllable via the mocked products. search_products is exercised via
+# the integration test below.
+
+
+async def test_search_by_metadata_drops_weak_runners_below_gap_floor():
+    """Top product scores high; runners-up score below gap_floor → only top returned.
+
+    With PRODUCT_RELEVANCE_GAP_RATIO=0.55:
+      practice match = 3, deity match = 3, life_domain match = 2
+      Product A: practice + deity → metadata_score = 6
+      Product B: deity only → metadata_score = 3
+      Product C: life_domain only → metadata_score = 2 (filtered by MIN_METADATA_SCORE=3)
+
+      After MIN_METADATA_SCORE filter: [A=6, B=3]
+      gap_floor = 6 * 0.55 = 3.3
+      A passes (6 ≥ 3.3); B fails (3 < 3.3) → only A returned.
+    """
+    ProductService = _load_product_service()
+    svc = ProductService.__new__(ProductService)
+    mock_coll = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.limit.return_value = iter([
+        {"_id": "a", "name": "Top Match", "is_active": True,
+         "practices": ["japa"], "deities": ["shiva"], "life_domains": [], "emotions": [], "benefits": []},
+        {"_id": "b", "name": "Weak Match", "is_active": True,
+         "practices": [], "deities": ["shiva"], "life_domains": [], "emotions": [], "benefits": []},
+        {"_id": "c", "name": "Below MIN", "is_active": True,
+         "practices": [], "deities": [], "life_domains": ["career"], "emotions": [], "benefits": []},
+    ])
+    mock_coll.find.return_value = mock_cursor
+    svc.collection = mock_coll
+
+    result = await svc.search_by_metadata(
+        practices=["japa"],
+        deities=["shiva"],
+        life_domains=["career"],
+        limit=5,
+    )
+    assert len(result) == 1
+    assert result[0]["name"] == "Top Match"
+
+
+async def test_search_by_metadata_keeps_full_cluster_when_scores_close():
+    """Tight cluster of strong matches → all pass the gap floor.
+
+    All four products score practice+deity = 6. gap_floor = 6 * 0.55 = 3.3.
+    All four pass (6 ≥ 3.3) → all four returned.
+    """
+    ProductService = _load_product_service()
+    svc = ProductService.__new__(ProductService)
+    mock_coll = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.limit.return_value = iter([
+        {"_id": str(i), "name": f"Mala {i}", "is_active": True,
+         "practices": ["japa"], "deities": ["shiva"], "life_domains": [], "emotions": [], "benefits": []}
+        for i in range(4)
+    ])
+    mock_coll.find.return_value = mock_cursor
+    svc.collection = mock_coll
+
+    result = await svc.search_by_metadata(
+        practices=["japa"],
+        deities=["shiva"],
+        limit=5,
+    )
+    assert len(result) == 4
+    assert {p["name"] for p in result} == {"Mala 0", "Mala 1", "Mala 2", "Mala 3"}
+
+
+async def test_search_by_metadata_returns_empty_when_no_pool():
+    """Empty product pool → []. No padding, no fallback to a different query."""
+    ProductService = _load_product_service()
+    svc = ProductService.__new__(ProductService)
+    mock_coll = MagicMock()
+    mock_cursor = MagicMock()
+    mock_cursor.limit.return_value = iter([])
+    mock_coll.find.return_value = mock_cursor
+    svc.collection = mock_coll
+
+    result = await svc.search_by_metadata(
+        practices=["japa"],
+        limit=5,
+    )
+    assert result == []
+
+
+def test_search_products_signature_drops_allow_category_fallback():
+    """The dead allow_category_fallback parameter must be removed from the
+    signature — it's the marker that the structural fix landed. If a future
+    refactor reintroduces the slot-filling fallback under a different name,
+    this test won't catch it, but it locks in that the dead param is gone."""
+    import inspect
+    ProductService = _load_product_service()
+    sig = inspect.signature(ProductService.search_products)
+    assert "allow_category_fallback" not in sig.parameters, (
+        "allow_category_fallback was the param that toggled the now-removed "
+        "category-fill fallback. It must stay removed — the relevance-gap "
+        "policy is the single source of truth for 'how many products to return'."
+    )

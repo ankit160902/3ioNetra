@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Send, Loader2, RefreshCw, LogOut, User, History, ChevronDown, ChevronUp, BookOpen, Activity, ThumbsUp, ThumbsDown, Moon, Sun, Copy, Check, ShoppingBag, ExternalLink, X, Search, ArrowDown } from 'lucide-react';
 import Head from 'next/head';
 import { useSession, Citation, SourceReference, FlowMetadata, UserProfile, Product, AuthExpiredError } from '../hooks/useSession';
-import { PhaseIndicatorCompact } from '../components/PhaseIndicator';
 import { useAuth } from '../hooks/useAuth';
 import dynamic from 'next/dynamic';
 const LoginPage = dynamic(() => import('../components/LoginPage'), { ssr: false });
@@ -764,10 +763,6 @@ export default function Home() {
           </header>
 
           <div className="flex-1 relative overflow-hidden flex flex-col">
-            {useConversationFlow && session.sessionId && (
-              <PhaseIndicatorCompact phase={session.phase} />
-            )}
-
             <div ref={scrollContainerRef} className="flex-1 overflow-y-auto pt-4 pb-32 scroll-smooth scrollbar-hide">
               <div className="max-w-4xl mx-auto px-5">
                 {messages.length === 0 ? (

@@ -96,11 +96,24 @@ class SessionState:
     # Session-level dedup: tracks which product IDs have been shown
     shown_product_ids: Set[str] = field(default_factory=set)
 
+    # Last 5 products recommended this session — surfaced to the LLM so it
+    # can answer follow-ups like "how do I use that mala?" with awareness
+    # of the actual item that was suggested. FIFO capped at 5 in
+    # ProductRecommender._record_shown. See profile_builder and
+    # llm.service._build_prompt for the consumer side.
+    recent_products: List[Dict[str, Any]] = field(default_factory=list)
+
     # Product recommendation throttling
     product_event_count: int = 0            # Proactive product events this session
     product_rejection_turn: int = -1        # Turn when user last rejected products
     product_rejection_count: int = 0        # Total rejections
     user_dismissed_products: bool = False   # Hard kill: user said "stop products"
+
+    # Crisis progression — incremented every time the user trips a safety
+    # gate. Used by services.crisis_response_composer to choose a different
+    # response variant on consecutive crisis turns so the bot does not
+    # return a byte-identical canned reply across turns.
+    crisis_turn_count: int = 0
 
     # Why the phase transition happened — injected into LLM phase prompt
     readiness_trigger: str = "listening"
@@ -131,6 +144,7 @@ class SessionState:
             "is_returning_user": self.is_returning_user,
             "last_proactive_product_turn": self.last_proactive_product_turn,
             "shown_product_ids": list(self.shown_product_ids),
+            "recent_products": self.recent_products,
             "product_event_count": self.product_event_count,
             "product_rejection_turn": self.product_rejection_turn,
             "product_rejection_count": self.product_rejection_count,
@@ -167,6 +181,7 @@ class SessionState:
             is_returning_user=data.get("is_returning_user", False),
             last_proactive_product_turn=data.get("last_proactive_product_turn", -1),
             shown_product_ids=set(data.get("shown_product_ids", [])),
+            recent_products=data.get("recent_products", []),
             product_event_count=data.get("product_event_count", 0),
             product_rejection_turn=data.get("product_rejection_turn", -1),
             product_rejection_count=data.get("product_rejection_count", 0),

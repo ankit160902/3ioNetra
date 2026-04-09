@@ -140,6 +140,16 @@ class ProductService:
                 MIN_METADATA_SCORE = 3
                 results = [r for r in results if r.get("_metadata_score", 0) >= MIN_METADATA_SCORE]
 
+                # Relevance-gap policy: drop anything scoring less than
+                # PRODUCT_RELEVANCE_GAP_RATIO of the top item. Same policy as
+                # search_products — single source of truth for "what does
+                # relevant mean?". Apr 2026 fix to stop padding weak slots.
+                if results:
+                    top_meta_score = results[0].get("_metadata_score", 0)
+                    if top_meta_score > 0:
+                        gap_floor = top_meta_score * settings.PRODUCT_RELEVANCE_GAP_RATIO
+                        results = [r for r in results if r.get("_metadata_score", 0) >= gap_floor]
+
                 # Deduplicate by name
                 seen_names = set()
                 deduped = []
@@ -159,9 +169,15 @@ class ProductService:
             return []
 
     async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
-                              emotion: str = "", deity: str = "",
-                              allow_category_fallback: bool = True) -> List[Dict[str, Any]]:
-        """Search products by text (for explicit user queries). Uses MongoDB $text search."""
+                              emotion: str = "", deity: str = "") -> List[Dict[str, Any]]:
+        """Search products by text (for explicit user queries). Uses MongoDB $text search.
+
+        Returns up to ``limit`` products that pass the relevance-gap policy
+        (see PRODUCT_RELEVANCE_GAP_RATIO in config). May return fewer than
+        ``limit`` if only some products are strongly relevant — this is
+        intentional, replacing the old "fill the slots" fallback that was
+        padding results with weakly-related items.
+        """
         import re
         # Tokenize and clean
         tokens = re.findall(r'\w+', query_text.lower())
@@ -396,46 +412,27 @@ class ProductService:
             if len(diverse) >= limit:
                 break
 
-        # Domain-level fallback: fill remaining slots from life_domain-tagged products
-        # Uses enriched life_domains field instead of hardcoded category map
-        if allow_category_fallback and len(diverse) < limit and life_domain:
-            if self.collection is not None:
-                existing_names = {p.get("name") for p in diverse}
-                # Query by enriched life_domains field
-                cat_query = {
-                    "is_active": True,
-                    "life_domains": life_domain.lower(),
-                }
-                try:
-                    def _cat_search():
-                        results = []
-                        for doc in self.collection.find(cat_query).limit(limit * 3):
-                            doc = self._serialize_doc(doc)
-                            if doc.get("name") not in existing_names:
-                                results.append(doc)
-                        return results
-                    fallback_pool = await asyncio.to_thread(_cat_search)
-                except Exception as e:
-                    logger.warning(f"Category fallback query failed: {e}")
-                    fallback_pool = []
+        # Relevance-gap policy: only return products within
+        # PRODUCT_RELEVANCE_GAP_RATIO of the top-scoring item. If product #1
+        # scores 95 and #2 scores 18, only #1 is returned. Replaces the
+        # previous "fill remaining slots from a different life-domain query"
+        # fallback that was padding results with weakly-related items —
+        # found Apr 2026 when users reported "always 3 products even when
+        # only 1 is relevant".
+        #
+        # Why this is the right shape:
+        #   * Self-correcting: a tight cluster of strong matches returns up
+        #     to `limit` items; a lone winner returns 1.
+        #   * Single source of truth: the same gap policy lives on
+        #     search_by_metadata, so both paths have identical semantics.
+        #   * One config knob (PRODUCT_RELEVANCE_GAP_RATIO).
+        if not diverse:
+            return []
 
-                # Score and sort fallback products
-                fallback_pool.sort(key=calculate_score, reverse=True)
-
-                for p in fallback_pool:
-                    if len(diverse) >= limit:
-                        break
-                    if p["name"] in seen_names:
-                        continue
-                    name_words = re.findall(r'[a-zA-Z]+', p.get("name", "").lower())
-                    pattern_key = " ".join(name_words[:2]) if len(name_words) >= 2 else p.get("name", "").lower()
-                    count = pattern_counts.get(pattern_key, 0)
-                    if count < max_per_pattern:
-                        diverse.append(p)
-                        seen_names.add(p["name"])
-                        pattern_counts[pattern_key] = count + 1
-
-        return diverse[:limit]
+        top_score = calculate_score(diverse[0])
+        relevance_floor = max(min_score, top_score * settings.PRODUCT_RELEVANCE_GAP_RATIO)
+        gap_filtered = [p for p in diverse if calculate_score(p) >= relevance_floor]
+        return gap_filtered[:limit]
 
     async def get_recommended_products(self, category: Optional[str] = None, limit: int = 4) -> List[Dict[str, Any]]:
         """Get recommended products, optionally filtered by category"""

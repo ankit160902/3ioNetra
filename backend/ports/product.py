@@ -13,7 +13,6 @@ class ProductPort(Protocol):
         limit: int = 5,
         emotion: str = "",
         deity: str = "",
-        allow_category_fallback: bool = True,
     ) -> List[Dict[str, Any]]: ...
 
     async def get_recommended_products(
