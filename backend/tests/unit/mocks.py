@@ -174,6 +174,15 @@ class MockProduct:
         self.search_count += 1
         return self._products[:limit]
 
+    async def search_by_metadata(
+        self,
+        practices=None, deities=None, emotions=None,
+        life_domains=None, product_type=None, benefits=None,
+        limit: int = 5,
+    ) -> List[Dict[str, Any]]:
+        self.search_count += 1
+        return self._products[:limit]
+
     async def get_recommended_products(
         self,
         category: Optional[str] = None,

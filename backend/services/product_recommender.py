@@ -105,40 +105,16 @@ _DEITY_NAMES = {
     "naag", "murugan", "bajrang", "mahadev", "parvati", "sita",
 }
 
-# Intents that never get proactive products (ASKING_INFO removed — "what should I get?" needs products)
-# Intents where the proactive-inference path (Path 3 in `recommend()`)
-# should NEVER fire. Without this, every guidance-phase response would
-# return 3-5 product cards even when the user asked an educational
-# question, requested today's panchang, vented emotionally, or just said
-# thank you. Found Apr 9 2026 in a real-user screenshot — the bot was
-# acting like a shopping kiosk wrapped in a spiritual companion.
+# Apr 2026 — Adaptive architecture: the two frozensets
+# (_SKIP_PROACTIVE_INTENTS, _NO_PRODUCT_INTENTS) and the proactive
+# inference Path 3 have been REMOVED. The IntentAgent's
+# `recommend_products` boolean is now the SINGLE authority for whether
+# products should be recommended. The IntentAgent sees the full
+# conversation context (emotion, intent, message content) and makes a
+# contextual decision — no hardcoded overrides needed.
 #
-# `PRODUCT_SEARCH` is NOT in this set: explicit shopping requests still
-# go through Path 1 of recommend(), which bypasses all gates.
-# `SEEKING_GUIDANCE` is NOT in this set either: it has its own finer-
-# grained gate at lines ~155-164 that requires either an `item` or
-# `ritual` entity to fire products.
-_SKIP_PROACTIVE_INTENTS = frozenset({
-    IntentType.GREETING,
-    IntentType.CLOSURE,
-    IntentType.ASKING_PANCHANG,
-    IntentType.ASKING_INFO,
-    IntentType.EXPRESSING_EMOTION,
-    IntentType.OTHER,
-})
-
-# Intents where the IntentAgent's `recommend_products=True` flag should
-# be overridden to False. Same set as above for symmetry — if proactive
-# inference is forbidden, the LLM-recommended path should also respect
-# the same boundary.
-_NO_PRODUCT_INTENTS = frozenset({
-    IntentType.GREETING,
-    IntentType.CLOSURE,
-    IntentType.ASKING_PANCHANG,
-    IntentType.ASKING_INFO,
-    IntentType.EXPRESSING_EMOTION,
-    IntentType.OTHER,
-})
+# Path 1 (explicit PRODUCT_SEARCH) and Path 2 (IntentAgent-recommended)
+# are the only product paths that remain.
 
 
 class ProductRecommender:
@@ -151,7 +127,6 @@ class ProductRecommender:
     def __init__(self, product_service, panchang_service=None):
         self.product_service = product_service
         self.panchang_service = panchang_service
-        self._suppress_emotion_set = frozenset(settings.PRODUCT_SUPPRESS_EMOTIONS.split(","))
 
     # ------------------------------------------------------------------
     # Public API
@@ -180,39 +155,25 @@ class ProductRecommender:
         )
         recommend_from_intent = analysis.get("recommend_products", False)
 
-        # Guard: override LLM hallucination for non-product intents
-        if recommend_from_intent and (
-            intent in _NO_PRODUCT_INTENTS
-            or "Verse Request" in turn_topics
-            or (intent == IntentType.SEEKING_GUIDANCE
-                and (analysis.get("life_domain") or "").lower() == "spiritual"
-                and not analysis.get("entities", {}).get("item")
-                and not analysis.get("entities", {}).get("ritual"))
-        ):
-            logger.info(f"Product guard: overriding recommend_products=True for intent={intent}")
-            recommend_from_intent = False
-
         products = []
 
         # Path 1: Explicit user request — bypasses all gates except crisis
         if is_explicit:
             products = await self._search_explicit(session, message, analysis, life_domain)
 
-        # Path 2: Intent agent says recommend — gated
+        # Path 2: IntentAgent says recommend — the IntentAgent sees the full
+        # conversation context (emotion, intent, message) and decides
+        # contextually. No hardcoded intent/emotion overrides.
         elif recommend_from_intent:
             products = await self._search_intent_recommended(session, analysis, life_domain)
 
-        # Path 3: Proactive inference — fully gated
-        if not products and intent not in _SKIP_PROACTIVE_INTENTS and "Verse Request" not in turn_topics:
-            products = await self._infer_proactive(
-                session, message, life_domain, analysis,
-                is_guidance_phase=is_ready_for_wisdom,
-            )
+        # Path 3 (proactive inference) REMOVED — Apr 2026 adaptive architecture.
+        # The IntentAgent's recommend_products boolean is the single authority.
+        # Proactive keyword-scanning was the source of most product spam.
 
-        # Post-processing: filter + record
+        # Post-processing: filter already-shown + record
         if products:
-            if not is_explicit and not recommend_from_intent:
-                products = self._filter_shown(session, products)
+            products = self._filter_shown(session, products)
             self._record_shown(session, products)
 
         return products
@@ -426,44 +387,24 @@ class ProductRecommender:
     # ------------------------------------------------------------------
 
     def _should_suppress(self, session, analysis=None, is_explicit_request=False) -> bool:
-        """Central product gatekeeper — returns True to block.
+        """Minimal product gatekeeper — returns True to block.
 
-        Gates evaluated in order:
-        1. Crisis urgency → always block (even explicit requests)
+        Apr 2026 adaptive architecture: most gates removed. The IntentAgent's
+        `recommend_products` boolean is the contextual authority for whether
+        products are appropriate. This function only checks the things the
+        IntentAgent can't see:
+        1. Crisis urgency → always block (safety, non-negotiable)
         2. Explicit user request → bypass remaining gates
-        3. High-urgency emotional expression → block (catches mislabelled
-           "neutral" emotion when urgency was correctly tagged high)
-        4. Current-turn emotion in suppress set → block
-        5. Session-level user dismissal / rejection / cooldowns → block
+        3. Hard user dismissal ("stop suggesting products") → respect it
+        4. Session cap → cost/UX guard (max 3 product events per session)
         """
         if analysis and analysis.get("urgency") == "crisis":
             return True
         if is_explicit_request:
             return False
-        # Defense in depth: high-urgency emotional expressions sometimes get
-        # an emotion field of "neutral" when the LLM is uncertain. Trust the
-        # urgency tag in that case.
-        if analysis:
-            urgency = (analysis.get("urgency") or "").lower()
-            intent = analysis.get("intent")
-            if urgency == "high" and intent == IntentType.EXPRESSING_EMOTION:
-                return True
-        current_emotion = (analysis.get("emotion", "") if analysis else "").lower()
-        if current_emotion in self._suppress_emotion_set:
-            return True
         if session.user_dismissed_products:
             return True
-        if session.product_rejection_count >= 2:
-            return True
-        if session.product_rejection_turn >= 0:
-            if (session.turn_count - session.product_rejection_turn) < settings.PRODUCT_COOLDOWN_AFTER_REJECTION:
-                return True
         if session.product_event_count >= settings.PRODUCT_SESSION_CAP:
-            return True
-        if session.last_proactive_product_turn >= 0:
-            if (session.turn_count - session.last_proactive_product_turn) < settings.PRODUCT_COOLDOWN_TURNS:
-                return True
-        if session.turn_count < settings.PRODUCT_MIN_TURN_FOR_PROACTIVE:
             return True
         return False
 

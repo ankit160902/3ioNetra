@@ -355,6 +355,32 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
     # injection attempts should never be evaluated as a crisis pattern match.
     is_injection, injection_response = safety_validator.check_prompt_injection(query.message)
 
+    # Apr 2026 adaptive architecture: check for de-escalation BEFORE
+    # running check_crisis_signals. The crisis detector scans the entire
+    # conversation history for keywords — so a past crisis message (T2)
+    # will re-trigger crisis on every subsequent turn. The de-escalation
+    # check intercepts this: if the user has already triggered crisis AND
+    # the current message is a de-escalation, skip crisis detection and
+    # resume normal flow.
+    if session.crisis_turn_count > 0 and safety_validator.is_de_escalation(query.message):
+        logger.info(
+            f"Crisis de-escalation detected (session={session.session_id}, "
+            f"crisis_turns={session.crisis_turn_count}): resuming normal flow"
+        )
+        session.crisis_turn_count = 0
+        session.crisis_resolved = True  # Tells check_crisis_signals to skip history scan
+        # Clear the despair emotion signal so downstream LLM doesn't see
+        # "emotional_state: despair" and inject helpline info into normal responses.
+        if SignalType.EMOTION in session.signals_collected:
+            del session.signals_collected[SignalType.EMOTION]
+        if SignalType.SEVERITY in session.signals_collected:
+            del session.signals_collected[SignalType.SEVERITY]
+        # Still populate user context and proceed normally
+        await _populate_session_with_user_context(session, user, query.user_profile)
+        session.add_message('user', query.message)
+        await session_manager.update_session(session)
+        return session, False, ""
+
     # Parallelize: user context population and crisis check are independent
     _, (is_crisis, crisis_response) = await asyncio.gather(
         _populate_session_with_user_context(session, user, query.user_profile),
@@ -372,13 +398,8 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
     if is_crisis:
         session.add_message('user', query.message)
         # Populate emotion signal for crisis — IntentAgent is skipped in crisis path
-        from models.session import Signal
+        from models.session import Signal  # Signal not at top-level; import here
         session.signals_collected[SignalType.EMOTION] = Signal(signal_type=SignalType.EMOTION, value='despair')
-        # Replace the canned safety_validator template with the
-        # CrisisResponseComposer's progression-aware response. This is the
-        # single point at which the crisis text is generated for the API
-        # response — safety_validator.check_crisis_signals is now used
-        # purely as a detector.
         crisis_response = get_crisis_response_composer().compose(session, query.message)
         session.add_message('assistant', crisis_response)
         await session_manager.update_session(session)
@@ -573,13 +594,10 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             response_text, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=True
         )
 
-        # Post-generation product inference: if LLM mentioned items but no products were pre-recommended
-        if not recommended_products:
-            _analysis = {"emotion": session.memory.story.emotional_state or "", "life_domain": session.memory.story.life_area or ""}
-            recommended_products = await companion_engine.product_recommender.infer_from_response(
-                session, response_text, _analysis,
-                life_domain=(session.memory.story.life_area or "unknown"),
-            )
+        # Post-generation product inference REMOVED (Apr 2026 adaptive
+        # architecture). The IntentAgent's recommend_products boolean is
+        # the single authority. Scanning the LLM response for product
+        # opportunities after the fact was the source of most product spam.
 
         _elapsed = (time.perf_counter() - _t_start) * 1000
         logger.info(f"REQUEST_END | cid={cid} | phase=guidance | {_elapsed:.0f}ms | turn={session.turn_count}")
@@ -600,13 +618,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             companion_response, session, query.message, safety_validator, session_manager, companion_engine, is_guidance=False
         ))
 
-        # Post-generation product inference for listening path too
-        if not recommended_products:
-            _analysis = {"emotion": session.memory.story.emotional_state or "", "life_domain": session.memory.story.life_area or ""}
-            recommended_products = await companion_engine.product_recommender.infer_from_response(
-                session, companion_response, _analysis,
-                life_domain=(session.memory.story.life_area or "unknown"),
-            )
+        # Post-generation product inference REMOVED (Apr 2026 — see guidance path comment).
 
         _elapsed = (time.perf_counter() - _t_start) * 1000
         logger.info(f"REQUEST_END | cid={cid} | phase={active_phase.value} | {_elapsed:.0f}ms | turn={session.turn_count}")
@@ -669,6 +681,18 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                 session, query, rag_pipeline, companion_engine, streaming=True
             )
             yield ": keepalive\n\n"  # Flush after RAG — prevents timeout during search
+
+            # LLM-based crisis short-circuit — IntentAgent detected urgency=crisis
+            # (catches typos/misspellings that keyword check missed).
+            if meta.get("crisis_response"):
+                crisis_text = meta["crisis_response"]
+                yield f"event: metadata\ndata: {json.dumps({'session_id': session.session_id, 'phase': 'listening', 'turn_count': session.turn_count, 'signals_collected': session.get_signals_summary()})}\n\n"
+                yield f"event: token\ndata: {json.dumps({'text': crisis_text})}\n\n"
+                session.add_message('assistant', crisis_text)
+                await session_manager.update_session(session)
+                flow_meta = {'detected_domain': None, 'emotional_state': 'despair', 'topics': meta.get('turn_topics', []), 'readiness_score': 0}
+                yield f"event: done\ndata: {json.dumps({'full_response': crisis_text, 'recommended_products': [], 'flow_metadata': flow_meta})}\n\n"
+                return
 
             is_ready = meta["is_ready_for_wisdom"]
             turn_topics = meta["turn_topics"]

@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # validator check (length, hollow phrase, scratchpad leak, etc.). Hard
     # backstop, not a target. After this many retries the last response is
     # returned with a logged metric.
-    LLM_REGENERATION_RETRIES: int = 1
+    LLM_REGENERATION_RETRIES: int = 2  # Apr 2026: bumped from 1 to give 2 chances to avoid hollow phrases after HIGH-severity detection
 
     # Token budget ceilings (used by TokenBudgetCalculator — adaptive system)
     TOKEN_CEILING_BRIEF: int = 512       # greetings, closures
@@ -217,16 +217,15 @@ class Settings(BaseSettings):
     PRODUCT_COOLDOWN_AFTER_REJECTION: int = 10      # Cooldown turns after user rejects products
     PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 2         # Allow products from turn 2 (not the very first message)
     # Emotions where product recommendations are suppressed entirely.
-    # Showing a "buy this rudraksha" card to a user who is grieving, anxious,
-    # or angry undermines trust — the moment calls for presence, not commerce.
-    # Explicit user requests (PRODUCT_SEARCH intent, "Product Inquiry" topic)
-    # bypass this suppression because the user has unambiguously asked.
-    PRODUCT_SUPPRESS_EMOTIONS: str = (
-        "grief,despair,hopelessness,crisis,shame,"
-        "anger,anxiety,fear,panic,loneliness,guilt,humiliation,trauma,sadness"
-    )
-    PRODUCT_GUIDANCE_CONTEXT_ENABLED: bool = True   # Allow context-based products in guidance phase
-    PRODUCT_LISTENING_PROACTIVE_ENABLED: bool = False  # Disable proactive products in listening phase
+    # PRODUCT_SUPPRESS_EMOTIONS REMOVED (Apr 2026 adaptive architecture).
+    # The IntentAgent's `recommend_products` boolean now makes the contextual
+    # decision about whether products are appropriate — it sees the emotion,
+    # intent, and full message. The hardcoded emotion list was over-blocking
+    # (e.g. "I'm anxious about my puja, what items do I need?" was blocked).
+    # Crisis-level blocking remains in _should_suppress (safety, non-negotiable).
+    #
+    # PRODUCT_GUIDANCE_CONTEXT_ENABLED and PRODUCT_LISTENING_PROACTIVE_ENABLED
+    # also removed — they gated Path 3 (proactive inference) which is deleted.
     PRODUCT_MIN_RELEVANCE_SCORE: float = 15.0         # Min combined score to include a product (15 ≈ one name keyword match)
     PRODUCT_RELEVANCE_GAP_RATIO: float = 0.55         # A product must score at least N% of the top item's score
     # The gap ratio is the structural fix for "always returns 3 padded products."

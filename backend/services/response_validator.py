@@ -210,13 +210,19 @@ def check_length(text: str, *, min_words: int, max_words: int) -> CheckResult:
     """
     wc = _word_count(text)
     if wc > max_words:
+        # Apr 2026: downgraded from HIGH → LOW. The LLM self-regulates
+        # length via the ADAPTIVE LENGTH prompt instruction. This check
+        # is now observational (logged for metrics, never blocks or
+        # triggers regen). The hard token budget in TokenBudgetCalculator
+        # is the cost safety net; word-count gating was truncating
+        # legitimate detailed responses (itineraries, step-by-step guides).
         return CheckResult(
             name="length",
             passed=False,
-            severity=Severity.HIGH,
+            severity=Severity.LOW,
             reason=(
-                f"Response is {wc} words; ceiling is {max_words}. "
-                f"Rewrite the same content in under {max_words} words."
+                f"Response is {wc} words; soft ceiling is {max_words}. "
+                f"(Observational only — not blocking.)"
             ),
         )
     if wc < min_words:
@@ -244,10 +250,14 @@ def check_hollow_phrases(text: str) -> CheckResult:
     low = text.lower()
     hits = [p for p in HOLLOW_PHRASES if p in low]
     if hits:
+        # Apr 2026: elevated from MEDIUM → HIGH. At MEDIUM severity Gemini
+        # sometimes ignored the regen hint and kept the phrase. HIGH
+        # triggers a hard regen with corrective instructions, which the
+        # existing _validate_and_repair loop handles automatically.
         return CheckResult(
             name="hollow_phrases",
             passed=False,
-            severity=Severity.MEDIUM,
+            severity=Severity.HIGH,
             reason=(
                 "Response uses banned hollow phrase(s): " + ", ".join(repr(h) for h in hits)
                 + ". Rewrite without these — be specific about what you observe."

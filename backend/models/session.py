@@ -114,6 +114,7 @@ class SessionState:
     # response variant on consecutive crisis turns so the bot does not
     # return a byte-identical canned reply across turns.
     crisis_turn_count: int = 0
+    crisis_resolved: bool = False  # Set True after de-escalation; tells check_crisis_signals to skip history scan
 
     # Why the phase transition happened — injected into LLM phase prompt
     readiness_trigger: str = "listening"
@@ -149,6 +150,8 @@ class SessionState:
             "product_rejection_turn": self.product_rejection_turn,
             "product_rejection_count": self.product_rejection_count,
             "user_dismissed_products": self.user_dismissed_products,
+            "crisis_turn_count": self.crisis_turn_count,
+            "crisis_resolved": self.crisis_resolved,
             "last_suggestions": self.last_suggestions,
             "readiness_trigger": self.readiness_trigger,
             "memory": self.memory.to_dict() if self.memory else None
@@ -186,6 +189,8 @@ class SessionState:
             product_rejection_turn=data.get("product_rejection_turn", -1),
             product_rejection_count=data.get("product_rejection_count", 0),
             user_dismissed_products=data.get("user_dismissed_products", False),
+            crisis_turn_count=data.get("crisis_turn_count", 0),
+            crisis_resolved=data.get("crisis_resolved", False),
             last_suggestions=data.get("last_suggestions", []),
             readiness_trigger=data.get("readiness_trigger", "listening"),
             memory=ConversationMemory.from_dict(data.get("memory", {}))

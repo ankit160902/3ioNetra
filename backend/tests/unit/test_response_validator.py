@@ -73,13 +73,14 @@ class TestLengthCheck:
         result = check_length(text, min_words=20, max_words=100)
         assert result.passed
 
-    def test_too_long_fails_high(self):
+    def test_too_long_is_observational(self):
+        """Apr 2026: length check is now LOW severity (observational only).
+        It still detects over-length but doesn't block or trigger regen."""
         text = " ".join(["word"] * 250)
         result = check_length(text, min_words=20, max_words=100)
         assert not result.passed
-        assert result.severity == Severity.HIGH
+        assert result.severity == Severity.LOW
         assert "250" in result.reason
-        assert "100" in result.reason
 
     def test_too_short_fails_low(self):
         text = "Yes, take rest."
@@ -112,9 +113,10 @@ class TestHollowPhrases:
         "I understand how that feels.",
     ])
     def test_banned_phrases_caught(self, phrase):
+        """Apr 2026: elevated from MEDIUM → HIGH to trigger hard regen."""
         result = check_hollow_phrases(phrase)
         assert not result.passed
-        assert result.severity == Severity.MEDIUM
+        assert result.severity == Severity.HIGH
 
     def test_clean_response_passes(self):
         result = check_hollow_phrases(
@@ -192,12 +194,14 @@ class TestResponseValidatorOrchestration:
         assert not report.passed
         assert report.needs_regeneration
 
-    def test_too_long_fails_aggregate(self):
+    def test_too_long_is_observational_in_aggregate(self):
+        """Apr 2026: length excess is LOW severity — aggregate still passes
+        because LOW checks don't block. No regen triggered."""
         v = get_response_validator()
         text = " ".join(["word"] * 300)
         report = v.validate(text, phase="guidance")
-        assert not report.passed
-        assert report.needs_regeneration
+        # LOW severity doesn't cause aggregate failure or regen
+        assert not report.needs_regeneration
 
     def test_verse_repair_does_not_block(self):
         v = get_response_validator()
@@ -207,11 +211,12 @@ class TestResponseValidatorOrchestration:
         assert "[VERSE]" in report.text
         assert report.passed or not report.needs_regeneration
 
-    def test_correction_hints_present_when_failing(self):
+    def test_correction_hints_from_hollow_phrases(self):
+        """Hollow phrases (now HIGH severity) produce correction hints."""
         v = get_response_validator()
-        text = " ".join(["word"] * 250)
+        text = "I hear you, that must be really difficult for you right now. " + " ".join(["word"] * 40)
         report = v.validate(text, phase="guidance")
-        assert any("250" in h or "110" in h for h in report.correction_hints)
+        assert any("hollow" in h.lower() or "i hear you" in h.lower() for h in report.correction_hints)
 
     def test_unknown_phase_falls_back_to_guidance(self):
         v = get_response_validator()

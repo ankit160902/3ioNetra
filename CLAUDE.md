@@ -415,7 +415,7 @@ python scripts/verify_video_ingestion.py        # Video ingestion verification
 
 ## Critical Rules
 
-1. **Response length:** 30–100 words. Two to four sentences. WhatsApp-style, not email-style.
+1. **Response length:** Adaptive — match query complexity. Simple support: 50-100 words. Detailed requests (itinerary, step-by-step, educational): up to 300 words. Never artificially truncate. (Apr 2026 — was "30-100 words" hardcoded.)
 2. **Restricted markdown in LLM responses.** Default is flowing sentences. Allowed: `**bold**` (sparing — 1-2 per response, for deity names or key practices), `- ` bullet lists (2-5 items max, for short step sequences only), `---` horizontal rules (at most one per response, for a real subject change). Forbidden: `# headers`, `> blockquotes`, `*italic*`, `` `inline code` ``, `1. numbered lists`, tables, links. The persona is a warm friend, not an article writer. (Apr 2026 — was previously "no markdown".)
 3. **Verse format:** `[VERSE]...[/VERSE]` tags for original Sanskrit/Hindi only. Max one per response.
 4. **Safety protocol:** Crisis → direct compassion + helpline numbers (iCall, Vandrevala, NIMHANS). Never spiritual-reframe active danger.

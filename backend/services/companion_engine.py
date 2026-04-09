@@ -246,7 +246,35 @@ class CompanionEngine:
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
 
-        # 1a. Off-topic short-circuit — if the intent agent (or fast-path) flagged
+        # 1a. LLM-based crisis detection — catches typos/misspellings that the
+        # keyword-based check in _preflight missed. The IntentAgent sees the
+        # full message and understands "i dnt wnt 2 liv" = crisis, regardless
+        # of spelling. This is the STRUCTURAL safety net — keyword check is
+        # just a speed optimization for obvious cases. Apr 2026.
+        if isinstance(analysis, dict) and analysis.get("urgency") == "crisis":
+            logger.warning(
+                f"LLM-based crisis detected (session={session.session_id}): "
+                f"IntentAgent urgency=crisis for message '{message[:50]}'"
+            )
+            from services.crisis_response_composer import get_crisis_response_composer
+            session.crisis_turn_count += 1
+            crisis_response = get_crisis_response_composer().compose(session, message)
+            return {
+                "is_ready_for_wisdom": False,
+                "readiness_trigger": "crisis",
+                "context_docs": [],
+                "turn_topics": turn_topics,
+                "recommended_products": [],
+                "active_phase": ConversationPhase.LISTENING,
+                "user_profile": build_user_profile(session.memory, session),
+                "past_memories": past_memories or [],
+                "analysis": analysis,
+                "model_override": None,
+                "config_override": None,
+                "crisis_response": crisis_response,
+            }
+
+        # 1b. Off-topic short-circuit — if the intent agent (or fast-path) flagged
         # the message as outside spiritual/life-guidance scope, return a gentle
         # redirect immediately. This avoids running RAG, product search, or
         # routing the LLM through the guidance pipeline for queries the
@@ -477,6 +505,15 @@ class CompanionEngine:
              recommended_products, active_phase, model_override, config_override, past_memories)
         """
         meta = await self.process_message_preamble(session, message)
+
+        # LLM-based crisis short-circuit: IntentAgent detected urgency=crisis
+        # (catches typos/misspellings that keyword check in _preflight missed).
+        if meta.get("crisis_response"):
+            return (
+                meta["crisis_response"], False, [],
+                meta["turn_topics"], [], ConversationPhase.LISTENING,
+                None, None, meta.get("past_memories", []),
+            )
 
         # Off-topic short-circuit: return canned redirect, skip LLM call entirely.
         if meta.get("off_topic_response"):
