@@ -83,6 +83,97 @@ class TestShouldSuppress:
         assert pr._should_suppress(session, {}) is True
 
 
+class TestExpandedEmotionSuppression:
+    """Verify the expanded PRODUCT_SUPPRESS_EMOTIONS list catches more
+    distress states. Each test asserts that products are blocked for
+    that specific emotion — what the evaluation report flagged as
+    'tone-deaf product cards during anger / anxiety / loneliness'.
+    """
+
+    def _block(self, emotion):
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        return pr._should_suppress(session, {"emotion": emotion})
+
+    def test_anger_blocks(self):
+        assert self._block("anger") is True
+
+    def test_anxiety_blocks(self):
+        assert self._block("anxiety") is True
+
+    def test_fear_blocks(self):
+        assert self._block("fear") is True
+
+    def test_panic_blocks(self):
+        assert self._block("panic") is True
+
+    def test_loneliness_blocks(self):
+        assert self._block("loneliness") is True
+
+    def test_guilt_blocks(self):
+        assert self._block("guilt") is True
+
+    def test_humiliation_blocks(self):
+        assert self._block("humiliation") is True
+
+    def test_trauma_blocks(self):
+        assert self._block("trauma") is True
+
+    def test_sadness_blocks(self):
+        assert self._block("sadness") is True
+
+    def test_neutral_does_not_block(self):
+        assert self._block("neutral") is False
+
+    def test_curiosity_does_not_block(self):
+        assert self._block("curiosity") is False
+
+    def test_hope_does_not_block(self):
+        assert self._block("hope") is False
+
+
+class TestHighUrgencyEmotionalGate:
+    """Verify the defense-in-depth gate that blocks products when intent is
+    EXPRESSING_EMOTION and urgency is high, even if the emotion field came
+    back as 'neutral' (LLM uncertainty)."""
+
+    def test_high_urgency_emotional_blocks_even_neutral_emotion(self):
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        analysis = {
+            "intent": IntentType.EXPRESSING_EMOTION,
+            "urgency": "high",
+            "emotion": "neutral",
+        }
+        assert pr._should_suppress(session, analysis) is True
+
+    def test_high_urgency_non_emotion_intent_does_not_block_via_this_gate(self):
+        """Other intents still go through the emotion-set check, not the urgency gate."""
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        analysis = {
+            "intent": IntentType.PRODUCT_SEARCH,
+            "urgency": "high",
+            "emotion": "curiosity",
+        }
+        # PRODUCT_SEARCH explicit user requests bypass emotion gates entirely
+        # via is_explicit_request, but here we're testing _should_suppress's
+        # internal urgency-emotional gate. Since intent is not EXPRESSING_EMOTION,
+        # the urgency gate does NOT trigger.
+        assert pr._should_suppress(session, analysis, is_explicit_request=False) is False
+
+    def test_normal_urgency_emotional_does_not_trigger_urgency_gate(self):
+        """Normal urgency relies on the emotion-set check, not the urgency gate."""
+        pr = ProductRecommender(MagicMock())
+        session = _make_session()
+        analysis = {
+            "intent": IntentType.EXPRESSING_EMOTION,
+            "urgency": "normal",
+            "emotion": "curiosity",  # not in suppress set
+        }
+        assert pr._should_suppress(session, analysis) is False
+
+
 # ---------------------------------------------------------------------------
 # Rejection detection tests
 # ---------------------------------------------------------------------------
@@ -205,6 +296,120 @@ class TestRecommend:
             [], is_ready_for_wisdom=False,
         )
         assert result == []
+
+
+# ---------------------------------------------------------------------------
+# Intent-based product gating tests (Apr 9 2026 — fixes the "shopping kiosk"
+# bug where every guidance-phase response returned 3-5 product cards even
+# when the user asked an educational/panchang/emotional question. The fix
+# expanded _SKIP_PROACTIVE_INTENTS and _NO_PRODUCT_INTENTS to include
+# ASKING_PANCHANG, ASKING_INFO, EXPRESSING_EMOTION, and OTHER. These tests
+# lock that behavior in so a future refactor can't reintroduce the spam.)
+# ---------------------------------------------------------------------------
+
+
+class TestIntentGating:
+    """Verify that the proactive-inference path (Path 3 of recommend()) is
+    blocked for intents that should never trigger product recommendations.
+
+    Each test sets up a guidance-phase call (is_ready_for_wisdom=True) with
+    products available in the mock service AND a message that would normally
+    match the proactive-inference keyword maps. The assertion is that the
+    intent gate short-circuits before the proactive path can fire.
+    """
+
+    async def test_panchang_intent_returns_no_products(self):
+        """ASKING_PANCHANG must NOT trigger product recommendations.
+
+        Real-world failure: a user asking 'what is today's tithi?' was
+        getting 3 mala/diya cards alongside the panchang reading because
+        the proactive-inference path keyword-matched on incidental terms.
+        After the fix, the intent gate at the top of recommend() returns
+        [] before any inference runs.
+        """
+        svc = _make_mock_product_service([{"_id": "1", "name": "Mala"}])
+        pr = ProductRecommender(svc)
+        session = _make_session(turn_count=3)
+
+        result = await pr.recommend(
+            session,
+            "What is today's tithi and is it auspicious for a puja?",
+            _default_analysis(intent=IntentType.ASKING_PANCHANG, recommend_products=False),
+            [],
+            is_ready_for_wisdom=True,
+        )
+        assert result == [], "panchang queries should never return products"
+
+    async def test_asking_info_intent_returns_no_products(self):
+        """ASKING_INFO (educational queries) must NOT trigger product recs.
+
+        Real-world failure: 'tell me about Mahabharata' returned mala
+        recommendations. Educational queries are about learning, not
+        shopping — products break the conversational tone.
+        """
+        svc = _make_mock_product_service([{"_id": "1", "name": "Mala"}])
+        pr = ProductRecommender(svc)
+        session = _make_session(turn_count=3)
+
+        result = await pr.recommend(
+            session,
+            "Tell me one beautiful thing about Mahabharata",
+            _default_analysis(intent=IntentType.ASKING_INFO, recommend_products=False),
+            [],
+            is_ready_for_wisdom=True,
+        )
+        assert result == [], "educational queries should never return products"
+
+    async def test_expressing_emotion_intent_returns_no_products(self):
+        """EXPRESSING_EMOTION must NOT trigger product recs.
+
+        Real-world failure: a user venting about career stress was getting
+        rudraksha mala suggestions in the same response. Emotional support
+        and shopping are not compatible — the bot needs to listen, not sell.
+        Note: there's already a separate emotion-suppression gate
+        (_should_suppress checks the emotion field), but this test asserts
+        the intent gate is ALSO sufficient even with neutral emotion.
+        """
+        svc = _make_mock_product_service([{"_id": "1", "name": "Mala"}])
+        pr = ProductRecommender(svc)
+        session = _make_session(turn_count=3)
+
+        result = await pr.recommend(
+            session,
+            "I've been feeling lost and unsure about life lately",
+            _default_analysis(
+                intent=IntentType.EXPRESSING_EMOTION,
+                emotion="neutral",  # bypass the emotion-set check; rely on intent gate
+                recommend_products=False,
+            ),
+            [],
+            is_ready_for_wisdom=True,
+        )
+        assert result == [], "emotional shares should never return products"
+
+    async def test_explicit_product_search_still_works_after_gating(self):
+        """REGRESSION: PRODUCT_SEARCH must STILL return products.
+
+        The intent-gating fix expanded _SKIP_PROACTIVE_INTENTS and
+        _NO_PRODUCT_INTENTS, but PRODUCT_SEARCH is intentionally NOT in
+        either set — explicit shopping requests bypass the intent gate
+        via Path 1 of recommend(). This test guards against an over-
+        eager future change that would also block Path 1.
+        """
+        products = [{"_id": "1", "name": "Rudraksha Mala"}]
+        svc = _make_mock_product_service(products)
+        pr = ProductRecommender(svc)
+        session = _make_session(turn_count=3)
+
+        result = await pr.recommend(
+            session,
+            "I want to buy a rudraksha mala for daily japa",
+            _default_analysis(intent=IntentType.PRODUCT_SEARCH),
+            ["Product Inquiry"],
+            is_ready_for_wisdom=True,
+        )
+        assert len(result) == 1
+        assert result[0]["name"] == "Rudraksha Mala"
 
 
 # ---------------------------------------------------------------------------

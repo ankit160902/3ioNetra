@@ -106,10 +106,39 @@ _DEITY_NAMES = {
 }
 
 # Intents that never get proactive products (ASKING_INFO removed — "what should I get?" needs products)
-_SKIP_PROACTIVE_INTENTS = frozenset({IntentType.GREETING, IntentType.CLOSURE})
+# Intents where the proactive-inference path (Path 3 in `recommend()`)
+# should NEVER fire. Without this, every guidance-phase response would
+# return 3-5 product cards even when the user asked an educational
+# question, requested today's panchang, vented emotionally, or just said
+# thank you. Found Apr 9 2026 in a real-user screenshot — the bot was
+# acting like a shopping kiosk wrapped in a spiritual companion.
+#
+# `PRODUCT_SEARCH` is NOT in this set: explicit shopping requests still
+# go through Path 1 of recommend(), which bypasses all gates.
+# `SEEKING_GUIDANCE` is NOT in this set either: it has its own finer-
+# grained gate at lines ~155-164 that requires either an `item` or
+# `ritual` entity to fire products.
+_SKIP_PROACTIVE_INTENTS = frozenset({
+    IntentType.GREETING,
+    IntentType.CLOSURE,
+    IntentType.ASKING_PANCHANG,
+    IntentType.ASKING_INFO,
+    IntentType.EXPRESSING_EMOTION,
+    IntentType.OTHER,
+})
 
-# Intents where LLM recommend_products should be overridden to False
-_NO_PRODUCT_INTENTS = frozenset({IntentType.GREETING, IntentType.CLOSURE})
+# Intents where the IntentAgent's `recommend_products=True` flag should
+# be overridden to False. Same set as above for symmetry — if proactive
+# inference is forbidden, the LLM-recommended path should also respect
+# the same boundary.
+_NO_PRODUCT_INTENTS = frozenset({
+    IntentType.GREETING,
+    IntentType.CLOSURE,
+    IntentType.ASKING_PANCHANG,
+    IntentType.ASKING_INFO,
+    IntentType.EXPRESSING_EMOTION,
+    IntentType.OTHER,
+})
 
 
 class ProductRecommender:
@@ -400,11 +429,28 @@ class ProductRecommender:
     # ------------------------------------------------------------------
 
     def _should_suppress(self, session, analysis=None, is_explicit_request=False) -> bool:
-        """Central product gatekeeper — 6 gates. Returns True to block."""
+        """Central product gatekeeper — returns True to block.
+
+        Gates evaluated in order:
+        1. Crisis urgency → always block (even explicit requests)
+        2. Explicit user request → bypass remaining gates
+        3. High-urgency emotional expression → block (catches mislabelled
+           "neutral" emotion when urgency was correctly tagged high)
+        4. Current-turn emotion in suppress set → block
+        5. Session-level user dismissal / rejection / cooldowns → block
+        """
         if analysis and analysis.get("urgency") == "crisis":
             return True
         if is_explicit_request:
             return False
+        # Defense in depth: high-urgency emotional expressions sometimes get
+        # an emotion field of "neutral" when the LLM is uncertain. Trust the
+        # urgency tag in that case.
+        if analysis:
+            urgency = (analysis.get("urgency") or "").lower()
+            intent = analysis.get("intent")
+            if urgency == "high" and intent == IntentType.EXPRESSING_EMOTION:
+                return True
         current_emotion = (analysis.get("emotion", "") if analysis else "").lower()
         if current_emotion in self._suppress_emotion_set:
             return True
