@@ -1,39 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const API_BASE = 'http://localhost:8080';
-
-async function loginViaAPI(page: any, request: any) {
-  const email = `e2etest_${Date.now()}@test.com`;
-  const res = await request.post(`${API_BASE}/api/auth/register`, {
-    data: { name: 'E2E Tester', email, password: 'TestPass123', phone: '9876543210', gender: 'Male', dob: '1995-06-15', profession: 'Working Professional' }
-  });
-  const data = await res.json();
-  await page.evaluate(({ token, user }: any) => {
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
-  }, { token: data.token, user: data.user });
-  await page.reload();
-  await page.waitForSelector('input[placeholder="Share your spiritual journey..."]', { timeout: 10000 });
-}
-
-// ---------------------------------------------------------------------------
-// Helper: send a chat message and wait for assistant response
-// ---------------------------------------------------------------------------
-async function sendChatMessage(page: any, text: string) {
-  const input = page.locator('input[placeholder="Share your spiritual journey..."]');
-  await input.fill(text);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForFunction(
-    () => {
-      const msgs = document.querySelectorAll('.animate-fade-in');
-      if (msgs.length < 2) return false;
-      const last = msgs[msgs.length - 1];
-      return last && last.textContent && last.textContent.trim().length > 10;
-    },
-    { timeout: 30000 }
-  );
-  await page.waitForTimeout(1500);
-}
+import { loginViaAPI, sendChatMessage } from './helpers/auth';
 
 // ---------------------------------------------------------------------------
 // Feedback Button Tests (ThumbsUp / ThumbsDown on assistant messages)

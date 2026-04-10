@@ -3,6 +3,16 @@
 Replaces the 87-line _assess_readiness() and inline if/else readiness
 logic in CompanionEngine with a formal pytransitions FSM.
 
+Thresholds (cooldown, distress listen turns) are read from
+``config.settings`` rather than module constants so the FSM has a single
+source of truth and operations can tune them without code changes.
+
+The emotion / topic / keyword sets below are *behavioral heuristics* applied
+to LLM-classified output (IntentAgent's emotion + topics). They are not
+domain-knowledge data tables. A long-term migration would have the
+IntentAgent emit a structured ``severity`` field directly so the FSM doesn't
+need any local emotion mapping at all — tracked separately.
+
 Usage:
     fsm = ConversationFSM(session)
     is_ready, trigger = fsm.evaluate(analysis, turn_topics)
@@ -12,6 +22,7 @@ from typing import Dict, List, Tuple
 
 from transitions import Machine
 
+from config import settings
 from models.session import SessionState, IntentType
 
 logger = logging.getLogger(__name__)
@@ -24,6 +35,7 @@ DISTRESS_EMOTIONS = frozenset({
 # High-intensity emotions used inside _assess_readiness (broader set)
 HIGH_INTENSITY_EMOTIONS = frozenset({
     "sadness", "anger", "anxiety", "hopelessness", "grief", "despair",
+    "loneliness", "frustration",
 })
 
 # Urgent keywords that bypass oscillation cooldown
@@ -37,9 +49,6 @@ EXPLICIT_TOPICS = frozenset({"Verse Request", "Product Inquiry"})
 
 # Topics treated as guidance asks (need min turns)
 GUIDANCE_TOPICS = frozenset({"Routine Request", "Puja Guidance", "Diet Plan"})
-
-# Minimum turns between consecutive guidance phases
-COOLDOWN_TURNS = 3
 
 
 class ConversationFSM:
@@ -82,31 +91,52 @@ class ConversationFSM:
             conditions=["is_closure_intent"],
             before="set_trigger_closure",
         )
-        # 2. Explicit request (bypasses turn threshold)
+        # 2a. Explicit user-initiated request (panchang, product, verse — bypasses all gates)
+        # These represent unambiguous user signals where the user has explicitly named
+        # what they want. Listening-first does not apply because the user is not venting.
         self.machine.add_transition(
             trigger="step",
             source="LISTENING",
             dest="GUIDANCE",
-            conditions=["is_explicit_request"],
+            conditions=["is_explicit_user_request"],
             unless=["is_closure_intent", "is_greeting_intent"],
             before="set_trigger_explicit",
         )
+        # 2b. LLM-inferred direct-answer flag (less reliable signal, needs listening guard)
+        # The intent agent's needs_direct_answer flag is heuristic and often fires for
+        # emotional vents. Block it for distressed users on early turns.
+        self.machine.add_transition(
+            trigger="step",
+            source="LISTENING",
+            dest="GUIDANCE",
+            conditions=["is_inferred_direct_answer"],
+            unless=["is_closure_intent", "is_greeting_intent", "needs_listening_first"],
+            before="set_trigger_explicit",
+        )
         # 3. Guidance ask with min turns met
+        # Defense-in-depth: even when intent==SEEKING_GUIDANCE, a distressed
+        # opener still needs at least one listening turn. The IntentAgent can
+        # misclassify emotional vents as guidance asks (e.g. "I lost my
+        # mother and can't stop crying" → SEEKING_GUIDANCE), and without
+        # this guard the FSM jumps straight to scripture prescription.
         self.machine.add_transition(
             trigger="step",
             source="LISTENING",
             dest="GUIDANCE",
             conditions=["is_guidance_ask", "min_turns_met_for_ask"],
-            unless=["is_closure_intent", "is_greeting_intent"],
+            unless=["is_closure_intent", "is_greeting_intent", "needs_listening_first"],
             before="set_trigger_guidance_ask",
         )
         # 4. Signal-based readiness (score + turns + cooldown)
+        # Same emotional guard — high readiness scores can fire on the very
+        # first turn for users in acute distress, which is exactly when
+        # listening matters most.
         self.machine.add_transition(
             trigger="step",
             source="LISTENING",
             dest="GUIDANCE",
             conditions=["readiness_threshold_met", "min_turns_met_for_signals", "cooldown_passed"],
-            unless=["is_closure_intent", "is_greeting_intent"],
+            unless=["is_closure_intent", "is_greeting_intent", "needs_listening_first"],
             before="set_trigger_signals",
         )
         # 5. Force transition (max turns)
@@ -178,7 +208,39 @@ class ConversationFSM:
     def is_closure_intent(self, event=None) -> bool:
         return self._analysis.get("intent") == IntentType.CLOSURE
 
-    def is_explicit_request(self, event=None) -> bool:
+    def needs_listening_first(self, event=None) -> bool:
+        """Distressed users on early turns need listening before guidance.
+
+        Used as an ``unless`` guard on transitions 2b (LLM-inferred direct
+        answer), 3 (guidance ask), and 4 (signal-based readiness). When a
+        user opens with a high-intensity emotion or the IntentAgent flags
+        urgency as ``high``/``crisis`` on their first ``MIN_DISTRESS_LISTEN_TURNS``
+        turns, the companion holds in LISTENING regardless of any other
+        signal that would otherwise fire a guidance transition.
+
+        Explicit user requests (verse request, product search, panchang)
+        are not affected because the user has unambiguously named what
+        they want. Force transitions are also exempt because they already
+        require maximum-clarification turns.
+        """
+        if self.session.turn_count >= settings.MIN_DISTRESS_LISTEN_TURNS:
+            return False
+        detected_emotion = (self._analysis.get("emotion") or "").lower()
+        urgency = (self._analysis.get("urgency") or "").lower()
+        # Distress can come from either an emotion classification or an
+        # explicit urgency signal — both are LLM-derived, no local lookup.
+        if urgency in {"high", "crisis"}:
+            return True
+        return detected_emotion in HIGH_INTENSITY_EMOTIONS
+
+    def is_explicit_user_request(self, event=None) -> bool:
+        """User explicitly named what they want — bypasses listening turns.
+
+        These are unambiguous user signals: panchang query, product search,
+        verse request, product inquiry, or LLM-detected product recommendation
+        intent. None of these are emotional vents, so listening-first does
+        not apply.
+        """
         intent = self._analysis.get("intent")
         if intent in (IntentType.ASKING_PANCHANG, IntentType.PRODUCT_SEARCH):
             return True
@@ -186,9 +248,27 @@ class ConversationFSM:
             return True
         if self._analysis.get("recommend_products", False):
             return True
-        if self._analysis.get("needs_direct_answer", False):
-            return True
         return False
+
+    def is_inferred_direct_answer(self, event=None) -> bool:
+        """LLM-inferred flag that the user wants a direct answer.
+
+        This flag is heuristic and often fires for emotional messages where
+        the user is venting rather than asking a procedural question. The
+        `needs_listening_first` guard on the corresponding transition prevents
+        this from short-circuiting the listening phase for distressed users.
+        """
+        return self._analysis.get("needs_direct_answer", False)
+
+    def is_explicit_request(self, event=None) -> bool:
+        """Backwards-compatible composite predicate.
+
+        Retained so existing call sites (analytics, debug logging, tests)
+        continue to work. Prefer the more specific
+        `is_explicit_user_request` and `is_inferred_direct_answer` for new
+        callers.
+        """
+        return self.is_explicit_user_request() or self.is_inferred_direct_answer()
 
     def is_guidance_ask(self, event=None) -> bool:
         intent = self._analysis.get("intent")
@@ -233,13 +313,17 @@ class ConversationFSM:
         return self.session.turn_count >= min_turns
 
     def cooldown_passed(self, event=None) -> bool:
-        """Oscillation cooldown: 3+ turns since last guidance, unless urgent."""
+        """Oscillation cooldown: N turns since last guidance, unless urgent.
+
+        N comes from ``settings.GUIDANCE_OSCILLATION_COOLDOWN`` so the value
+        is editable without code change.
+        """
         last_guidance = getattr(self.session, "last_guidance_turn", 0) or 0
         if last_guidance <= 0:
             return True
 
         turns_since = self.session.turn_count - last_guidance
-        if turns_since >= COOLDOWN_TURNS:
+        if turns_since >= settings.GUIDANCE_OSCILLATION_COOLDOWN:
             return True
 
         # Check urgent keyword override

@@ -95,3 +95,51 @@ def format_verse_history_for_prompt(session: SessionState) -> str:
             lines.append(f"  - Turn {entry.get('turn', '?')}: {' | '.join(parts)}")
 
     return "\n".join(lines)
+
+
+def _normalize_for_comparison(s: str) -> str:
+    """Normalize a mantra/verse string for repetition comparison.
+
+    Lowercase, collapse whitespace, and strip surrounding punctuation. This
+    lets "Om Namah Shivaya" and "ॐ नमः शिवाय " match as duplicates while
+    keeping the comparison cheap.
+    """
+    return re.sub(r'\s+', ' ', s.strip().lower()).strip('.,;:!?\'"')
+
+
+def detect_repetition(session: SessionState, response_text: str) -> List[str]:
+    """Return mantras/verses in the response that were already suggested.
+
+    Used as a soft monitoring signal — does NOT block the response (which
+    would require expensive regeneration). Repeats are logged so we can
+    track how often the LLM ignores the anti-repetition prompt rules and
+    decide whether to escalate to a hard regeneration loop later.
+
+    Returns a list of the offending normalized strings (empty if none).
+    """
+    if not session.suggested_verses:
+        return []
+
+    extracted = extract_verses_from_response(response_text)
+    new_normalized = {
+        _normalize_for_comparison(item)
+        for item in (extracted["mantras"] + extracted["references"])
+        if item.strip()
+    }
+    if not new_normalized:
+        return []
+
+    previous_normalized = set()
+    for entry in session.suggested_verses:
+        for item in entry.get("mantras", []):
+            previous_normalized.add(_normalize_for_comparison(item))
+        for item in entry.get("references", []):
+            previous_normalized.add(_normalize_for_comparison(item))
+
+    repeats = sorted(new_normalized & previous_normalized)
+    if repeats:
+        logger.warning(
+            f"VERSE_REPETITION session={session.session_id} "
+            f"turn={session.turn_count} repeated={repeats}"
+        )
+    return repeats

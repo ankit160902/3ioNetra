@@ -71,37 +71,64 @@ class IntentAgent:
          the emotion you classified above is one of grief/anxiety/anger/fear/despair/loneliness/
          hopelessness/shame, return False.
 
-    8. "recommend_products": boolean — DEFAULT IS FALSE. Products should feel like a rare,
-       relevant surprise — NOT a default on every response. Being pushy with products
-       destroys trust.
-       - True ONLY when the user EXPLICITLY asks to buy/shop/find a physical item:
-         a) "I want to buy a mala", "show me puja items", "what do I need for havan"
-         b) "recommend me a murti", "where can I get incense", "suggest products"
-       - ALWAYS False when:
-         a) User is sharing emotions, venting, or seeking support
-         b) User asks about mantras, verses, philosophy, scripture, karma, moksha
-         c) User asks for advice (career, relationship, health, education)
-         d) User asks about panchang, tithi, nakshatra
-         e) User asks how to do a practice (meditation, yoga, pranayama, japa)
-         f) User is greeting, thanking, or closing the conversation
-         g) The companion just MENTIONED a practice like japa or puja — that does
-            NOT mean the user wants to buy items for it. Wait for them to ask.
-         h) User asks about travel, pilgrimage, itinerary planning
-       - ALSO False when the user's PRIMARY question is about something else
-         (meditation, mantra, scripture) and they casually append "show products"
-         or "by the way show me products". The primary intent is the spiritual
-         question, not shopping. Only return True when buying IS the primary intent.
-       - WHEN IN DOUBT: return False. It is always better to NOT show products
-         than to show irrelevant ones. The user can always ask explicitly.
+    8. "product_signal": A structured object describing the user's product interest.
+       This replaces the old boolean recommend_products. DEFAULT intent is "none".
+       {{
+         "intent": one of ["none", "explicit_search", "contextual_need", "casual_mention", "negative"],
+         "confidence": float 0.0-1.0,
+         "type_filter": one of ["any", "physical_only", "consultation_only", "service_only"],
+         "search_keywords": list of 3-4 specific product search terms (empty if intent is "none"),
+         "max_results": integer 0-5 (0 = don't recommend any products),
+         "sensitivity_note": brief note if emotional sensitivity matters (empty string otherwise)
+       }}
 
-    9. "product_search_keywords": List of 3-4 specific product keywords if recommend_products is True.
-       Use context to resolve references (e.g., "essentials" + context "Satyanarayan Puja" → ["Satyanarayan", "puja samagri", "ghee"])
-       Leave empty [] if recommend_products is False.
+       INTENT RULES (read carefully):
+       - "explicit_search" (confidence 0.8-1.0, max_results 3-5):
+         User's PRIMARY intent is buying/shopping. They are actively looking for products.
+         Examples: "I want to buy a mala", "show me puja items", "recommend a Hanuman murti",
+         "what items do I need for havan", "I want to purchase incense",
+         "suggest products for stress", "what products can help with career",
+         "recommend products for my puja room"
+       - "contextual_need" (confidence 0.5-0.7, max_results 2-3):
+         User's message indicates openness to product suggestions in context. Two sub-cases:
+         a) Practice/ritual context: User discusses a practice requiring items AND asks what they need.
+            Examples: "What do I need for shraddh ceremony?", "I want to set up a home temple, what should I get?"
+         b) Help-seeking context: After sharing emotional/life struggles, user explicitly asks for
+            suggestions, recommendations, or "something that can help." The ask must be explicit —
+            continued venting without asking is still "none".
+            Examples: "Can you suggest something that might help?", "Is there anything that can
+            help with this?", "Kuch suggest karo", "Please recommend something",
+            "What can I do/use/try?", "Suggest something please",
+            "Is there anything that can bring peace?", "I need help, suggest something"
+         NOTE: If user mentions a practice (japa, puja, meditation) WITHOUT asking for items, this is "none".
+         NOTE: If user asks for spiritual advice only ("suggest a mantra"), this is "none".
+       - "casual_mention" (confidence 0.2-0.4, max_results 1):
+         Products mentioned but NOT the primary ask. Show at most 1 product.
+         Examples: "Tell me about meditation, and by the way do you have any products?"
+       - "negative" (confidence 0.8-1.0, max_results 0):
+         User rejects, criticizes, or dismisses products.
+         Examples: "Stop suggesting products", "Your products are overpriced", "No more shopping",
+         "I don't want to buy anything", "not interested in products"
+       - "none" (confidence 0.0, max_results 0):
+         DEFAULT. No product interest detected. Use this for:
+         * Pure emotional venting WITHOUT asking for suggestions (just sharing pain)
+         * Mantra/verse/scripture/philosophy questions
+         * Advice requests where user asks HOW to do something (not what to buy)
+         * Panchang/tithi/nakshatra queries
+         * Travel/pilgrimage/itinerary planning
+         * Greetings, closures, thank-you messages
+         * ANY first message of a conversation (NEVER recommend products on turn 1)
+         * When the user just MENTIONED a practice — that does NOT mean they want items
 
-    10. "product_rejection": boolean — True ONLY when the user explicitly rejects or dismisses product suggestions.
-        Examples: "stop suggesting products", "I don't want to buy anything", "no products please",
-        "not interested in shopping", "don't recommend products"
-        False for all other messages.
+       TYPE FILTER RULES:
+       - "physical_only": User asks for objects/items (murti, mala, diya, incense)
+       - "consultation_only": User asks for expert/astrologer/consultation
+       - "service_only": User asks for puja booking, temple seva, workshop
+       - "any": Not specified or mixed context
+
+       WHEN IN DOUBT: intent="none", max_results=0. It is ALWAYS better to NOT
+       show products than to show irrelevant ones. Products should feel like a
+       rare, relevant surprise — not a default on every response.
 
     11. "query_variants": List of EXACTLY 2 alternative search phrasings for the user's spiritual question.
         - You MUST generate 2 variants for ALL intents EXCEPT GREETING, CLOSURE, PRODUCT_SEARCH, and trivial/single-word messages.
@@ -199,9 +226,16 @@ class IntentAgent:
 
     def _fast_path(self, msg_lower: str) -> Optional[Dict[str, Any]]:
         """Return a fast-path result dict if the message matches a known pattern, else None."""
+        _default_product_signal = {
+            "intent": "none", "confidence": 0.0, "type_filter": "any",
+            "search_keywords": [], "max_results": 0, "sensitivity_note": "",
+        }
         _base = {
             "entities": {}, "urgency": "low", "summary": "",
-            "needs_direct_answer": False, "recommend_products": False,
+            "needs_direct_answer": False,
+            "product_signal": _default_product_signal,
+            # Legacy compat (all default to no-products)
+            "recommend_products": False,
             "product_search_keywords": [], "product_rejection": False,
             "query_variants": [], "expected_length": "moderate",
             "is_off_topic": False,
@@ -304,11 +338,38 @@ class IntentAgent:
                 logger.warning(f"IntentAgent: JSON extraction failed for '{message[:30]}...'")
                 return self._fallback_analysis(message)
 
-            # Validate with Pydantic model (coerces enums, applies defaults)
-            analysis = IntentAnalysis(**parsed)
-            data = analysis.to_dict()
+            # Validate with Pydantic model (coerces enums, applies defaults).
+            # Wrap in its own try/except because Pydantic validation can fail
+            # on unexpected JSON shapes (e.g. Gemini returns product_signal as
+            # a nested object but omits legacy flat fields). On failure, merge
+            # parsed JSON with defaults manually.
+            try:
+                analysis = IntentAnalysis(**parsed)
+                data = analysis.to_dict()
+            except Exception as pydantic_err:
+                logger.warning(f"IntentAgent Pydantic validation failed: {pydantic_err}. Using raw parsed with defaults.")
+                # Manually build a valid dict from parsed JSON + defaults
+                data = {
+                    "intent": parsed.get("intent", "OTHER"),
+                    "emotion": parsed.get("emotion", "neutral"),
+                    "life_domain": parsed.get("life_domain", "unknown"),
+                    "entities": parsed.get("entities", {}),
+                    "urgency": parsed.get("urgency", "normal"),
+                    "summary": parsed.get("summary", ""),
+                    "needs_direct_answer": parsed.get("needs_direct_answer", False),
+                    "product_signal": parsed.get("product_signal", {
+                        "intent": "none", "confidence": 0.0, "type_filter": "any",
+                        "search_keywords": [], "max_results": 0, "sensitivity_note": "",
+                    }),
+                    "recommend_products": parsed.get("recommend_products", False),
+                    "product_search_keywords": parsed.get("product_search_keywords", []),
+                    "product_rejection": parsed.get("product_rejection", False),
+                    "query_variants": parsed.get("query_variants", []),
+                    "expected_length": parsed.get("expected_length", "moderate"),
+                    "is_off_topic": parsed.get("is_off_topic", False),
+                }
             data["intent"] = IntentType(data.get("intent", "OTHER"))
-            logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | Keywords: {data.get('product_search_keywords')}")
+            logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | signal: {data.get('product_signal', {}).get('intent', 'n/a')}")
             self._cache.set(msg_lower, data, 1800)  # 30-min TTL
             return data
 
@@ -345,6 +406,25 @@ class IntentAgent:
             "?" in message or any(w in message_lower for w in ["how", "what", "where", "why"])
         )
 
+        # Build structured product signal instead of flat boolean
+        product_signal = {
+            "intent": "none", "confidence": 0.0, "type_filter": "any",
+            "search_keywords": [], "max_results": 0, "sensitivity_note": "",
+        }
+        if is_product_rejection:
+            product_signal = {
+                "intent": "negative", "confidence": 0.9, "type_filter": "any",
+                "search_keywords": [], "max_results": 0, "sensitivity_note": "",
+            }
+        elif any(w in message_lower for w in ["buy", "purchase", "order"]):
+            product_signal = {
+                "intent": "explicit_search", "confidence": 0.6, "type_filter": "any",
+                "search_keywords": [], "max_results": 3, "sensitivity_note": "",
+            }
+        # Note: "product", "recommend", "suggest" alone do NOT trigger products
+        # in the fallback. Only explicit buy/purchase words do. This prevents
+        # "your products are overpriced" from triggering recommendations.
+
         return {
             "intent": intent,
             "emotion": "neutral",
@@ -353,9 +433,11 @@ class IntentAgent:
             "urgency": "normal",
             "summary": message[:100],
             "needs_direct_answer": needs_direct,
-            "recommend_products": any(w in message_lower for w in ["buy", "price", "shop", "product", "recommend", "suggest"]),
-            "product_search_keywords": [],
-            "product_rejection": is_product_rejection,
+            "product_signal": product_signal,
+            # Legacy compat (derived from product_signal)
+            "recommend_products": product_signal["intent"] not in ("none", "negative"),
+            "product_search_keywords": product_signal["search_keywords"],
+            "product_rejection": product_signal["intent"] == "negative",
             "query_variants": [],
             "is_off_topic": False,
         }

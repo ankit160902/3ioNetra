@@ -1,39 +1,10 @@
 import { test, expect } from '@playwright/test';
-
-const API_BASE = 'http://localhost:8080';
-
-async function loginViaAPI(page: any, request: any) {
-  const email = `e2etest_${Date.now()}@test.com`;
-  const res = await request.post(`${API_BASE}/api/auth/register`, {
-    data: { name: 'E2E Tester', email, password: 'TestPass123', phone: '9876543210', gender: 'Male', dob: '1995-06-15', profession: 'Working Professional' }
-  });
-  const data = await res.json();
-  await page.evaluate(({ token, user }: any) => {
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
-  }, { token: data.token, user: data.user });
-  await page.reload();
-  await page.waitForSelector('input[placeholder="Share your spiritual journey..."]', { timeout: 10000 });
-}
-
-// ---------------------------------------------------------------------------
-// Helper: send a chat message and wait for assistant response
-// ---------------------------------------------------------------------------
-async function sendChatMessage(page: any, text: string) {
-  const input = page.locator('input[placeholder="Share your spiritual journey..."]');
-  await input.fill(text);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForFunction(
-    () => {
-      const msgs = document.querySelectorAll('.animate-fade-in');
-      if (msgs.length < 2) return false;
-      const last = msgs[msgs.length - 1];
-      return last && last.textContent && last.textContent.trim().length > 10;
-    },
-    { timeout: 30000 }
-  );
-  await page.waitForTimeout(1500);
-}
+import {
+  API_BASE,
+  loginViaAPI,
+  sendChatMessage,
+  chatInput,
+} from './helpers/auth';
 
 // ---------------------------------------------------------------------------
 // Miscellaneous E2E Tests
@@ -145,8 +116,7 @@ test.describe('Product Display Tests', () => {
     await loginViaAPI(page, request);
 
     // Verify the chat interface loaded
-    const chatInput = page.locator('input[placeholder="Share your spiritual journey..."]');
-    await expect(chatInput).toBeVisible();
+    await expect(chatInput(page)).toBeVisible();
 
     // Try sending a product-related query that might trigger recommendations
     await sendChatMessage(page, 'I want to buy some puja items and spiritual products for my meditation practice');
@@ -176,9 +146,8 @@ test.describe('Streaming Tests', () => {
     await page.goto('/');
     await loginViaAPI(page, request);
 
-    const input = page.locator('input[placeholder="Share your spiritual journey..."]');
-    await input.fill('Tell me about the importance of daily prayer');
-    await page.locator('button[type="submit"]').click();
+    await chatInput(page).fill('Tell me about the importance of daily prayer');
+    await page.locator('form button[type="submit"]').click();
 
     // During streaming, the last text segment of the assistant message gets a .streaming-cursor span.
     // We need to catch it quickly before streaming finishes.
@@ -257,28 +226,19 @@ test.describe('Edge Case Tests', () => {
 
     expect(longMessage.length).toBeGreaterThan(500);
 
-    // Send the long message
-    const input = page.locator('input[placeholder="Share your spiritual journey..."]');
-    await input.fill(longMessage);
-    await page.locator('button[type="submit"]').click();
-
-    // Wait for the response
-    await page.waitForFunction(
-      () => {
-        const msgs = document.querySelectorAll('.animate-fade-in');
-        if (msgs.length < 2) return false;
-        const last = msgs[msgs.length - 1];
-        return last && last.textContent && last.textContent.trim().length > 10;
-      },
-      { timeout: 90000 }
-    );
+    // Send via the canonical helper — it waits for the request to fully
+    // complete (input re-enabled), not just for the first 10 streamed
+    // characters, so the assistant message and feedback buttons are
+    // guaranteed to be in the DOM when this returns.
+    await sendChatMessage(page, longMessage, { timeout: 120_000 });
 
     // Verify the user's long message was displayed
     const userMessageBubble = page.locator('.justify-end').first();
     const userText = await userMessageBubble.textContent();
     expect(userText).toContain('difficult phase');
 
-    // Verify an assistant response was received
+    // Verify an assistant response was received (feedback button only
+    // renders on completed assistant messages).
     const assistantMessages = page.locator('button[title="Helpful"]');
     const count = await assistantMessages.count();
     expect(count).toBeGreaterThanOrEqual(1);

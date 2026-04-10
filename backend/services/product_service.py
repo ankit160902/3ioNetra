@@ -92,8 +92,6 @@ class ProductService:
                 conditions.append({"benefits": {"$in": list(benefit_targets)}})
         if life_domains:
             conditions.append({"life_domains": {"$in": life_domains}})
-        if product_type:
-            conditions.append({"product_type": product_type})
         if benefits:
             conditions.append({"benefits": {"$in": benefits}})
 
@@ -101,6 +99,10 @@ class ProductService:
             return []
 
         query = {"is_active": True, "$or": conditions}
+        # product_type is an AND filter — narrows results to the requested
+        # type (physical, consultation, service) rather than broadening.
+        if product_type:
+            query["product_type"] = product_type
 
         try:
             def _fetch():
@@ -169,14 +171,19 @@ class ProductService:
             return []
 
     async def search_products(self, query_text: str, life_domain: str = "unknown", limit: int = 5,
-                              emotion: str = "", deity: str = "") -> List[Dict[str, Any]]:
-        """Search products by text (for explicit user queries). Uses MongoDB $text search.
+                              emotion: str = "", deity: str = "",
+                              product_type: Optional[str] = None,
+                              price_range: Optional[tuple] = None) -> List[Dict[str, Any]]:
+        """Search products by text with optional type and price filtering.
 
-        Returns up to ``limit`` products that pass the relevance-gap policy
-        (see PRODUCT_RELEVANCE_GAP_RATIO in config). May return fewer than
-        ``limit`` if only some products are strongly relevant — this is
-        intentional, replacing the old "fill the slots" fallback that was
-        padding results with weakly-related items.
+        Args:
+            product_type: Filter to "physical", "consultation", "service", or
+                          "experience". None = no filter. Flows from
+                          ProductSignal.type_filter.
+            price_range: (min, max) tuple in INR. None = no filter.
+
+        Returns up to ``limit`` products that pass the relevance-gap policy.
+        May return fewer if only some products are strongly relevant.
         """
         import re
         # Tokenize and clean
@@ -209,6 +216,18 @@ class ProductService:
                 "$text": {"$search": search_string},
                 "is_active": True,
             }
+            # Type filter: "physical", "consultation", "service", "experience"
+            if product_type:
+                text_query["product_type"] = product_type
+            # Price range filter
+            if price_range and len(price_range) == 2:
+                price_filter = {}
+                if price_range[0] is not None:
+                    price_filter["$gte"] = price_range[0]
+                if price_range[1] is not None:
+                    price_filter["$lte"] = price_range[1]
+                if price_filter:
+                    text_query["amount"] = price_filter
             def _text_search():
                 cursor = self.collection.find(
                     text_query,
@@ -230,6 +249,14 @@ class ProductService:
                     {"description": {"$regex": regex_pattern, "$options": "i"}},
                 ],
             }
+            # Apply same type/price filters to regex fallback
+            if product_type:
+                query["product_type"] = product_type
+            if price_range and len(price_range) == 2:
+                pf = {}
+                if price_range[0] is not None: pf["$gte"] = price_range[0]
+                if price_range[1] is not None: pf["$lte"] = price_range[1]
+                if pf: query["amount"] = pf
             def _regex_search():
                 return [self._serialize_doc(doc) for doc in self.collection.find(query).limit(50)]
 
@@ -293,12 +320,22 @@ class ProductService:
                 if emotion.lower() in product.get("emotions", []):
                     score += 15
 
-            # Product type boost (enriched field — replaces hardcoded category lists)
+            # Product type scoring — type-aware boost/penalty (Apr 2026 redesign).
+            # When user specifies a type (e.g. "physical_only" via ProductSignal),
+            # matching products get a strong bonus and mismatches get a penalty.
+            # This prevents "show me murtis" from returning consultations.
             ptype = product.get("product_type", "")
-            if ptype == "physical":
-                score += 10
-            elif ptype in ("service", "consultation"):
-                score += 15
+            if product_type:
+                if ptype == product_type:
+                    score += 20  # Strong match bonus
+                elif ptype:
+                    score -= 30  # Strong mismatch penalty
+            else:
+                # No type filter — original behavior
+                if ptype == "physical":
+                    score += 10
+                elif ptype in ("service", "consultation"):
+                    score += 15
 
             # Price-tier moderation
             price = product.get("amount", 0)

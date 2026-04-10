@@ -103,8 +103,9 @@ class SessionState:
     # llm.service._build_prompt for the consumer side.
     recent_products: List[Dict[str, Any]] = field(default_factory=list)
 
-    # Product recommendation throttling
-    product_event_count: int = 0            # Proactive product events this session
+    # Product recommendation throttling — split counters (Apr 2026 redesign)
+    product_event_count: int = 0            # Proactive/contextual product events (cap 3)
+    explicit_product_count: int = 0         # Explicit user requests (cap 10, generous)
     product_rejection_turn: int = -1        # Turn when user last rejected products
     product_rejection_count: int = 0        # Total rejections
     user_dismissed_products: bool = False   # Hard kill: user said "stop products"
@@ -147,6 +148,7 @@ class SessionState:
             "shown_product_ids": list(self.shown_product_ids),
             "recent_products": self.recent_products,
             "product_event_count": self.product_event_count,
+            "explicit_product_count": self.explicit_product_count,
             "product_rejection_turn": self.product_rejection_turn,
             "product_rejection_count": self.product_rejection_count,
             "user_dismissed_products": self.user_dismissed_products,
@@ -186,6 +188,7 @@ class SessionState:
             shown_product_ids=set(data.get("shown_product_ids", [])),
             recent_products=data.get("recent_products", []),
             product_event_count=data.get("product_event_count", 0),
+            explicit_product_count=data.get("explicit_product_count", 0),
             product_rejection_turn=data.get("product_rejection_turn", -1),
             product_rejection_count=data.get("product_rejection_count", 0),
             user_dismissed_products=data.get("user_dismissed_products", False),

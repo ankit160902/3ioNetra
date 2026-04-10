@@ -113,11 +113,12 @@ class TestExplicitRequest:
         assert is_ready is True
         assert trigger == "explicit_request"
 
-    def test_needs_direct_answer_triggers_guidance(self):
+    def test_needs_direct_answer_triggers_guidance_for_neutral_user(self):
+        """needs_direct_answer flag triggers guidance when user is not in distress."""
         session = _make_session(turn_count=1)
         fsm = ConversationFSM(session)
         is_ready, trigger = fsm.evaluate(
-            _default_analysis(needs_direct_answer=True), []
+            _default_analysis(needs_direct_answer=True, emotion="curiosity"), []
         )
         assert is_ready is True
         assert trigger == "explicit_request"
@@ -139,6 +140,158 @@ class TestExplicitRequest:
             _default_analysis(intent=IntentType.ASKING_PANCHANG), []
         )
         assert is_ready is True
+
+
+# ---------------------------------------------------------------------------
+# Listening-first guard for distressed users on early turns
+# ---------------------------------------------------------------------------
+
+class TestListeningFirstGuard:
+    """Verify that the needs_listening_first guard blocks premature guidance.
+
+    The intent agent's needs_direct_answer flag is heuristic and often fires
+    for emotional vents. For distressed users on their first or second turn,
+    the FSM should keep them in LISTENING regardless of that flag.
+    """
+
+    def test_distressed_user_turn_zero_stays_listening(self):
+        """User opening with anxiety + needs_direct_answer should NOT jump to guidance."""
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="anxiety", needs_direct_answer=True), []
+        )
+        assert is_ready is False
+        assert trigger == "listening"
+
+    def test_distressed_user_turn_one_stays_listening(self):
+        """Even on turn 1, distressed users get one more listening turn."""
+        session = _make_session(turn_count=1)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="grief", needs_direct_answer=True), []
+        )
+        assert is_ready is False
+
+    def test_distressed_user_turn_two_can_proceed(self):
+        """After 2 listening turns, distressed users can move to guidance."""
+        session = _make_session(turn_count=2)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="anxiety", needs_direct_answer=True), []
+        )
+        assert is_ready is True
+
+    def test_neutral_user_turn_zero_can_proceed(self):
+        """Non-distressed users still bypass via needs_direct_answer."""
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="curiosity", needs_direct_answer=True), []
+        )
+        assert is_ready is True
+
+    def test_explicit_user_request_bypasses_guard_even_when_distressed(self):
+        """Verse Request and similar explicit signals are not blocked by listening-first.
+
+        If a distressed user explicitly asks "share a verse on grief", they
+        get the verse — they have explicitly named what they want.
+        """
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="grief"), ["Verse Request"]
+        )
+        assert is_ready is True
+        assert trigger == "explicit_request"
+
+    def test_panchang_query_bypasses_guard_even_when_distressed(self):
+        """Factual panchang queries are not blocked by listening-first."""
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(intent=IntentType.ASKING_PANCHANG, emotion="anxiety"), []
+        )
+        assert is_ready is True
+
+    def test_distressed_user_low_intensity_emotion_can_proceed(self):
+        """Mild emotions (e.g. confusion, curiosity) don't trigger the guard."""
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(emotion="confusion", needs_direct_answer=True), []
+        )
+        assert is_ready is True
+
+    def test_grief_vent_misclassified_as_seeking_guidance_stays_listening(self):
+        """Regression for live E2E S1: 'I lost my mother last month and I
+        can't stop crying' → IntentAgent flagged as SEEKING_GUIDANCE on
+        turn 1, the FSM jumped straight to GUIDANCE because transition 3
+        (is_guidance_ask) had no listening guard. Adding the
+        needs_listening_first guard to transition 3 fixes this — the FSM
+        must now hold in LISTENING for grief openers regardless of intent.
+        """
+        session = _make_session(turn_count=1, last_user_message="I lost my mother and I can't stop crying")
+        fsm = ConversationFSM(session)
+        is_ready, trigger = fsm.evaluate(
+            _default_analysis(
+                intent=IntentType.SEEKING_GUIDANCE,
+                emotion="grief",
+                urgency="high",
+            ),
+            [],
+        )
+        assert is_ready is False, (
+            f"Distressed grief vent on turn 1 must stay in LISTENING "
+            f"regardless of intent classification (got trigger={trigger})"
+        )
+        assert trigger == "listening"
+
+    def test_high_urgency_blocks_guidance_even_for_neutral_emotion(self):
+        """If IntentAgent flags urgency=high, listening guard fires even
+        when the surface emotion looks neutral. Urgency is the LLM's own
+        severity signal — we trust it without a hardcoded emotion check.
+        """
+        session = _make_session(turn_count=0)
+        fsm = ConversationFSM(session)
+        is_ready, _ = fsm.evaluate(
+            _default_analysis(
+                intent=IntentType.SEEKING_GUIDANCE,
+                emotion="confusion",
+                urgency="high",
+            ),
+            [],
+        )
+        assert is_ready is False
+
+    def test_high_readiness_score_blocks_when_distressed_on_turn_zero(self):
+        """Even a 0.95 readiness score should not unlock guidance for a
+        distressed turn-0 user. Transition 4 (signal-based) now also
+        respects the listening guard.
+        """
+        session = _make_session(
+            turn_count=0,
+            readiness=0.95,
+            emotional_state="grief",
+            signals=4,
+        )
+        fsm = ConversationFSM(session)
+        is_ready, _ = fsm.evaluate(
+            _default_analysis(emotion="grief", urgency="high"),
+            [],
+        )
+        assert is_ready is False
+
+    def test_is_explicit_request_composite_remains_truthy(self):
+        """The composite predicate is preserved for backwards compatibility."""
+        session = _make_session(turn_count=1)
+        fsm = ConversationFSM(session)
+        fsm._analysis = _default_analysis(needs_direct_answer=True)
+        # The composite is True even though the transition is blocked.
+        assert fsm.is_explicit_request() is True
+        # The split predicates expose the difference.
+        assert fsm.is_explicit_user_request() is False
+        assert fsm.is_inferred_direct_answer() is True
 
 
 # ---------------------------------------------------------------------------

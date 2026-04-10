@@ -170,9 +170,15 @@ class MockProduct:
         limit: int = 5,
         emotion: str = "",
         deity: str = "",
+        product_type: str = None,
+        price_range: tuple = None,
     ) -> List[Dict[str, Any]]:
         self.search_count += 1
-        return self._products[:limit]
+        results = self._products[:limit]
+        # Filter by product_type if provided (matches real implementation)
+        if product_type:
+            results = [p for p in results if p.get("product_type", "") == product_type] or results
+        return results[:limit]
 
     async def search_by_metadata(
         self,

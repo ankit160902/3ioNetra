@@ -147,29 +147,65 @@ class ProductRecommender:
         proactive inference, filtering, recording.
         """
         intent = analysis.get("intent")
+
+        # Read the structured ProductSignal (falls back to legacy boolean)
+        product_signal = analysis.get("product_signal", {})
+
+        # Validate the signal — catches emotion conflicts, follow-up context,
+        # adversarial exploitation, negative sentiment, and Turn 1 leaks.
+        # Only suppresses, never triggers. The IntentAgent remains the sole
+        # positive authority for product recommendations.
+        from services.product_validator import validate_product_signal
+        product_signal = validate_product_signal(product_signal, analysis, message, session)
+
+        product_intent = product_signal.get("intent", "none")
+        type_filter_raw = product_signal.get("type_filter", "any")
+        type_filter = None if type_filter_raw == "any" else type_filter_raw.replace("_only", "")
+        max_results = product_signal.get("max_results", 0)
+
+        # Detect rejection from the signal AND from message text
         self._detect_product_rejection(session, message, analysis)
 
         is_explicit = (
             "Product Inquiry" in turn_topics
             or intent == IntentType.PRODUCT_SEARCH
+            or product_intent == "explicit_search"
         )
-        recommend_from_intent = analysis.get("recommend_products", False)
 
         products = []
 
-        # Path 1: Explicit user request — bypasses all gates except crisis
+        # Path 1: Explicit user request — bypasses all gates except crisis.
+        # Uses split counter (explicit_product_count) with generous cap (10).
         if is_explicit:
-            products = await self._search_explicit(session, message, analysis, life_domain)
+            products = await self._search_explicit(
+                session, message, analysis, life_domain,
+                product_type=type_filter,
+                limit=max_results or 5,
+            )
+            if products:
+                session.explicit_product_count += 1
 
-        # Path 2: IntentAgent says recommend — the IntentAgent sees the full
-        # conversation context (emotion, intent, message) and decides
-        # contextually. No hardcoded intent/emotion overrides.
-        elif recommend_from_intent:
-            products = await self._search_intent_recommended(session, analysis, life_domain)
+        # Path 2: Contextual need — IntentAgent says items are needed
+        elif product_intent == "contextual_need" and max_results > 0:
+            products = await self._search_intent_recommended(
+                session, analysis, life_domain,
+                product_type=type_filter,
+                limit=max_results or 3,
+            )
+            if products:
+                session.product_event_count += 1
 
-        # Path 3 (proactive inference) REMOVED — Apr 2026 adaptive architecture.
-        # The IntentAgent's recommend_products boolean is the single authority.
-        # Proactive keyword-scanning was the source of most product spam.
+        # Path 2b: Casual mention — show at most 1-2 products
+        elif product_intent == "casual_mention" and max_results > 0:
+            products = await self._search_intent_recommended(
+                session, analysis, life_domain,
+                product_type=type_filter,
+                limit=min(max_results, 2),
+            )
+            if products:
+                session.product_event_count += 1
+
+        # All other cases (none, negative): no products
 
         # Post-processing: filter already-shown + record
         if products:
@@ -283,7 +319,8 @@ class ProductRecommender:
     # Internal: search paths
     # ------------------------------------------------------------------
 
-    async def _search_explicit(self, session, message, analysis, life_domain) -> List[Dict]:
+    async def _search_explicit(self, session, message, analysis, life_domain,
+                               product_type=None, limit=5) -> List[Dict]:
         """Explicit product request — bypasses all gates except crisis."""
         if self._should_suppress(session, analysis, is_explicit_request=True):
             return []
@@ -293,6 +330,8 @@ class ProductRecommender:
             search_terms, life_domain=life_domain,
             emotion=analysis.get("emotion", ""),
             deity=self._get_conversation_deity(session, analysis),
+            product_type=product_type,
+            limit=limit,
         )
         if not products:
             products = await self.product_service.get_recommended_products(
@@ -301,28 +340,59 @@ class ProductRecommender:
             session.product_event_count += 1
         return products
 
-    async def _search_intent_recommended(self, session, analysis, life_domain) -> List[Dict]:
-        """Intent agent recommended products — uses enriched metadata search."""
+    async def _search_intent_recommended(self, session, analysis, life_domain,
+                                         product_type=None, limit=3) -> List[Dict]:
+        """Intent agent recommended products — two-stage search.
+
+        Stage 1: Text search using signal_keywords from ProductSignal.
+                 Matches product names directly (e.g. "mala" → "Rudraksha Mala").
+        Stage 2: Metadata search using enriched fields (practices, deities, etc.).
+                 Catches products tagged with relevant attributes.
+        Results are merged (text search preferred, metadata supplements).
+        """
         if self._should_suppress(session, analysis, is_explicit_request=False):
             return []
 
-        # Build metadata query from intent analysis signals
+        product_signal = analysis.get("product_signal", {})
+        signal_keywords = product_signal.get("search_keywords", [])
+
         practices = self._detect_practices_from_context(session, analysis)
         deity = self._get_conversation_deity(session, analysis)
         emotion = analysis.get("emotion", "") if analysis else ""
 
-        logger.info(f"Metadata product search: practices={practices} deity={deity} domain={life_domain} emotion={emotion}")
+        logger.info(f"Intent-recommended search: signal_kw={signal_keywords} practices={practices} deity={deity} domain={life_domain} emotion={emotion} type={product_type}")
 
-        products = await self.product_service.search_by_metadata(
-            practices=practices if practices else None,
-            deities=[deity] if deity else None,
-            emotions=[emotion] if emotion else None,
-            life_domains=[life_domain.lower()] if life_domain and life_domain != "unknown" else None,
-            limit=5,
-        )
+        products = []
+
+        # Stage 1: Text search with signal_keywords (direct product name matching)
+        if signal_keywords:
+            keyword_query = " ".join(signal_keywords[:6])
+            products = await self.product_service.search_products(
+                keyword_query, life_domain=life_domain,
+                emotion=emotion, deity=deity,
+                product_type=product_type,
+                limit=limit,
+            )
+
+        # Stage 2: Metadata search (enriched field matching)
+        if len(products) < limit:
+            metadata_products = await self.product_service.search_by_metadata(
+                practices=practices if practices else None,
+                deities=[deity] if deity else None,
+                emotions=[emotion] if emotion else None,
+                life_domains=[life_domain.lower()] if life_domain and life_domain != "unknown" else None,
+                product_type=product_type,
+                limit=limit,
+            )
+            # Merge: supplement with metadata results, deduped by ID
+            existing_ids = {p.get("_id") for p in products}
+            for mp in metadata_products:
+                if mp.get("_id") not in existing_ids and len(products) < limit:
+                    products.append(mp)
+                    existing_ids.add(mp.get("_id"))
+
         if products:
             session.last_proactive_product_turn = session.turn_count
-            session.product_event_count += 1
         return products
 
     async def _infer_proactive(self, session, message, life_domain, analysis, is_guidance_phase) -> List[Dict]:
@@ -387,21 +457,30 @@ class ProductRecommender:
     # ------------------------------------------------------------------
 
     def _should_suppress(self, session, analysis=None, is_explicit_request=False) -> bool:
-        """Minimal product gatekeeper — returns True to block.
+        """Product gatekeeper — returns True to block.
 
-        Apr 2026 adaptive architecture: most gates removed. The IntentAgent's
-        `recommend_products` boolean is the contextual authority for whether
-        products are appropriate. This function only checks the things the
-        IntentAgent can't see:
+        Checks things the IntentAgent can't see (session state, timing):
         1. Crisis urgency → always block (safety, non-negotiable)
-        2. Explicit user request → bypass remaining gates
-        3. Hard user dismissal ("stop suggesting products") → respect it
-        4. Session cap → cost/UX guard (max 3 product events per session)
+        2. Explicit user request → bypass remaining gates (generous cap 10)
+        3. Turn 1 → no products on greeting (non-explicit only)
+        4. Post-crisis cooldown → 3 turns after de-escalation
+        5. Hard user dismissal ("stop suggesting products")
+        6. Session cap → proactive: 3, explicit: 10
         """
         if analysis and analysis.get("urgency") == "crisis":
             return True
         if is_explicit_request:
+            # Explicit requests still blocked by crisis and hard dismissal
+            if session.user_dismissed_products:
+                return True
+            if session.explicit_product_count >= 10:
+                return True
             return False
+        # Non-explicit gates
+        if session.turn_count < 1:
+            return True  # Never recommend on first message
+        if session.crisis_resolved and (session.turn_count - getattr(session, 'crisis_turn_count', 0)) < 3:
+            return True  # Post-crisis cooldown
         if session.user_dismissed_products:
             return True
         if session.product_event_count >= settings.PRODUCT_SESSION_CAP:
@@ -572,7 +651,13 @@ class ProductRecommender:
         return ""
 
     def _filter_shown(self, session, products):
-        return [p for p in products if p.get("_id") not in session.shown_product_ids]
+        """Filter already-shown products by ID AND name (handles duplicates)."""
+        shown_names = {p.get("name", "").lower() for p in session.recent_products}
+        return [
+            p for p in products
+            if p.get("_id") not in session.shown_product_ids
+            and p.get("name", "").lower() not in shown_names
+        ]
 
     def _record_shown(self, session, products):
         """Record products as shown in this session.
@@ -597,7 +682,12 @@ class ProductRecommender:
                 "_id": pid,
                 "name": p.get("name", ""),
                 "category": p.get("category", ""),
+                "position": len(session.recent_products) + 1,
+                "amount": p.get("amount", 0),
+                "currency": p.get("currency", "INR"),
+                "description_snippet": (p.get("description") or "")[:150],
+                "product_type": p.get("product_type", "physical"),
             })
-        # FIFO cap — keep only the last 5 products visible to the LLM.
-        if len(session.recent_products) > 5:
-            session.recent_products = session.recent_products[-5:]
+        # FIFO cap — keep only the last 10 products visible to the LLM.
+        if len(session.recent_products) > 10:
+            session.recent_products = session.recent_products[-10:]

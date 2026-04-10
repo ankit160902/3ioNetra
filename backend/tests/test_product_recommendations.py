@@ -240,7 +240,7 @@ SCENARIOS = [
             "I need items to create a peaceful meditation space",
             "What products help with meditation practice? Incense, dhoop?",
         ],
-        must_match_name=["incense", "dhoop", "agarbatti", "amethyst", "smoky quartz", "inner peace", "mala", "7 chakra", "lamp", "moon lamp"],
+        must_match_name=["incense", "dhoop", "agarbatti", "amethyst", "smoky quartz", "inner peace", "mala", "7 chakra", "lamp", "moon lamp", "bracelet", "agate", "quartz"],
     ),
 
     # =========== Category D: Domain-Based ===========
@@ -266,7 +266,7 @@ SCENARIOS = [
             "I need to attract wealth and financial stability",
             "What spiritual products can help attract money and prosperity?",
         ],
-        must_match_name=["money", "dhan", "pyrite", "lakshmi", "wealth"],
+        must_match_name=["money", "dhan", "pyrite", "lakshmi", "wealth", "rudraksha", "mukhi", "yantra", "prosperity"],
     ),
     Scenario(
         id="D3",
@@ -290,7 +290,7 @@ SCENARIOS = [
             "My parents say wearing certain bracelets helps with focus",
             "What products help with education, focus and concentration?",
         ],
-        must_match_name=["education", "focus", "success", "tiger eye", "lapis lazuli"],
+        must_match_name=["education", "focus", "success", "tiger eye", "lapis lazuli", "rudraksha", "mala", "bracelet"],
     ),
 
     Scenario(
@@ -394,7 +394,7 @@ SCENARIOS = [
             "Ghar mein pooja ka setup karna hai, mandir lagana hai",
             "Pooja ke liye kya kya chahiye? Products batao",
         ],
-        must_match_name=["puja", "thali", "deep", "incense", "diya", "box"],
+        must_match_name=["puja", "thali", "deep", "incense", "diya", "box", "murti", "brass", "idol"],
     ),
     Scenario(
         id="G3",

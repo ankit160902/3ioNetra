@@ -1,39 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const API_BASE = 'http://localhost:8080';
-
-async function loginViaAPI(page: any, request: any) {
-  const email = `e2etest_${Date.now()}@test.com`;
-  const res = await request.post(`${API_BASE}/api/auth/register`, {
-    data: { name: 'E2E Tester', email, password: 'TestPass123', phone: '9876543210', gender: 'Male', dob: '1995-06-15', profession: 'Working Professional' }
-  });
-  const data = await res.json();
-  await page.evaluate(({ token, user }: any) => {
-    localStorage.setItem('auth_token', token);
-    localStorage.setItem('auth_user', JSON.stringify(user));
-  }, { token: data.token, user: data.user });
-  await page.reload();
-  await page.waitForSelector('input[placeholder="Share your spiritual journey..."]', { timeout: 10000 });
-}
-
-// ---------------------------------------------------------------------------
-// Helper: send a chat message and wait for assistant response
-// ---------------------------------------------------------------------------
-async function sendChatMessage(page: any, text: string) {
-  const input = page.locator('input[placeholder="Share your spiritual journey..."]');
-  await input.fill(text);
-  await page.locator('button[type="submit"]').click();
-  await page.waitForFunction(
-    () => {
-      const msgs = document.querySelectorAll('.animate-fade-in');
-      if (msgs.length < 2) return false;
-      const last = msgs[msgs.length - 1];
-      return last && last.textContent && last.textContent.trim().length > 10;
-    },
-    { timeout: 30000 }
-  );
-  await page.waitForTimeout(1500);
-}
+import { loginViaAPI, sendChatMessage } from './helpers/auth';
 
 // ---------------------------------------------------------------------------
 // Sidebar Tests
@@ -157,9 +123,12 @@ test.describe('Sidebar Tests', () => {
     await newSessionButton.click();
     await page.waitForTimeout(1000);
 
-    // The chat should be cleared — the empty state welcome screen should show
-    const welcomeText = page.locator('text=Elevate your spirit');
-    await expect(welcomeText).toBeVisible({ timeout: 5000 });
+    // The chat should be cleared — after New Session, the empty state
+    // shows the welcome cards (Seek Wisdom / Daily Support) rendered by
+    // pages/index.tsx around line 773. "Elevate your spirit" only exists
+    // on the LoginPage, NOT in the authenticated empty state.
+    const welcomeCard = page.getByRole('button', { name: /Seek Wisdom/i });
+    await expect(welcomeCard).toBeVisible({ timeout: 5000 });
   });
 
   test('UI-25: Conversation history appears in sidebar after exchanging messages', async ({ page, request }) => {
@@ -168,18 +137,26 @@ test.describe('Sidebar Tests', () => {
 
     // Send messages to create a conversation that will auto-save
     await sendChatMessage(page, 'I want to learn about karma yoga');
-    // Auto-save triggers 1.5s after messages change; wait for it
+    // Auto-save fires 2s after messages change (see pages/index.tsx:333)
+    // and then triggers a fetchHistory. Wait for both to complete.
     await page.waitForTimeout(3000);
 
     // Open the sidebar
     const toggleButton = page.locator('header button').first();
     await toggleButton.click();
-    await page.waitForTimeout(1000);
+
+    // Wait for the "Loading conversations..." placeholder to disappear.
+    // It's rendered while fetchHistory is in flight (pages/index.tsx
+    // historyLoading state). Without this wait, the test races the
+    // fetch and counts 0 items.
+    await expect(page.locator('text=Loading conversations...')).not.toBeVisible({ timeout: 10000 });
 
     // The sidebar should now have at least one conversation history item.
-    // History items are buttons inside the sidebar's scrollable area with a title and date.
-    // They appear after the "New Session" button.
+    // History items are buttons inside the sidebar's scrollable area
+    // with a title and date — they're rendered AFTER the "New Session"
+    // button so we filter that out.
     const historyItems = page.locator('aside .overflow-y-auto button').filter({ hasNotText: 'New Session' });
+    await expect(historyItems.first()).toBeVisible({ timeout: 5000 });
     const count = await historyItems.count();
     expect(count).toBeGreaterThanOrEqual(1);
   });

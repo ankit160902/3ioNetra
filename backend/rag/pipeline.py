@@ -22,6 +22,36 @@ from services.cache_service import get_cache_service
 logger = logging.getLogger(__name__)
 
 
+def _get_onnx_providers() -> List[str]:
+    """Return the explicit ONNX Runtime execution provider list.
+
+    Why this exists
+    ---------------
+    By default, ONNX Runtime probes every available execution provider
+    on the host. On Apple Silicon Macs the CoreML provider probe fails
+    with ``EP Error SystemError : 20``, then the runtime falls back to
+    CPU. The fallback works but emits 4 lines of stderr noise on every
+    cold start, hiding real errors.
+
+    Setting an explicit provider list short-circuits the probe and
+    documents the supported execution paths. CUDA is preferred when
+    available; otherwise we use CPU directly. CoreML is intentionally
+    excluded — sentence-transformers' CoreML support is incomplete and
+    the speedup on Apple Silicon doesn't outweigh the noise + risk of
+    silent fallback.
+    """
+    providers: List[str] = []
+    try:
+        import torch  # type: ignore[import-not-found]
+
+        if torch.cuda.is_available():
+            providers.append("CUDAExecutionProvider")
+    except Exception:
+        pass
+    providers.append("CPUExecutionProvider")
+    return providers
+
+
 def _sanitize_for_prompt(text: str, max_len: int = 500) -> str:
     """Sanitize user input before interpolation into LLM prompts.
     Strips characters that could be interpreted as prompt structure."""
@@ -143,215 +173,13 @@ _CITATION_PATTERNS = [
 
 
 # ------------------------------------------------------------------
-# Spell correction: Dharmic vocabulary for Levenshtein-based correction
+# Query normalization is handled by services.query_normalizer.QueryNormalizer.
+# The previous Levenshtein-based spell corrector and dharmic vocabulary
+# tables that lived here mangled common English words into Sanskrit terms
+# (e.g. "How" → "homa", "Give" → "gita") because they operated on whole
+# strings without a stopword mask. The semantic infrastructure (E5 + BGE
+# CrossEncoder) handles morphology and fuzzy matching far better.
 # ------------------------------------------------------------------
-
-# ~200 high-frequency dharmic terms that users commonly misspell
-_DHARMIC_VOCABULARY = {
-    # Scriptures
-    "bhagavad", "gita", "geeta", "ramayana", "mahabharata", "upanishad",
-    "vedanta", "purana", "veda", "rigveda", "yajurveda", "samaveda",
-    "atharvaveda", "brahma", "sutra", "patanjali", "charaka", "samhita",
-    "manusmriti", "arthashastra", "panchatantra", "vishnu",
-    # Deities
-    "shiva", "krishna", "rama", "hanuman", "ganesh", "ganesha", "durga",
-    "lakshmi", "saraswati", "parvati", "kali", "brahma", "vishnu",
-    "narayana", "mahesh", "shankar", "mahadev", "radha", "sita",
-    # Concepts
-    "karma", "dharma", "moksha", "samsara", "atman", "brahman", "maya",
-    "ahimsa", "bhakti", "yoga", "pranayama", "dhyana", "samadhi",
-    "kundalini", "chakra", "mantra", "tantra", "shakti", "puja",
-    "seva", "tapas", "vairagya", "viveka", "sattva", "rajas", "tamas",
-    "guna", "ashtanga", "hatha", "jnana", "kriya", "nidra",
-    # Practices
-    "meditation", "chanting", "kirtan", "bhajan", "aarti", "arati",
-    "yajna", "havan", "homa", "sandhya", "vandana", "japa", "mala",
-    "rudraksha", "tulsi", "tirtha", "yatra", "darshan", "prasad",
-    "abhishekam", "archana", "sankalpa", "diksha",
-    # Life concepts
-    "grihastha", "vanaprastha", "sannyasa", "brahmachari", "ashrama",
-    "varna", "purushartha", "artha", "kama", "nishkama",
-    # Common misspelling targets
-    "shloka", "sloka", "sutra", "stotra", "stuti", "chalisa",
-    "hanuman", "gayatri", "namaskar", "namaste", "pranam",
-    "ayurveda", "vedic", "upanishadic", "yogic", "tantric",
-    "detachment", "liberation", "devotion", "righteousness",
-    "consciousness", "enlightenment", "reincarnation", "pilgrimage",
-}
-
-# English → Sanskrit/Hindi concept mapping for bilingual retrieval boost
-_ENGLISH_TO_SANSKRIT = {
-    "detachment": ["vairagya", "विराग"],
-    "meditation": ["dhyana", "ध्यान"],
-    "duty": ["dharma", "kartavya", "कर्तव्य"],
-    "liberation": ["moksha", "mukti", "मोक्ष"],
-    "devotion": ["bhakti", "भक्ति"],
-    "knowledge": ["jnana", "vidya", "ज्ञान"],
-    "action": ["karma", "कर्म"],
-    "yoga": ["yoga", "योग"],
-    "breath": ["prana", "pranayama", "प्राण"],
-    "soul": ["atman", "आत्मा"],
-    "god": ["brahman", "ishvara", "ब्रह्मन"],
-    "truth": ["satya", "सत्य"],
-    "non-violence": ["ahimsa", "अहिंसा"],
-    "peace": ["shanti", "शांति"],
-    "self-control": ["dama", "संयम"],
-    "renunciation": ["sannyasa", "tyaga", "त्याग"],
-    "compassion": ["karuna", "daya", "करुणा"],
-    "austerity": ["tapas", "तपस"],
-    "wisdom": ["prajna", "viveka", "प्रज्ञा"],
-    "illusion": ["maya", "माया"],
-    "suffering": ["dukha", "दुःख"],
-    "desire": ["kama", "trishna", "काम"],
-    "anger": ["krodha", "क्रोध"],
-    "greed": ["lobha", "लोभ"],
-    "pride": ["ahamkara", "अहंकार"],
-    "ego": ["ahamkara", "अहंकार"],
-    "fear": ["bhaya", "भय"],
-    "faith": ["shraddha", "श्रद्धा"],
-    "patience": ["dhairya", "धैर्य"],
-    "forgiveness": ["kshama", "क्षमा"],
-    "contentment": ["santosha", "संतोष"],
-    "service": ["seva", "सेवा"],
-    "charity": ["dana", "दान"],
-    "worship": ["puja", "upasana", "पूजा"],
-    "chanting": ["japa", "kirtan", "जप"],
-    "pilgrimage": ["tirtha", "yatra", "तीर्थ"],
-    "fasting": ["upavasa", "vrata", "उपवास"],
-    "teacher": ["guru", "acharya", "गुरु"],
-    "student": ["shishya", "brahmachari", "शिष्य"],
-    "scripture": ["shastra", "grantha", "शास्त्र"],
-    "mantra": ["mantra", "मंत्र"],
-    "ritual": ["vidhi", "kriya", "विधि"],
-    "virtue": ["punya", "dharma", "पुण्य"],
-    "sin": ["papa", "adharma", "पाप"],
-    "rebirth": ["punarjanma", "samsara", "पुनर्जन्म"],
-    "heaven": ["swarga", "स्वर्ग"],
-    "concentration": ["dharana", "ekagrata", "धारणा"],
-    "equanimity": ["samatva", "sthitaprajna", "समत्व"],
-    "consciousness": ["chaitanya", "चैतन्य"],
-    "mindfulness": ["smriti", "sati", "स्मृति"],
-    "purpose": ["dharma", "purushartha", "धर्म"],
-    "duty": ["kartavya", "svadharma", "कर्तव्य"],
-    "destiny": ["prarabdha", "vidhi", "प्रारब्ध"],
-    "happiness": ["ananda", "sukha", "आनंद"],
-    "love": ["prema", "bhakti", "प्रेम"],
-    "sacrifice": ["yajna", "tyaga", "यज्ञ"],
-    "gratitude": ["kritajna", "कृतज्ञता"],
-    "humility": ["vinaya", "namrata", "विनय"],
-    "courage": ["veerya", "shaurya", "वीर्य"],
-    "discipline": ["niyama", "anushasan", "नियम"],
-    "purity": ["shuddhi", "pavitrata", "शुद्धि"],
-    "balance": ["samatva", "samyama", "संतुलन"],
-    "harmony": ["samanvaya", "समन्वय"],
-    "strength": ["shakti", "bala", "शक्ति"],
-    "self-realization": ["atma-jnana", "आत्मज्ञान"],
-    "mental health": ["manas swasthya", "chitta shuddhi"],
-    "anxiety": ["chinta", "vyakulata", "चिंता"],
-    "depression": ["vishada", "nirasha", "विषाद"],
-    "stress": ["tanav", "तनाव"],
-    "relationship": ["sambandha", "संबंध"],
-    "family": ["parivar", "kutumb", "परिवार"],
-    "death": ["mrityu", "antakala", "मृत्यु"],
-    "grief": ["shoka", "viyoga", "शोक"],
-    "loneliness": ["ekaant", "एकांत"],
-    "confusion": ["moha", "bhrama", "मोह"],
-    "addiction": ["vyasana", "आसक्ति"],
-    "jealousy": ["irshya", "ईर्ष्या"],
-    "guilt": ["aparadh-bodh", "अपराध-बोध"],
-    "shame": ["lajja", "लज्जा"],
-}
-
-
-def _levenshtein_distance(s1: str, s2: str) -> int:
-    """Compute Levenshtein edit distance between two strings."""
-    if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
-    if len(s2) == 0:
-        return len(s1)
-    prev_row = range(len(s2) + 1)
-    for i, c1 in enumerate(s1):
-        curr_row = [i + 1]
-        for j, c2 in enumerate(s2):
-            insertions = prev_row[j + 1] + 1
-            deletions = curr_row[j] + 1
-            substitutions = prev_row[j] + (c1 != c2)
-            curr_row.append(min(insertions, deletions, substitutions))
-        prev_row = curr_row
-    return prev_row[-1]
-
-
-def _correct_word(word: str) -> str:
-    """Correct a single word against the dharmic vocabulary using Levenshtein distance.
-    Only corrects if distance <= 2 and the correction is unambiguous (best match is
-    clearly better than the second-best).
-    """
-    word_lower = word.lower()
-    if word_lower in _DHARMIC_VOCABULARY:
-        return word  # Already correct
-    if len(word_lower) < 3:
-        return word  # Too short to reliably correct
-
-    best_match = None
-    best_dist = float("inf")
-    second_best_dist = float("inf")
-
-    for vocab_word in _DHARMIC_VOCABULARY:
-        # Quick length filter: skip words that differ by more than 2 chars
-        if abs(len(vocab_word) - len(word_lower)) > 2:
-            continue
-        dist = _levenshtein_distance(word_lower, vocab_word)
-        if dist < best_dist:
-            second_best_dist = best_dist
-            best_dist = dist
-            best_match = vocab_word
-        elif dist < second_best_dist:
-            second_best_dist = dist
-
-    # Only correct if: distance <= 2, and best is clearly better than second-best
-    if best_match and best_dist <= 2 and best_dist < second_best_dist:
-        return best_match
-    return word
-
-
-def _augment_english_concepts(query: str) -> str:
-    """Append Sanskrit/Hindi equivalents for English spiritual terms in the query.
-    Bridges the bilingual gap: English queries get matched to Sanskrit-heavy corpus.
-    Only augments — never removes original terms. Cost: <1ms dictionary lookup.
-    """
-    query_lower = query.lower()
-    words = set(query_lower.split())
-    augmented_terms = []
-
-    for english_term, sanskrit_list in _ENGLISH_TO_SANSKRIT.items():
-        # Check for single-word and multi-word matches
-        if english_term in words or english_term in query_lower:
-            # Only add the romanized Sanskrit terms (skip Devanagari for embedding model)
-            for term in sanskrit_list:
-                if all('\u0900' <= c <= '\u097F' for c in term if not c.isspace()):
-                    continue  # Skip pure Devanagari
-                if term.lower() not in query_lower:
-                    augmented_terms.append(term)
-
-    if augmented_terms:
-        # Limit to top 4 augmentations to avoid diluting the embedding
-        augmented = " ".join(augmented_terms[:4])
-        logger.info(f"English concept augmentation: +'{augmented}' for '{query[:40]}'")
-        return f"{query} {augmented}"
-    return query
-
-
-def _correct_spelling(query: str) -> str:
-    """Apply dharmic vocabulary spell correction to a query string.
-    Returns corrected query. Only modifies words that are close matches
-    to known dharmic terms (Levenshtein distance <= 2).
-    """
-    words = query.split()
-    corrected = [_correct_word(w) for w in words]
-    result = " ".join(corrected)
-    if result != query:
-        logger.info(f"Spell correction: '{query}' → '{result}'")
-    return result
 
 
 _BM25_STOPWORDS = frozenset({
@@ -395,7 +223,7 @@ class RAGPipeline:
     - await generate_embeddings(...)
     """
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Optional[Path] = None) -> None:
         self.verses: List[Dict] = []
         self.embeddings: Optional[np.ndarray] = None
         self.dim: int = 0
@@ -403,6 +231,11 @@ class RAGPipeline:
         self._embedding_model = None
         self._reranker_model = None
         self._llm = get_llm_service()
+        # Single source of truth for query string preprocessing.
+        # See services/query_normalizer.py for the contract.
+        from services.query_normalizer import get_query_normalizer
+        self._query_normalizer = get_query_normalizer()
+        self._data_dir_override: Optional[Path] = Path(data_dir) if data_dir is not None else None
 
     def __bool__(self) -> bool:
         return self.available
@@ -417,8 +250,11 @@ class RAGPipeline:
         This allows handling massive datasets (2GB+) without OOM crashes.
         """
         try:
-            base_dir = Path(__file__).parent.parent
-            processed_dir = base_dir / "data" / "processed"
+            if self._data_dir_override is not None:
+                processed_dir = self._data_dir_override
+            else:
+                base_dir = Path(__file__).parent.parent
+                processed_dir = base_dir / "data" / "processed"
             metadata_path = processed_dir / "verses.json"
             embeddings_path = processed_dir / "embeddings.npy"
 
@@ -505,16 +341,15 @@ class RAGPipeline:
             # Eagerly load ML models at startup to avoid per-request delays
             self._load_ml_models()
 
-            # Build Sanskrit term lookup for query expansion decisions
-            _terms = set(_DHARMIC_VOCABULARY)
-            for vals in _ENGLISH_TO_SANSKRIT.values():
-                _terms.update(v.lower() for v in vals if not any(ord(c) > 127 for c in v))
-            for v in self.verses:
-                topic = v.get("topic", "")
-                if topic:
-                    _terms.update(t.strip().lower() for t in topic.split(","))
-            self._sanskrit_terms = frozenset(_terms)
-            logger.info(f"Sanskrit term set built: {len(self._sanskrit_terms)} terms")
+            # Note: the previous implementation built a hardcoded "sanskrit
+            # term lookup" set used by ``_contains_sanskrit_term`` to decide
+            # whether to trigger query expansion. That heuristic has been
+            # removed — bilingual / synonym handling is now the responsibility
+            # of services.intent_agent.IntentAgent which produces query
+            # variants threaded into ``RAGPipeline.search(query_variants=...)``
+            # upstream. Short queries still trigger expansion via the LLM
+            # path; long queries go through embedding/reranker which handle
+            # multilingual matching natively.
 
             # Build reference index for citation short-circuit (item 1.3)
             self._reference_index: Dict[str, int] = {}
@@ -628,8 +463,24 @@ class RAGPipeline:
                     logger.info(f"SPLADE: loaded model + index ({self._splade_index.shape})")
                 except Exception as e:
                     logger.warning(f"SPLADE: failed to load — falling back to BM25: {e}")
+                    if settings.SPLADE_REQUIRED:
+                        raise RuntimeError(
+                            f"SPLADE_REQUIRED=True but SPLADE failed to load: {e}. "
+                            "Either fix the SPLADE model/index or set "
+                            "SPLADE_ENABLED=False / SPLADE_REQUIRED=False."
+                        ) from e
             else:
-                logger.info("SPLADE: enabled but no index found — run build_splade_index.py first")
+                # The index is missing. Surface this loudly — silent
+                # degradation to BM25 hides corrupted ingest pipelines.
+                msg = (
+                    f"SPLADE: enabled but no index found at {splade_index_path}. "
+                    "To fix, run: python scripts/build_splade_index.py"
+                )
+                if settings.SPLADE_REQUIRED:
+                    raise RuntimeError(
+                        msg + " (SPLADE_REQUIRED=True — refusing to start in degraded mode)"
+                    )
+                logger.error(msg + " — falling back to BM25 (set SPLADE_REQUIRED=True to fail fast)")
 
         # Block all future HuggingFace Hub HTTP requests
         os.environ["HF_HUB_OFFLINE"] = "1"
@@ -638,10 +489,6 @@ class RAGPipeline:
             "RAGPipeline: ML models loaded at startup (embedding + reranker) — "
             "HuggingFace Hub set to offline mode for runtime"
         )
-
-    def _contains_sanskrit_term(self, query: str) -> bool:
-        """Check if query contains any known Sanskrit/dharmic term."""
-        return any(tok in self._sanskrit_terms for tok in query.lower().split())
 
     def _try_citation_lookup(self, query: str) -> Optional[List[Dict]]:
         """Short-circuit: if query is a direct verse citation (e.g. 'BG 2.47'),
@@ -726,8 +573,16 @@ class RAGPipeline:
         from sentence_transformers import SentenceTransformer
         if settings.EMBEDDING_ONNX_ENABLED:
             try:
-                logger.info("RAGPipeline: loading embedding model with ONNX backend (2-4x faster)")
-                self._embedding_model = SentenceTransformer(settings.EMBEDDING_MODEL, backend="onnx")
+                providers = _get_onnx_providers()
+                logger.info(
+                    "RAGPipeline: loading embedding model with ONNX backend "
+                    f"(providers={providers})"
+                )
+                self._embedding_model = SentenceTransformer(
+                    settings.EMBEDDING_MODEL,
+                    backend="onnx",
+                    model_kwargs={"provider": providers[0]},
+                )
                 return
             except Exception as e:
                 logger.warning(f"ONNX embedding load failed, falling back to PyTorch: {e}")
@@ -740,14 +595,29 @@ class RAGPipeline:
         if self._reranker_model is not None:
             return
         from sentence_transformers import CrossEncoder
+        # Pass fix_mistral_regex=True to the underlying tokenizer so the
+        # outdated regex warning from the bge-reranker-v2-m3 tokenizer is
+        # silenced. Without this, every cold start emits a HuggingFace
+        # warning about an incorrect regex pattern that may slightly
+        # affect tokenization quality.
+        _tokenizer_args = {"fix_mistral_regex": True}
         if settings.RERANKER_ONNX_ENABLED:
             try:
                 # Load from local DEV cache if ONNX model exists there, else from HuggingFace
                 _local_reranker = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "reranker")
                 _onnx_path = os.path.join(_local_reranker, "onnx", "model.onnx")
                 _reranker_src = _local_reranker if os.path.exists(_onnx_path) else settings.RERANKER_MODEL
-                logger.info(f"RAGPipeline: loading reranker with ONNX backend from {_reranker_src}")
-                self._reranker_model = CrossEncoder(_reranker_src, backend="onnx")
+                providers = _get_onnx_providers()
+                logger.info(
+                    "RAGPipeline: loading reranker with ONNX backend from "
+                    f"{_reranker_src} (providers={providers})"
+                )
+                self._reranker_model = CrossEncoder(
+                    _reranker_src,
+                    backend="onnx",
+                    model_kwargs={"provider": providers[0]},
+                    tokenizer_args=_tokenizer_args,
+                )
                 _model_type = type(self._reranker_model.model).__name__
                 logger.info(f"RAGPipeline: reranker loaded — model_type={_model_type} device={self._reranker_model.device}")
                 if "ORT" in _model_type:
@@ -1617,12 +1487,13 @@ Respond ONLY with 2 terms, separated by a newline."""
         _t_start = time.perf_counter()
         _timings = {}
 
-        # Fix 1: Spell correction before embedding (catches "meditaiton", "hanumn", etc.)
-        query = _correct_spelling(query)
-
-        # Fix 3: English concept augmentation — bridge bilingual gap
-        if not self._is_hindi_or_devanagari(query) and not self._is_transliterated_hindi(query):
-            query = _augment_english_concepts(query)
+        # Query normalization (NFKC + whitespace) is delegated to
+        # services/query_normalizer.py. The normalizer never substitutes user
+        # tokens and never appends domain-specific synonyms — bilingual /
+        # synonym handling lives in IntentAgent.query_variants which threads
+        # through this method's ``query_variants`` parameter.
+        normalized = self._query_normalizer.normalize(query)
+        query = normalized.normalized
 
         # Auto-exclude temple docs for non-temple queries
         if doc_type_filter is None and intent is not None:
@@ -1643,11 +1514,14 @@ Respond ONLY with 2 terms, separated by a newline."""
         needs_translation = is_devanagari_query or is_hinglish_query
 
         # Use pre-computed variants from IntentAgent if available (saves a Gemini Flash round-trip)
+        # IntentAgent is the single source of bilingual / synonym variants —
+        # no local hardcoded vocabulary lookup. If no variants were provided
+        # upstream, fall back to expanding short queries via the LLM path.
         _has_precomputed_variants = bool(query_variants)
         needs_expansion = (
             settings.QUERY_EXPANSION_ENABLED
             and not _has_precomputed_variants
-            and (len(query.split()) < 6 or self._contains_sanskrit_term(query))
+            and len(query.split()) < 6
             and query.strip().lower() not in self._SKIP_EXPANSION
             and self._llm.available
         )

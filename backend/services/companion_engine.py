@@ -243,6 +243,24 @@ class CompanionEngine:
         if isinstance(_results[2], Exception):
             logger.warning(f"Speculative RAG failed (non-fatal): {_results[2]}")
 
+        # Guard: if IntentAgent returned an exception (via gather return_exceptions),
+        # use a safe fallback dict so downstream code doesn't crash.
+        if isinstance(analysis, Exception):
+            logger.warning(f"IntentAgent failed (non-fatal): {analysis}. Using fallback.")
+            analysis = {
+                "intent": IntentType.OTHER, "emotion": "neutral",
+                "life_domain": "unknown", "entities": {}, "urgency": "normal",
+                "summary": "", "needs_direct_answer": False,
+                "product_signal": {"intent": "none", "confidence": 0.0, "type_filter": "any",
+                                   "search_keywords": [], "max_results": 0, "sensitivity_note": ""},
+                "recommend_products": False, "product_search_keywords": [],
+                "product_rejection": False, "query_variants": [],
+                "expected_length": "moderate", "is_off_topic": False,
+            }
+        if isinstance(past_memories, Exception):
+            logger.warning(f"Memory retrieval failed (non-fatal): {past_memories}")
+            past_memories = []
+
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
 
@@ -364,7 +382,24 @@ class CompanionEngine:
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
-            should_get_verses = is_verse_request or (is_ready and not is_product_request)
+            # Gate RAG for purely practical topics — the LLM gives better
+            # practical advice when it doesn't have scripture to lean on.
+            # Spiritual grounding still comes from the persona's dharmic
+            # principles — just not specific verse citations.
+            _spiritual_cues = {"mantra", "verse", "spiritual", "prayer", "meditate",
+                               "puja", "ritual", "god", "deity", "temple", "scripture",
+                               "gita", "veda", "karma", "dharma", "moksha"}
+            _practical_domains = {"work", "career", "finance", "health", "education",
+                                  "relationship", "family", "money", "job"}
+            _life_domain_lower = (analysis.get("life_domain") or "unknown").lower()
+            _is_practical_only = (
+                not any(kw in message.lower() for kw in _spiritual_cues)
+                and any(d in _life_domain_lower for d in _practical_domains)
+            )
+            should_get_verses = (
+                is_verse_request
+                or (is_ready and not is_product_request and not _is_practical_only)
+            )
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
                 if speculative_rag_docs:

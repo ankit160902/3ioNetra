@@ -817,6 +817,18 @@ class LLMService:
         )
         is_guidance_phase = phase in (ConversationPhase.GUIDANCE, ConversationPhase.SYNTHESIS)
 
+        # Detect practical topics — gate panchang and adjust response structure
+        _practical_topic_keywords = {"job", "salary", "budget", "debt", "resume", "interview",
+                                     "boss", "deadline", "exam", "grade", "doctor", "medication",
+                                     "rent", "loan", "commute", "promotion", "appraisal",
+                                     "work hours", "office", "colleague", "manager",
+                                     "savings", "expenses", "emi", "insurance",
+                                     "school", "college", "admission", "study",
+                                     "weight", "exercise", "diet", "sleep schedule",
+                                     "relationship", "divorce", "marriage", "fight",
+                                     "parenting", "child", "teenager"}
+        _is_practical_topic = any(kw in query_lower for kw in _practical_topic_keywords)
+
         # Format user profile if available
         profile_text = ""
         if user_profile:
@@ -879,8 +891,12 @@ class LLMService:
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
                 has_data = True
 
-            # Current Panchang — only include when topic is spiritual or in guidance phase
-            if user_profile.get('current_panchang') and (is_spiritual_topic or is_guidance_phase):
+            # Current Panchang — include for spiritual topics or guidance phase,
+            # but skip for practical-only topics (job, budget, health logistics)
+            # where tithi/nakshatra references feel irrelevant.
+            if (user_profile.get('current_panchang')
+                    and (is_spiritual_topic or is_guidance_phase)
+                    and not _is_practical_topic):
                 p = user_profile['current_panchang']
                 panchang_lines = ["   • CURRENT PANCHANG (Today):"]
                 if p.get('date') or p.get('vaara'):
@@ -960,25 +976,34 @@ class LLMService:
                     profile_parts.append(f"   • Turn {s['turn']}: You suggested {s['practice']}")
                 has_data = True
 
-            # Products previously recommended in this session — surfaced so the
-            # LLM can answer follow-ups like "how do I use that mala?" with
-            # awareness of the actual item recommended. Added Apr 2026 because
-            # users were getting generic answers when referencing earlier
-            # product cards. Source: SessionState.recent_products (FIFO cap 5).
+            # Products previously recommended in this session — numbered with
+            # full details so the LLM can answer "tell me about the third one",
+            # "which is cheaper", "compare the mala and the rudraksha", etc.
             if user_profile.get('recent_products'):
                 recent_products = user_profile['recent_products']
-                profile_parts.append("\n   PRODUCTS YOU RECOMMENDED IN THIS SESSION:")
-                for p in recent_products[-5:]:
+                profile_parts.append("\n   PRODUCTS YOU RECOMMENDED IN THIS SESSION (numbered as shown to user):")
+                for i, p in enumerate(recent_products[-10:], 1):
                     name = p.get('name') or 'Unnamed product'
                     category = p.get('category') or ''
-                    line = f"   • {name}"
+                    amount = p.get('amount', '')
+                    currency = p.get('currency', 'INR')
+                    desc = p.get('description_snippet', '')
+                    ptype = p.get('product_type', '')
+                    line = f"   {i}. {name}"
                     if category:
                         line += f" ({category})"
+                    if amount:
+                        line += f" — {currency} {amount}"
+                    if ptype:
+                        line += f" [{ptype}]"
                     profile_parts.append(line)
+                    if desc:
+                        profile_parts.append(f"      {desc}")
                 profile_parts.append(
-                    "   If the user references one of these (e.g. 'that mala', "
-                    "'the diya you mentioned', 'how do I use it'), you know "
-                    "exactly which item they mean — answer specifically about it."
+                    "   If the user references one by position ('the third one', "
+                    "'first product'), by name ('that mala'), by type ('the consultation'), "
+                    "or by comparison ('which is cheaper'), you know exactly which item "
+                    "they mean. Answer with specific details about it."
                 )
                 has_data = True
 
@@ -1301,6 +1326,24 @@ CONTEXT & JOURNEY:
             )
         else:
             _length_hint = ""
+
+        # Practical topic: enforce 30/70 word split for real-world problems
+        _practical_ask_phrases = ["how do i", "what should i", "how can i", "help me with",
+                                  "suggest something", "what to do", "guide me", "kuch suggest",
+                                  "kya karu", "kaise", "help me", "what can i do"]
+        _is_practical_ask = (
+            _is_practical_topic
+            and any(phrase in query_lower for phrase in _practical_ask_phrases)
+        )
+        if _is_practical_ask and not _length_hint:
+            _length_hint = (
+                "RESPONSE STRUCTURE: The user is asking about a real-world problem. "
+                "First 30% of your response (~40-60 words): give CONCRETE practical advice — "
+                "what they can actually DO (specific action steps, timeline, or resource). "
+                "Remaining 70% (~90-150 words): spiritual grounding — dharmic principle, "
+                "practice, or mantra that supports the practical action. "
+                "Do NOT skip the practical part. Lead with it.\n"
+            )
 
         # Programmatic language/script constraint — overrides Gemini's default
         # mirror inference, which is unreliable when the system prompt contains

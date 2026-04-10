@@ -353,16 +353,17 @@ class TestRecordShownPopulatesRecentProducts:
         pr._record_shown(session, products)
         assert len(session.recent_products) == 1
 
-    def test_record_shown_caps_at_5(self):
-        """recent_products is FIFO-capped at 5 to keep the LLM prompt small."""
+    def test_record_shown_caps_at_10(self):
+        """recent_products is FIFO-capped at 10 (Apr 2026 — was 5, expanded
+        for richer LLM context with numbered positions)."""
         pr = ProductRecommender(MagicMock())
         session = _make_session()
         products = [
             {"_id": f"p{i}", "name": f"Product {i}", "category": "test"}
-            for i in range(7)
+            for i in range(12)
         ]
         pr._record_shown(session, products)
-        assert len(session.recent_products) == 5
-        # FIFO: oldest dropped, newest kept (p2..p6)
+        assert len(session.recent_products) == 10
+        # FIFO: oldest dropped, newest kept (p2..p11)
         ids = [p["_id"] for p in session.recent_products]
-        assert ids == ["p2", "p3", "p4", "p5", "p6"]
+        assert ids == [f"p{i}" for i in range(2, 12)]

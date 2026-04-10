@@ -4,8 +4,25 @@ Multi-Model Routing Engine for 3ioNetra
 Routes cheap models for simple requests, premium models for complex guidance,
 reducing cost while maintaining quality.
 
-Feature flag: MODEL_ROUTING_ENABLED=false by default.
-When disabled, all calls go to settings.GEMINI_MODEL (current behavior).
+Feature flag: ``MODEL_ROUTING_ENABLED`` (default: True).
+
+When ``MODEL_ROUTING_ENABLED=False``:
+    Every routing decision returns ``settings.GEMINI_MODEL`` regardless of
+    intent or phase. This is the canonical "single model" mode — useful for
+    cost capping (point everything at gemini-2.0-flash) or for debugging
+    (point everything at gemini-2.5-pro). The tier-specific MODEL_PREMIUM /
+    MODEL_STANDARD / MODEL_ECONOMY settings are intentionally ignored in
+    this mode so there is exactly one source of truth.
+
+When ``MODEL_ROUTING_ENABLED=True``:
+    The decision tree below picks a tier per request, and the tier maps to
+    one of MODEL_PREMIUM / MODEL_STANDARD / MODEL_ECONOMY. GEMINI_MODEL is
+    not consulted in this mode — operators set the three tier models
+    independently.
+
+The model resolution itself goes through ``get_model_for_tier(tier)`` so
+this contract is enforced in exactly one place. Direct access to
+``TIER_MODELS[tier]`` is forbidden — see the helper for why.
 """
 
 import logging
@@ -25,12 +42,35 @@ class ModelTier(str, Enum):
     PREMIUM = "premium"
 
 
-# Tier → default model mapping
+# Tier → tier-specific model mapping. ONLY consulted when
+# MODEL_ROUTING_ENABLED=True. Use ``get_model_for_tier(tier)`` instead of
+# indexing this dict directly so the routing-disabled path stays in sync.
 TIER_MODELS = {
     ModelTier.ECONOMY: settings.MODEL_ECONOMY,
     ModelTier.STANDARD: settings.MODEL_STANDARD,
     ModelTier.PREMIUM: settings.MODEL_PREMIUM,
 }
+
+
+def get_model_for_tier(tier: ModelTier) -> str:
+    """Resolve a tier to a concrete Gemini model name.
+
+    This is the **single source of truth** for model selection. When routing
+    is disabled, all tiers collapse to ``settings.GEMINI_MODEL`` so the
+    operator gets exactly the model they configured in ``.env``. When
+    routing is enabled, the tier maps to its dedicated config setting.
+
+    The historical bug this prevents: ``_make_decision`` used to call
+    ``TIER_MODELS[tier]`` directly even when routing was disabled, which
+    silently overrode ``GEMINI_MODEL`` with whatever ``MODEL_PREMIUM`` was
+    set to. Recent commits switched ``GEMINI_MODEL=gemini-2.0-flash`` for
+    "2-3s responses" but every conversation kept using gemini-2.5-pro
+    because of this leak. Centralizing the resolution in one function
+    makes the bug class impossible to reintroduce.
+    """
+    if not settings.MODEL_ROUTING_ENABLED:
+        return settings.GEMINI_MODEL
+    return TIER_MODELS[tier]
 
 # Tier → generation config
 TIER_CONFIGS = {
@@ -236,7 +276,10 @@ def _make_decision(
     """
     from services.token_budget import calculate_budget
 
-    model = TIER_MODELS[tier]
+    # Resolve model via the single helper. When MODEL_ROUTING_ENABLED=False
+    # this returns settings.GEMINI_MODEL for ALL tiers — which is what
+    # "routing disabled" actually means.
+    model = get_model_for_tier(tier)
     config = TIER_CONFIGS[tier].copy()
 
     # Adaptive token budget — uses LLM's expected_length + phase + intent

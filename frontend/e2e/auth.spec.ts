@@ -1,16 +1,16 @@
 import { test, expect } from '@playwright/test';
+import { API_BASE, uniqueEmail } from './helpers/auth';
 
-const API_BASE = 'http://localhost:8080';
-
-function uniqueEmail(): string {
-  return `testuser_${Date.now()}@test.com`;
-}
-
+// auth.spec.ts uses a different user shape from the canonical helper:
+// the password is "Test@1234" (special chars), profession is "engineer"
+// (mapped via the gender/profession dropdowns), and gender is lowercase.
+// These specific values are baked into AUTH-09 (wrong password test) and
+// the dropdown selectOption() calls in AUTH-08, so we keep them here
+// instead of polluting the shared helper with five overrides.
 function uniqueUser() {
-  const email = uniqueEmail();
   return {
     name: 'Test User',
-    email,
+    email: uniqueEmail('testuser'),
     password: 'Test@1234',
     phone: '9876543210',
     gender: 'male',
@@ -19,8 +19,12 @@ function uniqueUser() {
   };
 }
 
+// Auth tests assert on raw response status codes (e.g. AUTH-05 expects
+// the duplicate registration to return non-200), so this wrapper returns
+// the raw Playwright APIResponse instead of the parsed JSON that
+// `helpers/auth.registerUserViaAPI` returns.
 async function registerUserViaAPI(request: any, user: ReturnType<typeof uniqueUser>) {
-  const response = await request.post(`${API_BASE}/api/auth/register`, {
+  return request.post(`${API_BASE}/api/auth/register`, {
     data: {
       name: user.name,
       email: user.email,
@@ -31,7 +35,6 @@ async function registerUserViaAPI(request: any, user: ReturnType<typeof uniqueUs
       profession: user.profession,
     },
   });
-  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,30 +128,42 @@ test.describe('Auth UI Tests', () => {
   });
 
   test('AUTH-08: Register via UI', async ({ page }) => {
+    // LoginPage has a 3-step registration flow. The button text only
+    // becomes "Create Account" once registrationStep reaches 3 (see
+    // LoginPage.tsx:578 — `registrationStep < 3 ? 'Next Step' : 'Create Account'`).
+    // Earlier versions only had 2 steps; this test was missing step 3.
     const user = uniqueUser();
 
     await page.goto('/');
 
-    // Switch to register form
+    // Switch from "Sign In" to register mode.
     await page.getByText(/create account/i).click();
 
-    // Step 1: basic info
+    // Step 1: basic info → Next Step
     await page.locator('#name').fill(user.name);
     await page.locator('#email').fill(user.email);
     await page.locator('#password').fill(user.password);
     await page.locator('#confirmPassword').fill(user.password);
-
-    // Advance to step 2
     await page.getByRole('button', { name: /next step/i }).click();
 
-    // Step 2: additional details
+    // Step 2: profile details → Next Step
     await page.locator('#phone').fill(user.phone);
     await page.locator('#gender').selectOption(user.gender);
     await page.locator('#dob').fill(user.dob);
     await page.locator('#profession').selectOption({ label: 'Working Professional' });
+    await page.getByRole('button', { name: /next step/i }).click();
 
-    // Submit registration
-    await page.getByRole('button', { name: /create account/i }).click();
+    // Step 3: spiritual profile. Pick rashi/gotra/nakshatra for
+    // realism, then click "Skip" — `handleSkipStep` (LoginPage.tsx:240)
+    // submits via `handleSubmitWithDefaults` which sends the form with
+    // empty optional fields like preferred_deity. The "Create Account"
+    // button does a strict validation that requires preferred_deity.
+    // The Skip path is the canonical "I want to register without
+    // filling every spiritual field" flow that real users hit.
+    await page.locator('#rashi').selectOption({ index: 1 });
+    await page.locator('#gotra').selectOption({ index: 1 });
+    await page.locator('#nakshatra').selectOption({ index: 1 });
+    await page.getByRole('button', { name: /^skip$/i }).click();
 
     // Verify the chat page loads
     await expect(page.getByRole('heading', { name: /3ioNetra/i })).toBeVisible({

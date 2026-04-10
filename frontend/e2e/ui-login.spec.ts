@@ -62,13 +62,19 @@ test.describe('Login Page UI Tests', () => {
     const createAccountLink = page.getByRole('button', { name: 'Create Account' });
     await createAccountLink.click();
 
-    // Verify 2 progress dots are visible
-    const progressDots = page.locator('.rounded-full.transition-all.duration-500');
-    await expect(progressDots).toHaveCount(2);
+    // The step indicator container has a stable data-testid (see
+    // LoginPage.tsx:365). Each step is rendered as a direct child <div>
+    // — there are 3 of them ([1, 2, 3].map(...) at line 366). Querying
+    // by class name (.rounded-full.transition-all.duration-500) is
+    // brittle because the same Tailwind classes are also applied to
+    // the connector lines, so the previous test counted 5 elements.
+    const stepIndicators = page.locator('[data-testid="step-indicators"] > div');
+    await expect(stepIndicators).toHaveCount(3);
 
-    // Verify the first dot (active) has the bg-orange-500 class
-    const activeDot = progressDots.first();
-    await expect(activeDot).toHaveClass(/bg-orange-500/);
+    // The active step's dot has bg-orange-500. The dot is the FIRST
+    // div inside each step's wrapper div.
+    const firstDot = stepIndicators.first().locator('div').first();
+    await expect(firstDot).toHaveClass(/bg-orange-500/);
   });
 
   test('UI-05: Login form validation - submit empty form shows error', async ({ page }) => {

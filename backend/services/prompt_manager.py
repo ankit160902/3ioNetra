@@ -38,17 +38,28 @@ class PromptManager:
         Retrieve a specific prompt using dot notation for nested keys.
         Example: get_prompt('spiritual_mitra', 'persona.name')
         """
+        val = self.get_value(group_name, key_path, default=default)
+        return str(val) if val is not None else default
+
+    def get_value(self, group_name: str, key_path: str, default: Any = None) -> Any:
+        """
+        Retrieve a raw value (dict / list / str / int) from a prompt group
+        using dot notation. Use this when callers need structured data such
+        as the per-phase response_constraints block.
+
+        Example::
+
+            pm.get_value('spiritual_mitra', 'response_constraints.guidance')
+            # → {'min_words': 40, 'max_words': 100, 'max_sentences': 5}
+        """
         group = self.get_prompt_group(group_name)
-        keys = key_path.split('.')
-        
-        val = group
-        for k in keys:
+        val: Any = group
+        for k in key_path.split('.'):
             if isinstance(val, dict):
                 val = val.get(k)
             else:
                 return default
-                
-        return str(val) if val is not None else default
+        return val if val is not None else default
 
 _prompt_manager: Optional[PromptManager] = None
 
