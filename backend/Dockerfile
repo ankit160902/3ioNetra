@@ -35,6 +35,24 @@ COPY . .
 # Pre-download models during build phase
 RUN python scripts/download_models.py
 
+# Pre-download Skyfield astronomy data (panchang service).
+# Without this, hip_main.dat (10MB) + de421.bsp (16MB) download from the
+# internet on EVERY container boot = 2-3 minute cold start delay.
+# Downloads to: /app/ (skyfield.api.load uses CWD) AND
+#               ~/.local/share/jyotishganit/ (jyotishganit's custom Loader)
+RUN python -c "\
+import os; \
+os.makedirs(os.path.expanduser('~/.local/share/jyotishganit'), exist_ok=True); \
+from skyfield.api import Loader; \
+from skyfield.data import hipparcos; \
+jl = Loader(os.path.expanduser('~/.local/share/jyotishganit')); \
+jl('de421.bsp'); \
+print('de421.bsp cached to jyotishganit dir'); \
+al = Loader('/app'); \
+al('de421.bsp'); \
+al.open(hipparcos.URL); \
+print('hip_main.dat + de421.bsp cached to /app')"
+
 # Force offline mode for runtime
 ENV TRANSFORMERS_OFFLINE=1
 ENV HF_HUB_OFFLINE=1

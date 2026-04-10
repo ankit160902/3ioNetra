@@ -87,6 +87,10 @@ class IntentAgent:
          g) The companion just MENTIONED a practice like japa or puja — that does
             NOT mean the user wants to buy items for it. Wait for them to ask.
          h) User asks about travel, pilgrimage, itinerary planning
+       - ALSO False when the user's PRIMARY question is about something else
+         (meditation, mantra, scripture) and they casually append "show products"
+         or "by the way show me products". The primary intent is the spiritual
+         question, not shopping. Only return True when buying IS the primary intent.
        - WHEN IN DOUBT: return False. It is always better to NOT show products
          than to show irrelevant ones. The user can always ask explicitly.
 
