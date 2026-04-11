@@ -279,6 +279,188 @@ class GroundingResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Dynamic memory system (Apr 2026) — see docs/superpowers/specs/2026-04-12-
+# dynamic-memory-design.md for the design that motivates these models.
+# ---------------------------------------------------------------------------
+
+_VALID_SENSITIVITY_TIERS = {"trivial", "personal", "sensitive", "crisis"}
+_VALID_UPDATE_OPERATIONS = {"ADD", "UPDATE", "DELETE", "NOOP"}
+
+
+class ExtractedMemory(BaseModel):
+    """One fact extracted from a single user turn by MemoryExtractor.
+
+    Importance is LLM-assigned on a 1-10 scale. Sensitivity is one of four
+    tiers that drive retrieval filtering. tone_marker is a free-text single
+    word that names the dominant emotional tone (grief/joy/anxiety/etc.) —
+    used for tone-aware retrieval of sensitive memories.
+
+    All fields are tolerant of bad LLM output: out-of-range importance
+    clamps, unknown sensitivity defaults to "personal", missing tone_marker
+    defaults to "neutral".
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    text: str
+    importance: int = 5
+    sensitivity: str = "personal"
+    tone_marker: str = "neutral"
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _coerce_text(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v).strip()
+
+    @field_validator("importance", mode="before")
+    @classmethod
+    def _clamp_importance(cls, v: Any) -> int:
+        try:
+            i = int(v)
+        except (TypeError, ValueError):
+            return 5
+        if i < 1:
+            return 1
+        if i > 10:
+            return 10
+        return i
+
+    @field_validator("sensitivity", mode="before")
+    @classmethod
+    def _coerce_sensitivity(cls, v: Any) -> str:
+        if v is None:
+            return "personal"
+        s = str(v).strip().lower()
+        return s if s in _VALID_SENSITIVITY_TIERS else "personal"
+
+    @field_validator("tone_marker", mode="before")
+    @classmethod
+    def _coerce_tone(cls, v: Any) -> str:
+        if v is None:
+            return "neutral"
+        s = str(v).strip().lower()
+        return s if s else "neutral"
+
+
+class ExtractionResult(BaseModel):
+    """Output of MemoryExtractor Gemini call #1. Zero facts is valid."""
+
+    model_config = ConfigDict(extra="allow")
+
+    facts: List[ExtractedMemory] = Field(default_factory=list)
+
+
+class MemoryUpdateDecision(BaseModel):
+    """Output of MemoryUpdater Gemini call #2. Mem0 ADD/UPDATE/DELETE/NOOP.
+
+    ADD — new memory, no existing similar memory captures this fact.
+    UPDATE — target_memory_id refines/supersedes; updated_text is the merged text.
+    DELETE — target_memory_id is no longer true; don't insert new fact.
+    NOOP — target_memory_id already captures this fact; no write, just bump access.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    operation: str = "ADD"
+    target_memory_id: Optional[str] = None
+    updated_text: Optional[str] = None
+    reason: str = ""
+
+    @field_validator("operation", mode="before")
+    @classmethod
+    def _coerce_operation(cls, v: Any) -> str:
+        if v is None:
+            return "ADD"
+        s = str(v).strip().upper()
+        return s if s in _VALID_UPDATE_OPERATIONS else "ADD"
+
+    @field_validator("target_memory_id", mode="before")
+    @classmethod
+    def _coerce_target_id(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    @field_validator("updated_text", mode="before")
+    @classmethod
+    def _coerce_updated_text(cls, v: Any) -> Optional[str]:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _coerce_reason(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v)
+
+
+class ReflectionProfilePatch(BaseModel):
+    """The profile-delta portion of ReflectionResult.
+
+    Represents the updated relational profile after consolidation. Each list
+    field is capped at 10 items by the ReflectionService (not by Pydantic)
+    so the profile never balloons past its prompt-injection budget.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    relational_narrative: str = ""
+    spiritual_themes: List[str] = Field(default_factory=list)
+    ongoing_concerns: List[str] = Field(default_factory=list)
+    tone_preferences: List[str] = Field(default_factory=list)
+    people_mentioned: List[str] = Field(default_factory=list)
+
+    @field_validator("relational_narrative", mode="before")
+    @classmethod
+    def _coerce_narrative(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v)
+
+    @field_validator(
+        "spiritual_themes", "ongoing_concerns",
+        "tone_preferences", "people_mentioned",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_str_list(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if x is not None and str(x).strip()]
+        return []
+
+
+class ReflectionResult(BaseModel):
+    """Output of ReflectionService Gemini call. Produced by one LLM call
+    that does BOTH consolidation (the updated_profile) AND pruning (the
+    prune_ids list of episodic memory ids to invalidate).
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    updated_profile: ReflectionProfilePatch = Field(
+        default_factory=ReflectionProfilePatch
+    )
+    prune_ids: List[str] = Field(default_factory=list)
+
+    @field_validator("prune_ids", mode="before")
+    @classmethod
+    def _coerce_prune_ids(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if x is not None and str(x).strip()]
+        return []
+
+
+# ---------------------------------------------------------------------------
 # JSON extractor
 # ---------------------------------------------------------------------------
 

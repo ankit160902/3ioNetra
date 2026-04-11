@@ -3,6 +3,10 @@ from models.llm_schemas import (
     IntentAnalysis, IntentEnum, UrgencyEnum,
     QueryRewrite, GroundingResult,
     extract_json,
+    # Dynamic memory system (Apr 2026)
+    ExtractedMemory, ExtractionResult,
+    MemoryUpdateDecision,
+    ReflectionProfilePatch, ReflectionResult,
 )
 
 
@@ -159,3 +163,139 @@ class TestExtractJson:
         text = '```\n{"intent": "CLOSURE"}\n```'
         result = extract_json(text)
         assert result["intent"] == "CLOSURE"
+
+
+# ---------------------------------------------------------------------------
+# Dynamic memory system — Apr 2026
+# ---------------------------------------------------------------------------
+
+class TestExtractedMemory:
+    def test_valid_minimal(self):
+        m = ExtractedMemory(
+            text="User is starting a new job next month",
+            importance=6,
+            sensitivity="personal",
+            tone_marker="anticipation",
+        )
+        assert m.text == "User is starting a new job next month"
+        assert m.importance == 6
+        assert m.sensitivity == "personal"
+        assert m.tone_marker == "anticipation"
+
+    def test_importance_clamped_below_1(self):
+        m = ExtractedMemory(text="x", importance=-5, sensitivity="personal")
+        assert m.importance == 1
+
+    def test_importance_clamped_above_10(self):
+        m = ExtractedMemory(text="x", importance=99, sensitivity="personal")
+        assert m.importance == 10
+
+    def test_importance_garbage_defaults_to_5(self):
+        m = ExtractedMemory(text="x", importance="nonsense", sensitivity="personal")
+        assert m.importance == 5
+
+    def test_invalid_sensitivity_coerced_to_personal(self):
+        m = ExtractedMemory(text="x", importance=5, sensitivity="nonsense")
+        assert m.sensitivity == "personal"
+
+    def test_tone_marker_defaults_to_neutral(self):
+        m = ExtractedMemory(text="x", importance=5, sensitivity="personal")
+        assert m.tone_marker == "neutral"
+
+    def test_sensitivity_valid_values_accepted(self):
+        for tier in ("trivial", "personal", "sensitive", "crisis"):
+            m = ExtractedMemory(text="x", importance=5, sensitivity=tier)
+            assert m.sensitivity == tier
+
+
+class TestExtractionResult:
+    def test_empty_facts_is_valid(self):
+        r = ExtractionResult(facts=[])
+        assert r.facts == []
+
+    def test_default_is_empty(self):
+        r = ExtractionResult()
+        assert r.facts == []
+
+    def test_multiple_facts(self):
+        r = ExtractionResult(facts=[
+            {"text": "user is a software engineer", "importance": 5, "sensitivity": "personal"},
+            {"text": "user's father passed in February", "importance": 9, "sensitivity": "sensitive"},
+        ])
+        assert len(r.facts) == 2
+        assert r.facts[0].text == "user is a software engineer"
+        assert r.facts[1].sensitivity == "sensitive"
+
+
+class TestMemoryUpdateDecision:
+    def test_add_operation(self):
+        d = MemoryUpdateDecision(operation="ADD", reason="new fact")
+        assert d.operation == "ADD"
+        assert d.target_memory_id is None
+        assert d.updated_text is None
+
+    def test_update_operation(self):
+        d = MemoryUpdateDecision(
+            operation="UPDATE",
+            target_memory_id="507f1f77bcf86cd799439011",
+            updated_text="user is recovering from grief",
+            reason="situation evolved",
+        )
+        assert d.operation == "UPDATE"
+        assert d.target_memory_id == "507f1f77bcf86cd799439011"
+        assert d.updated_text == "user is recovering from grief"
+
+    def test_delete_operation(self):
+        d = MemoryUpdateDecision(
+            operation="DELETE",
+            target_memory_id="abc123",
+            reason="user corrected prior statement",
+        )
+        assert d.operation == "DELETE"
+        assert d.target_memory_id == "abc123"
+
+    def test_noop_operation(self):
+        d = MemoryUpdateDecision(operation="NOOP", target_memory_id="xyz", reason="redundant")
+        assert d.operation == "NOOP"
+
+
+class TestReflectionProfilePatch:
+    def test_full_patch(self):
+        p = ReflectionProfilePatch(
+            relational_narrative="You are a software engineer wrestling with career questions.",
+            spiritual_themes=["finding purpose"],
+            ongoing_concerns=["career uncertainty"],
+            tone_preferences=["prefers direct advice"],
+            people_mentioned=["Priya (sister)"],
+        )
+        assert p.relational_narrative.startswith("You are")
+        assert len(p.spiritual_themes) == 1
+        assert len(p.ongoing_concerns) == 1
+
+    def test_empty_lists_by_default(self):
+        p = ReflectionProfilePatch(relational_narrative="")
+        assert p.spiritual_themes == []
+        assert p.ongoing_concerns == []
+        assert p.tone_preferences == []
+        assert p.people_mentioned == []
+
+
+class TestReflectionResult:
+    def test_valid(self):
+        r = ReflectionResult(
+            updated_profile={
+                "relational_narrative": "You are ...",
+                "spiritual_themes": ["theme1"],
+            },
+            prune_ids=["abc", "def"],
+        )
+        assert r.updated_profile.relational_narrative.startswith("You are")
+        assert r.updated_profile.spiritual_themes == ["theme1"]
+        assert r.prune_ids == ["abc", "def"]
+
+    def test_empty_prune_list(self):
+        r = ReflectionResult(
+            updated_profile={"relational_narrative": ""},
+            prune_ids=[],
+        )
+        assert r.prune_ids == []
