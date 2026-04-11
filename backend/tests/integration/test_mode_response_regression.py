@@ -136,6 +136,29 @@ REGRESSION_FIXTURE = [
         ["priorit", "sleep", "focus", "study"],
         ["[VERSE]", "[MANTRA]", "light a diya"],
     ),
+
+    # Closure mode — Bug 1 regression scenarios
+    (
+        "thank you, that helped",
+        "closure",
+        [],  # no positive must-haves — closure is about what's absent
+        ["[VERSE]", "[MANTRA]", "tell me more", "what else is on your mind",
+         "i hear you", "i understand"],
+    ),
+    (
+        "ok I'll try that",
+        "closure",
+        [],
+        ["[VERSE]", "[MANTRA]", "tell me more", "what else",
+         "i hear you", "i understand"],
+    ),
+    (
+        "thanks, I feel better now",
+        "closure",
+        [],
+        ["[VERSE]", "[MANTRA]", "please share", "tell me more",
+         "i hear you", "i understand"],
+    ),
 ]
 
 
@@ -195,6 +218,22 @@ def test_mode_response_properties(query, expected_mode, must_have, must_not_have
         assert sentences <= 8, (  # allow slack for LLM variance, spec says 3-5
             f"presence_first response is {sentences} sentences long "
             f"(expected <= 8). Query: {query!r}"
+        )
+
+    # Length constraint for closure mode (strictly short)
+    if expected_mode == "closure":
+        sentences = _count_sentences(response_text)
+        # Spec says 1-2 sentences. Allow up to 4 for LLM variance but not more.
+        assert sentences <= 4, (
+            f"closure response is {sentences} sentences long "
+            f"(expected <= 4). Query: {query!r}. Response: {response_text[:300]}"
+        )
+        word_count = len(response_text.split())
+        assert word_count <= 50, (
+            f"closure response is {word_count} words (expected <= 50). "
+            f"A closure response that's longer than 50 words is almost "
+            f"certainly inviting more conversation when it shouldn't. "
+            f"Query: {query!r}. Response: {response_text[:300]}"
         )
 
     # Word count floor for teaching mode (regression gate)

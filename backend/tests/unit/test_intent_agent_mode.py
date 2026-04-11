@@ -161,6 +161,51 @@ class TestFallbackModeDerivation:
 
 
 # ---------------------------------------------------------------------------
+# Closure mode semantic classification (the Bug 1 fix)
+# ---------------------------------------------------------------------------
+
+class TestClosureModeSemanticDetection:
+    """Verify that the 5th mode plumbs through every code path correctly.
+
+    The actual LLM classification accuracy for multi-word closure signals
+    (e.g. "thank you, I needed to hear that") is exercised by the live-LLM
+    tests in test_intent_agent_mode_live.py and the integration regression
+    suite. These unit tests just verify the plumbing (cache, Pydantic,
+    fallback, fast-path) accepts "closure" at every layer without tripping.
+    """
+
+    def test_pydantic_accepts_closure_value(self):
+        ia = IntentAnalysis(intent="CLOSURE", response_mode="closure")
+        assert ia.response_mode == "closure"
+        assert ia.intent == IntentEnum.CLOSURE
+
+    def test_closure_survives_to_dict_roundtrip(self):
+        ia = IntentAnalysis(response_mode="closure")
+        d = ia.to_dict()
+        assert d["response_mode"] == "closure"
+        # Roundtrip: building a new IntentAnalysis from the dict should preserve
+        ia2 = IntentAnalysis(**d)
+        assert ia2.response_mode == "closure"
+
+    def test_closure_coercion_from_messy_input(self):
+        # Various forms of closure that the Pydantic validator should accept
+        assert IntentAnalysis(response_mode="closure").response_mode == "closure"
+        assert IntentAnalysis(response_mode="CLOSURE").response_mode == "closure"
+        assert IntentAnalysis(response_mode=" Closure ").response_mode == "closure"
+
+    def test_fast_path_closure_set_returns_closure_mode(self):
+        # Spot-check several phrases from _CLOSURE_SET to ensure they all
+        # route to the new mode (previously routed to exploratory).
+        agent = IntentAgent()
+        for phrase in ("thanks", "thank you", "bye", "goodbye", "thank you so much"):
+            result = agent._fast_path(phrase)
+            assert result is not None, f"{phrase} should hit the fast-path"
+            assert result["response_mode"] == "closure", (
+                f"{phrase} should route to closure mode, got {result['response_mode']}"
+            )
+
+
+# ---------------------------------------------------------------------------
 # IntentAnalysis Pydantic coercion for response_mode
 # ---------------------------------------------------------------------------
 

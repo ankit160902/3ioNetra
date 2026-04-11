@@ -1,4 +1,4 @@
-"""Dev tool: side-by-side comparison of Mitra responses for the 10-query
+"""Dev tool: side-by-side comparison of Mitra responses for the 12-query
 regression golden list. Not a test — a human eyeball utility.
 
 Runs each query through the full CompanionEngine pipeline on the CURRENT
@@ -86,6 +86,18 @@ GOLDEN_QUERIES = [
         "exploratory",  # boundary case: could also be presence_first
         "Boundary case — either exploratory (clarifying q) or presence_first (holding space) is acceptable",
     ),
+    (
+        11,
+        "thank you, I needed to hear that",
+        "closure",
+        "Bug 1 regression: must return 1-2 sentence warm goodbye, NOT 'I hear you' or 'tell me more'",
+    ),
+    (
+        12,
+        "ok I'll try that",
+        "closure",
+        "Short-ack closure: must be brief acknowledgment, no new advice",
+    ),
 ]
 
 
@@ -95,7 +107,7 @@ def _print_separator(char="=", length=78):
 
 def _print_query_header(num, query, expected_mode, notes):
     _print_separator("=")
-    print(f"[{num}/10] {query}")
+    print(f"[{num}/{len(GOLDEN_QUERIES)}] {query}")
     print(f"Expected mode: {expected_mode}")
     print(f"Notes: {notes}")
     _print_separator("-")
@@ -123,7 +135,7 @@ async def _run_query(query):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run the 10-query mode regression golden list and print responses.",
+        description="Run the mode regression golden list and print responses.",
     )
     parser.add_argument(
         "--only",

@@ -107,6 +107,24 @@ class TestModeBlockInjection:
         assert "MODE: practical_first" not in prompt
         assert "MODE: teaching" not in prompt
 
+    def test_closure_injects_only_that_block(self, llm_service, base_context):
+        prompt = llm_service._build_prompt(
+            query="thank you, that helped",
+            conversation_history=[],
+            phase=ConversationPhase.LISTENING,
+            context=base_context,
+            response_mode="closure",
+        )
+        assert "ACTIVE RESPONSE MODE" in prompt
+        assert "MODE: closure" in prompt
+        # Other mode markers must NOT appear
+        assert "MODE: practical_first" not in prompt
+        assert "MODE: presence_first" not in prompt
+        assert "MODE: teaching" not in prompt
+        assert "MODE: exploratory" not in prompt
+        # Closure block has a distinctive rule
+        assert "CURRENT TURN DOMINATES" in prompt or "door closing softly" in prompt
+
 
 # ---------------------------------------------------------------------------
 # No mode_block when response_mode is None
@@ -148,7 +166,7 @@ class TestDeletedHotFixAbsent:
     the hardcoded keyword lists — for any mode, any phase, any query."""
 
     @pytest.mark.parametrize("mode", [
-        "practical_first", "presence_first", "teaching", "exploratory", None,
+        "practical_first", "presence_first", "teaching", "exploratory", "closure", None,
     ])
     @pytest.mark.parametrize("query", [
         "i have 6 modules to study by tomorrow",
