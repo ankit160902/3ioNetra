@@ -66,11 +66,13 @@ class TestFastPathModes:
         assert result["intent"] == IntentType.GREETING
         assert result["response_mode"] == "exploratory"
 
-    def test_closure_maps_to_exploratory(self, agent):
+    def test_closure_maps_to_closure_mode(self, agent):
+        # Apr 2026 — "closure" is now the 5th response_mode, replacing the
+        # earlier "exploratory" default on CLOSURE fast-path matches.
         result = agent._fast_path("thanks")
         assert result is not None
         assert result["intent"] == IntentType.CLOSURE
-        assert result["response_mode"] == "exploratory"
+        assert result["response_mode"] == "closure"
 
     def test_off_topic_maps_to_exploratory(self, agent):
         # "write code for" is in _OFF_TOPIC_PHRASES
@@ -142,10 +144,12 @@ class TestFallbackModeDerivation:
         assert result["intent"] == IntentType.GREETING
         assert result["response_mode"] == "exploratory"
 
-    def test_closure_fallback_maps_to_exploratory(self, agent):
+    def test_closure_fallback_maps_to_closure_mode(self, agent):
+        # Apr 2026 — _fallback_analysis mode_map now routes CLOSURE -> "closure"
+        # so offline fallback still produces a proper wind-down response.
         result = agent._fallback_analysis("thanks bye")
         assert result["intent"] == IntentType.CLOSURE
-        assert result["response_mode"] == "exploratory"
+        assert result["response_mode"] == "closure"
 
     def test_unknown_intent_defaults_to_exploratory(self, agent):
         # A message with no intent signals → OTHER → exploratory
@@ -166,8 +170,8 @@ class TestIntentAnalysisResponseModeCoercion:
     def test_default_is_exploratory(self):
         assert IntentAnalysis().response_mode == "exploratory"
 
-    def test_all_four_valid_modes_accepted(self):
-        for mode in ("practical_first", "presence_first", "teaching", "exploratory"):
+    def test_all_five_valid_modes_accepted(self):
+        for mode in ("practical_first", "presence_first", "teaching", "exploratory", "closure"):
             assert IntentAnalysis(response_mode=mode).response_mode == mode
 
     def test_unknown_mode_coerces_to_exploratory(self):

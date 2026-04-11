@@ -171,6 +171,16 @@ class IntentAgent:
         - "exploratory": User is vague, searching, doesn't know what they need
           ("I feel lost", "I don't know what to do"). Answer is warmth + ONE
           clarifying question. No solutions, no scripture yet.
+        - "closure": User is signaling the END of this exchange — gratitude,
+          acceptance, "I feel better now", "thanks for listening", "ok I'll
+          try that", "thank you, I needed to hear that", or a short positive
+          acknowledgement of advice given. The signal is acceptance, not more
+          sharing. Classify as closure when the CURRENT TURN is a wind-down,
+          REGARDLESS of how emotional the prior turns were. This rule dominates
+          conversation-history bias — if the prior 3 turns were about grief
+          and this turn is "thank you, that helped", the mode is closure, not
+          presence_first. The response should be 1-2 sentences of warmth,
+          not an invitation to continue.
 
         TIE-BREAKER: If a query has both dimensions ("I'm starting a new job
         on Monday, should I do a puja?"), pick the DOMINANT mode — usually the
@@ -284,11 +294,12 @@ class IntentAgent:
                     "life_domain": "unknown", "expected_length": "brief",
                     "response_mode": "exploratory"}
 
-        # (b) CLOSURE
+        # (b) CLOSURE — route to the dedicated closure mode so the response is
+        # a 1-2 sentence warm wind-down instead of an invitation to keep talking.
         if msg_lower in self._CLOSURE_SET:
             return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude",
                     "life_domain": "unknown", "expected_length": "brief",
-                    "response_mode": "exploratory"}
+                    "response_mode": "closure"}
 
         # (c) OFF_TOPIC — short-circuit before normal classification.
         # We skip this check if the message also has emotional weight (e.g.
@@ -391,7 +402,7 @@ class IntentAgent:
             except Exception as pydantic_err:
                 logger.warning(f"IntentAgent Pydantic validation failed: {pydantic_err}. Using raw parsed with defaults.")
                 # Manually build a valid dict from parsed JSON + defaults
-                _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory"}
+                _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
                 _raw_mode = str(parsed.get("response_mode", "exploratory")).strip().lower()
                 data = {
                     "intent": parsed.get("intent", "OTHER"),
@@ -479,7 +490,7 @@ class IntentAgent:
         # functioning with sensible defaults.
         mode_map = {
             IntentType.GREETING: "exploratory",
-            IntentType.CLOSURE: "exploratory",
+            IntentType.CLOSURE: "closure",
             IntentType.ASKING_INFO: "teaching",
             IntentType.ASKING_PANCHANG: "teaching",
             IntentType.PRODUCT_SEARCH: "teaching",
