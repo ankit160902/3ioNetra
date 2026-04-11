@@ -22,7 +22,13 @@ class PromptManager:
         for filename in os.listdir(self.prompt_dir):
             if filename.endswith(".yaml") or filename.endswith(".yml"):
                 try:
-                    with open(os.path.join(self.prompt_dir, filename), 'r') as f:
+                    # Explicit UTF-8 is mandatory: spiritual_mitra.yaml contains
+                    # Sanskrit/Hindi characters and em-dashes that crash on the
+                    # default cp1252 encoding Python uses on Windows. Without
+                    # this, the prompt cache silently loads as empty, making
+                    # every prompt_manager.get_prompt() return "" and the whole
+                    # persona system fall back to Gemini defaults.
+                    with open(os.path.join(self.prompt_dir, filename), 'r', encoding='utf-8') as f:
                         name = os.path.splitext(filename)[0]
                         self.cache[name] = yaml.safe_load(f)
                         logger.info(f"Loaded prompt file: {filename}")
