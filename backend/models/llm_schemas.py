@@ -91,7 +91,7 @@ class IntentAnalysis(BaseModel):
     expected_length: ExpectedLengthEnum = ExpectedLengthEnum.MODERATE
     is_off_topic: bool = False
     response_mode: Literal[
-        "practical_first", "presence_first", "teaching", "exploratory"
+        "practical_first", "presence_first", "teaching", "exploratory", "closure"
     ] = "exploratory"
 
     @field_validator("intent", mode="before")
@@ -149,7 +149,7 @@ class IntentAnalysis(BaseModel):
     @field_validator("response_mode", mode="before")
     @classmethod
     def _coerce_response_mode(cls, v: Any) -> str:
-        valid = {"practical_first", "presence_first", "teaching", "exploratory"}
+        valid = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
         if v is None:
             return "exploratory"
         s = str(v).strip().lower()
