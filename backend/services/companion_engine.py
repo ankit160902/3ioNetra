@@ -199,7 +199,13 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
-        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval + Speculative RAG
+        # Parallel Task Execution: Intent Analysis + Memory Retrieval ONLY.
+        # Speculative RAG was removed Apr 2026 — the mode-aware gating added
+        # in the response-mode system made parallel RAG a net negative because
+        # the RAG task would pay full reranker cost (60-170s on CPU) for queries
+        # that the mode gate then discards (practical_first, early presence).
+        # RAG now runs SEQUENTIALLY at the use site, gated on response_mode,
+        # inside the guidance/listening code paths below.
         _t_parallel_start = time.perf_counter()
         tasks = [
             self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
@@ -214,35 +220,11 @@ class CompanionEngine:
         else:
             tasks.append(asyncio.sleep(0, result=[]))
 
-        # Speculative RAG: start search in parallel with intent for any substantive message.
-        # Runs from turn 1 to eliminate the sequential _retrieve_and_validate bottleneck.
-        _trivial = message.strip().lower() in TRIVIAL_MESSAGES
-        _panchang_kw = {"panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"}
-        _is_panchang_q = any(k in message.lower() for k in _panchang_kw)
-        _speculative_rag_eligible = (
-            msg_words > 3
-            and not _trivial
-            and not _is_panchang_q
-            and self.rag_pipeline and self.rag_pipeline.available
-        )
-        if _speculative_rag_eligible:
-            _spec_query = self._build_listening_query(message, session.memory)
-            tasks.append(self.rag_pipeline.search(
-                query=_spec_query, language="en",
-                top_k=settings.RETRIEVAL_TOP_K,
-                min_score=settings.MIN_SIMILARITY_SCORE,
-            ))
-        else:
-            tasks.append(asyncio.sleep(0, result=[]))
-
         _results = await asyncio.gather(*tasks, return_exceptions=True)
         _t_parallel_end = time.perf_counter()
         _parallel_ms = (_t_parallel_end - _t_parallel_start) * 1000
         analysis, past_memories = _results[0], _results[1]
-        speculative_rag_docs = _results[2] if not isinstance(_results[2], Exception) else []
-        logger.info(f"PERF_PREAMBLE parallel={_parallel_ms:.0f}ms intent_ok={not isinstance(_results[0], Exception)} mem_ok={not isinstance(_results[1], Exception)} rag_ok={not isinstance(_results[2], Exception)} rag_docs={len(speculative_rag_docs) if isinstance(speculative_rag_docs, list) else 0}")
-        if isinstance(_results[2], Exception):
-            logger.warning(f"Speculative RAG failed (non-fatal): {_results[2]}")
+        logger.info(f"PERF_PREAMBLE parallel={_parallel_ms:.0f}ms intent_ok={not isinstance(_results[0], Exception)} mem_ok={not isinstance(_results[1], Exception)}")
 
         # Guard: if IntentAgent returned an exception (via gather return_exceptions),
         # use a safe fallback dict so downstream code doesn't crash.
@@ -298,6 +280,7 @@ class CompanionEngine:
                 "model_override": None,
                 "config_override": None,
                 "crisis_response": crisis_response,
+                "response_mode": analysis.get("response_mode", "presence_first"),
             }
 
         # 1b. Off-topic short-circuit — if the intent agent (or fast-path) flagged
@@ -325,6 +308,7 @@ class CompanionEngine:
                 "model_override": None,
                 "config_override": None,
                 "off_topic_response": _off_topic_detector.get_redirect_message(),
+                "response_mode": analysis.get("response_mode", "exploratory"),
             }
 
         # 2. Store in Long-Term Memory if significant
@@ -386,19 +370,20 @@ class CompanionEngine:
                 )
             )
 
-            # 📚 SCRIPTURE RETRIEVAL — use speculative RAG if available (already ran in parallel with intent)
+            # 📚 SCRIPTURE RETRIEVAL — mode-gated, sequential (post-Apr-2026).
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
             # Gate RAG based on response_mode (LLM-classified, not keyword-matched).
-            # practical_first → skip RAG entirely; the LLM gives better practical
-            # advice without scripture to lean on. presence_first on early turns →
-            # skip RAG; the user needs presence, not citations. teaching →
-            # always use RAG (full scripture power). exploratory → let RAG run if
-            # it has something concrete to surface.
+            # practical_first / closure → skip RAG entirely; these modes never
+            # surface scripture.
+            # presence_first on early turns → skip RAG; the user needs presence,
+            # not citations.
+            # teaching → always use RAG (full scripture power).
+            # exploratory → let RAG run if it has something concrete to surface.
             _response_mode = analysis.get("response_mode", "exploratory")
             _skip_rag_for_mode = (
-                _response_mode == "practical_first"
+                _response_mode in ("practical_first", "closure")
                 or (_response_mode == "presence_first" and session.turn_count <= 2)
             )
             should_get_verses = (
@@ -407,28 +392,16 @@ class CompanionEngine:
             )
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
-                if speculative_rag_docs:
-                    # Reuse docs from parallel RAG — skip the expensive _retrieve_and_validate call
-                    from services.context_validator import get_context_validator
-                    ctx_validator = get_context_validator()
-                    context_docs = ctx_validator.validate(
-                        docs=speculative_rag_docs, intent=intent,
-                        query=message, min_score=settings.MIN_SIMILARITY_SCORE,
-                        max_per_source=settings.MAX_DOCS_PER_SOURCE,
-                        max_docs=settings.RERANK_TOP_K,
+                # Sequential RAG: with speculative dispatch removed (Apr 2026),
+                # we only run RAG here, only for modes that need it. This costs
+                # ~1-2s on teaching queries but saves 60-170s on practical/closure
+                # turns that used to pay speculative reranker cost for nothing.
+                try:
+                    context_docs, _top_score = await self._retrieve_and_validate(
+                        session, message, analysis, intent, "guidance",
                     )
-                    logger.info(f"Guidance: reused {len(context_docs)} speculative RAG docs (skipped redundant search)")
-                elif not _speculative_rag_eligible:
-                    # Speculative RAG wasn't eligible (trivial/panchang) — run sequential search
-                    try:
-                        context_docs, _top_score = await self._retrieve_and_validate(
-                            session, message, analysis, intent, "guidance",
-                        )
-                    except Exception as e:
-                        logger.warning(f"Guidance-phase RAG/validation failed: {e}")
-                else:
-                    # Speculative RAG ran but returned empty — proceed without scripture docs
-                    logger.info("Guidance: speculative RAG returned empty, proceeding without scripture context")
+                except Exception as e:
+                    logger.warning(f"Guidance-phase RAG/validation failed: {e}")
 
             # Now await the product recommendation that's been running in
             # parallel with the RAG/validation work above.
@@ -464,6 +437,16 @@ class CompanionEngine:
         context_docs = []
 
         if self.available and self.rag_pipeline and self.rag_pipeline.available:
+            # Listening-phase RAG gating — layered. Mode-based skips come first
+            # (practical_first / closure / early presence_first all skip RAG
+            # entirely); then the pre-existing intent-based skips for greetings,
+            # short acknowledgments, and panchang queries act as belt-and-
+            # suspenders guards in case the mode classification is unavailable.
+            _response_mode_listen = analysis.get("response_mode", "exploratory")
+            _skip_rag_listen_mode = (
+                _response_mode_listen in ("practical_first", "closure")
+                or (_response_mode_listen == "presence_first" and session.turn_count <= 2)
+            )
             skip_rag_intents = {IntentType.GREETING, IntentType.CLOSURE}
             # Skip RAG for emotional expressions in early turns — they need presence, not scripture
             skip_rag_early = session.turn_count <= 2 and intent == IntentType.EXPRESSING_EMOTION
@@ -475,32 +458,21 @@ class CompanionEngine:
             skip_rag_short = _is_short_ack or (_msg_words <= 8 and _detected_emotion in _positive_emotions)
             panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
             _is_panchang = any(k in message.lower() for k in panchang_keywords)
-            if intent in skip_rag_intents or skip_rag_early or skip_rag_short:
+            if _skip_rag_listen_mode:
+                logger.info(f"Skipping RAG for mode={_response_mode_listen} in listening phase")
+            elif intent in skip_rag_intents or skip_rag_early or skip_rag_short:
                 logger.info(f"Skipping RAG for {intent} intent in listening phase (turn={session.turn_count}, words={_msg_words}, emotion={_detected_emotion})")
             elif _is_panchang:
                 logger.info("Skipping RAG for Panchang-related query in listening phase")
-            elif speculative_rag_docs:
-                # Reuse docs from parallel RAG — skip redundant search
-                from services.context_validator import get_context_validator
-                ctx_validator = get_context_validator()
-                context_docs = ctx_validator.validate(
-                    docs=speculative_rag_docs, intent=intent,
-                    query=message, min_score=settings.MIN_SIMILARITY_SCORE,
-                    max_per_source=settings.MAX_DOCS_PER_SOURCE,
-                    max_docs=settings.RERANK_TOP_K,
-                )
-                logger.info(f"Listening: reused {len(context_docs)} speculative RAG docs")
-            elif not _speculative_rag_eligible:
-                # Speculative RAG wasn't eligible — run sequential search
+            else:
+                # Sequential RAG: run the search only when the mode and intent
+                # checks all agree the query needs scripture context.
                 try:
                     context_docs, _top_score = await self._retrieve_and_validate(
                         session, message, analysis, intent, "listening",
                     )
                 except Exception as e:
                     logger.warning(f"Listening-phase RAG/validation failed: {e}")
-            else:
-                # Speculative RAG ran but returned empty — proceed without scripture docs
-                logger.info("Listening: speculative RAG returned empty, proceeding without scripture context")
 
         user_profile = build_user_profile(session.memory, session)
         if past_memories:
