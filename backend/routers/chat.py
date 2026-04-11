@@ -527,7 +527,18 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     engine_result, speculative_docs = await _run_speculative_rag(
         session, query, rag_pipeline, companion_engine, streaming=False
     )
-    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config, past_memories = engine_result
+    (
+        companion_response,
+        is_ready_for_wisdom,
+        context_docs_used,
+        turn_topics,
+        recommended_products,
+        active_phase,
+        route_model,
+        route_config,
+        past_memories,
+        route_response_mode,
+    ) = engine_result
 
     if is_ready_for_wisdom:
         # Use engine's already-retrieved + validated docs as primary source
@@ -549,6 +560,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             model_override=route_model,
             config_override=route_config,
             session=session,
+            response_mode=route_response_mode,
         )
 
         # Grounding verification — regenerate if response cites non-existent sources.
@@ -588,6 +600,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                     model_override=route_model,
                     config_override=grounding_config,
                     session=session,
+                    response_mode=route_response_mode,
                 )
 
         response_text = await _postprocess_and_save(
@@ -726,6 +739,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     model_override=meta.get("model_override"),
                     config_override=meta.get("config_override"),
                     session=session,
+                    response_mode=meta.get("response_mode", "exploratory"),
                 ):
                     full_text_parts.append(token)
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
@@ -741,6 +755,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                         memory_context=session.memory,
                         model_override=meta.get("model_override"),
                         config_override=meta.get("config_override"),
+                        response_mode=meta.get("response_mode", "exploratory"),
                     ):
                         full_text_parts.append(token)
                         yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"

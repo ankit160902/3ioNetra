@@ -544,9 +544,15 @@ class CompanionEngine:
         """
         Returns:
             (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics,
-             recommended_products, active_phase, model_override, config_override, past_memories)
+             recommended_products, active_phase, model_override, config_override,
+             past_memories, response_mode)
+
+        The final element ``response_mode`` is the IntentAgent-classified
+        response shape for this turn — used by routers/chat.py to pass
+        the mode through to ResponseComposer for guidance-phase synthesis.
         """
         meta = await self.process_message_preamble(session, message)
+        _mode = meta.get("response_mode", "exploratory")
 
         # LLM-based crisis short-circuit: IntentAgent detected urgency=crisis
         # (catches typos/misspellings that keyword check in _preflight missed).
@@ -554,7 +560,7 @@ class CompanionEngine:
             return (
                 meta["crisis_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []),
+                None, None, meta.get("past_memories", []), _mode,
             )
 
         # Off-topic short-circuit: return canned redirect, skip LLM call entirely.
@@ -562,14 +568,15 @@ class CompanionEngine:
             return (
                 meta["off_topic_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []),
+                None, None, meta.get("past_memories", []), _mode,
             )
 
         if meta["is_ready_for_wisdom"]:
             return (
                 meta["acknowledgement"], True, meta["context_docs"],
                 meta["turn_topics"], meta["recommended_products"], ConversationPhase.GUIDANCE,
-                meta.get("model_override"), meta.get("config_override"), meta.get("past_memories", []),
+                meta.get("model_override"), meta.get("config_override"),
+                meta.get("past_memories", []), _mode,
             )
 
         # Listening phase — make the LLM call
@@ -606,7 +613,8 @@ class CompanionEngine:
 
             return (reply, False, meta["context_docs"], meta["turn_topics"],
                     meta["recommended_products"], meta["active_phase"],
-                    meta.get("model_override"), meta.get("config_override"), meta.get("past_memories", []))
+                    meta.get("model_override"), meta.get("config_override"),
+                    meta.get("past_memories", []), _mode)
 
         # Fallback (no LLM)
         return (
@@ -619,6 +627,7 @@ class CompanionEngine:
             None,
             None,
             [],
+            _mode,
         )
 
     # ------------------------------------------------------------------

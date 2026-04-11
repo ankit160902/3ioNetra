@@ -163,6 +163,7 @@ class ResponseComposer:
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
         session=None,
+        response_mode: Optional[str] = None,
     ) -> str:
         """
         Compose a response using:
@@ -224,6 +225,7 @@ class ResponseComposer:
                 memory_context=memory,
                 model_override=model_override,
                 config_override=config_override,
+                response_mode=response_mode,
             )
             # Final gate: run ResponseValidator and optionally regenerate
             # once with corrective hints if a HIGH-severity check fails.
@@ -239,6 +241,7 @@ class ResponseComposer:
                     memory_context=memory,
                     model_override=model_override,
                     config_override=self._merge_correction_hints(config_override, hints),
+                    response_mode=response_mode,
                 ),
             )
             # Cache the response for future similar queries (per-user)
@@ -319,6 +322,7 @@ class ResponseComposer:
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
         session=None,
+        response_mode: Optional[str] = None,
     ):
         """
         Stream response synthesis using LLMService.generate_response_stream.
@@ -368,6 +372,7 @@ class ResponseComposer:
                 memory_context=memory,
                 model_override=model_override,
                 config_override=config_override,
+                response_mode=response_mode,
             ):
                 full_response_parts.append(chunk)
                 yield chunk
