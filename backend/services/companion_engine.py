@@ -181,6 +181,7 @@ class CompanionEngine:
                 memory_context=session.memory,
                 model_override=routing.model_name,
                 config_override=routing.config_override,
+                response_mode=analysis.get("response_mode", "exploratory"),
             ):
                 yield {"type": "token", "content": token}
         else:
@@ -263,6 +264,13 @@ class CompanionEngine:
 
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
+
+        # Observability: log the chosen response_mode so runtime behavior is
+        # traceable. Follows the existing IntentAgent logger.info pattern.
+        logger.info(
+            f"Mode selected: {analysis.get('response_mode', 'exploratory')} "
+            f"for '{message[:50]}' (session={session.session_id}, turn={session.turn_count})"
+        )
 
         # 1a. LLM-based crisis detection — catches typos/misspellings that the
         # keyword-based check in _preflight missed. The IntentAgent sees the
@@ -382,23 +390,20 @@ class CompanionEngine:
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
-            # Gate RAG for purely practical topics — the LLM gives better
-            # practical advice when it doesn't have scripture to lean on.
-            # Spiritual grounding still comes from the persona's dharmic
-            # principles — just not specific verse citations.
-            _spiritual_cues = {"mantra", "verse", "spiritual", "prayer", "meditate",
-                               "puja", "ritual", "god", "deity", "temple", "scripture",
-                               "gita", "veda", "karma", "dharma", "moksha"}
-            _practical_domains = {"work", "career", "finance", "health", "education",
-                                  "relationship", "family", "money", "job"}
-            _life_domain_lower = (analysis.get("life_domain") or "unknown").lower()
-            _is_practical_only = (
-                not any(kw in message.lower() for kw in _spiritual_cues)
-                and any(d in _life_domain_lower for d in _practical_domains)
+            # Gate RAG based on response_mode (LLM-classified, not keyword-matched).
+            # practical_first → skip RAG entirely; the LLM gives better practical
+            # advice without scripture to lean on. presence_first on early turns →
+            # skip RAG; the user needs presence, not citations. teaching →
+            # always use RAG (full scripture power). exploratory → let RAG run if
+            # it has something concrete to surface.
+            _response_mode = analysis.get("response_mode", "exploratory")
+            _skip_rag_for_mode = (
+                _response_mode == "practical_first"
+                or (_response_mode == "presence_first" and session.turn_count <= 2)
             )
             should_get_verses = (
                 is_verse_request
-                or (is_ready and not is_product_request and not _is_practical_only)
+                or (is_ready and not is_product_request and not _skip_rag_for_mode)
             )
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
@@ -450,6 +455,7 @@ class CompanionEngine:
                 "acknowledgement": random.choice(acknowledgements),
                 "model_override": routing.model_name,
                 "config_override": routing.config_override,
+                "response_mode": analysis.get("response_mode", "exploratory"),
             }
 
         # ------------------------------------------------------------------
@@ -527,6 +533,7 @@ class CompanionEngine:
             "analysis": analysis,
             "model_override": routing.model_name,
             "config_override": routing.config_override,
+            "response_mode": analysis.get("response_mode", "exploratory"),
         }
 
     async def process_message(
@@ -576,6 +583,7 @@ class CompanionEngine:
                 memory_context=session.memory,
                 model_override=meta.get("model_override"),
                 config_override=meta.get("config_override"),
+                response_mode=meta.get("response_mode"),
             )
 
             # Cost tracking
