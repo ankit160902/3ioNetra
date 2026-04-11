@@ -48,7 +48,6 @@ logs/
 
 # Data & ML Models
 data/
-models/
 ml_models/
 *.pkl
 *.pth

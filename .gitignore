@@ -52,7 +52,6 @@ Thumbs.db
 data/qdrant_storage/
 data/processed/
 data/vector_db/
-models/
 logs/
 *.wav
 *.mp3
