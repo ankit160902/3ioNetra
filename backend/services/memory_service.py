@@ -26,14 +26,58 @@ class LongTermMemoryService:
         self._ensure_indexes()
 
     def _ensure_indexes(self):
-        """Create indexes on the user_memories collection."""
+        """Create indexes on user_memories and user_profiles collections.
+
+        Legacy indexes are kept for backward compatibility with the pre-
+        dynamic-memory retrieval path. New indexes support the dynamic
+        memory system (Apr 2026) — bi-temporal filtering, importance-
+        ranked top-k, sensitivity tier filtering, and the new user_profiles
+        collection for relational profiles.
+
+        Each create_index call is wrapped in its own try/except so one
+        failure (e.g. "index already exists under a different name")
+        doesn't block the rest.
+        """
         if self.db is None:
             return
+
+        # Legacy user_memories indexes (pre Apr 2026) — preserved
+        _legacy_memory_indexes = [
+            ("user_id",),
+            ([("user_id", 1), ("created_at", -1)],),
+        ]
+        for args in _legacy_memory_indexes:
+            try:
+                self.db.user_memories.create_index(*args)
+            except Exception as e:
+                logger.warning(f"user_memories legacy index {args!r} creation failed: {e}")
+
+        # NEW user_memories indexes for dynamic memory system
+        _new_memory_indexes = [
+            # Bi-temporal filter — invalid_at=None means still valid. This is
+            # the hottest path — every retrieval filters out invalidated
+            # memories, so user_id + invalid_at is the primary compound index.
+            [("user_id", 1), ("invalid_at", 1)],
+            # Top-k by importance — supports the Generative-Agents scoring
+            # function's importance lookup when the scoring short-circuits
+            # to high-importance memories.
+            [("user_id", 1), ("importance", -1)],
+            # Tier filter — supports the sensitivity-tier retrieval filter
+            # so the MemoryReader can quickly exclude sensitive memories
+            # when the current turn's tone doesn't align.
+            [("user_id", 1), ("sensitivity", 1)],
+        ]
+        for index_spec in _new_memory_indexes:
+            try:
+                self.db.user_memories.create_index(index_spec)
+            except Exception as e:
+                logger.warning(f"user_memories index {index_spec!r} creation failed: {e}")
+
+        # NEW user_profiles collection index — unique, one profile per user
         try:
-            self.db.user_memories.create_index("user_id")
-            self.db.user_memories.create_index([("user_id", 1), ("created_at", -1)])
+            self.db.user_profiles.create_index([("user_id", 1)], unique=True)
         except Exception as e:
-            logger.warning(f"user_memories index creation failed: {e}")
+            logger.warning(f"user_profiles unique index creation failed: {e}")
 
     def set_rag_pipeline(self, rag_pipeline):
         self.rag_pipeline = rag_pipeline
