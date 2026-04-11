@@ -136,6 +136,24 @@ class Settings(BaseSettings):
     MAX_DOCS_PER_TRADITION: int = 3
     MEMORY_SIMILARITY_THRESHOLD: float = 0.35  # min cosine sim for memory recall
 
+    # Dynamic memory system (Apr 2026 — see 2026-04-12-dynamic-memory-design.md).
+    # Scoring weights and thresholds for the new MemoryReader + MemoryExtractor
+    # + ReflectionService pipeline. All tunable without code changes.
+    MEMORY_HALF_LIFE_DAYS: int = 30                    # recency decay half-life
+    MEMORY_IMPORTANCE_FLOOR_THRESHOLD: int = 8         # importance >= this: never fully decays
+    MEMORY_IMPORTANCE_FLOOR_VALUE: float = 0.3         # minimum recency floor for important memories
+    MEMORY_WEIGHT_RECENCY: float = 0.5                 # Generative Agents used 1.0 — we lower
+    MEMORY_WEIGHT_IMPORTANCE: float = 1.0              # slightly stronger than relevance
+    MEMORY_WEIGHT_RELEVANCE: float = 1.0               # cosine similarity weight
+    MEMORY_EPISODIC_TOP_K: int = 3                     # top-k episodic memories injected per turn
+    MEMORY_SCORE_FLOOR: float = 0.4                    # absolute score floor — weak matches aren't shown
+    MEMORY_EXTRACTION_TIMEOUT_SECONDS: int = 30        # hard cap on async extraction task
+    MEMORY_PRUNE_IMPORTANCE_SAFETY_FLOOR: int = 8      # the ONE hardcoded safety floor — prune never touches this
+    REFLECTION_THRESHOLD: int = 30                     # importance sum that triggers consolidation
+    REFLECTION_EPISODIC_WINDOW: int = 20               # how many recent memories reflection reads
+    REFLECTION_MODEL: str = "gemini-2.5-flash"         # reflection uses slightly stronger model than extraction
+    BACKFILL_CONVERSATION_COUNT: int = 10              # how many prior conversations cold-start backfill processes
+
     # Semantic Response Cache (saves 5-15s on repeat patterns)
     RESPONSE_CACHE_ENABLED: bool = Field(default=True, env="RESPONSE_CACHE_ENABLED")
     RESPONSE_CACHE_TTL: int = Field(default=21600, env="RESPONSE_CACHE_TTL")  # 6 hours
