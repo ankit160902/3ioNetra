@@ -2,7 +2,7 @@
  * Login/Register Page Component with Extended Profile Collection
  */
 import { useState, useEffect } from 'react';
-import { Loader2, Eye, EyeOff, Moon, Sun } from 'lucide-react';
+import { Loader2, Eye, EyeOff, Moon, Sun, ChevronDown } from 'lucide-react';
 import SearchableMultiSelect from './SearchableMultiSelect';
 import { useTheme } from '../hooks/useTheme';
 
@@ -95,7 +95,13 @@ const templeOptions = [
   'Trimbakeshwar', 'Ujjain Mahakal', 'Amarnath',
 ];
 
-const selectClass = 'w-full px-5 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 dark:focus:border-orange-700 focus:bg-white dark:focus:bg-gray-800 text-sm font-bold text-gray-900 dark:text-gray-100 transition-all outline-none appearance-none cursor-pointer';
+const selectClass = 'w-full pl-5 pr-12 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 dark:focus:border-orange-700 focus:bg-white dark:focus:bg-gray-800 text-sm font-bold text-gray-900 dark:text-gray-100 transition-all outline-none appearance-none cursor-pointer';
+
+// Auto-scroll the focused select into view so the dropdown is visible after click
+const handleSelectFocus = (e: React.FocusEvent<HTMLSelectElement>) => {
+  const target = e.currentTarget;
+  setTimeout(() => target.scrollIntoView({ block: 'center', behavior: 'smooth' }), 50);
+};
 const inputClass = 'w-full px-5 py-3.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-2xl focus:ring-4 focus:ring-orange-500/5 focus:border-orange-200 dark:focus:border-orange-700 focus:bg-white dark:focus:bg-gray-800 text-sm font-bold text-gray-900 dark:text-gray-100 transition-all outline-none';
 const labelClass = 'block text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500 mb-1.5 ml-1';
 
@@ -467,10 +473,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
                 <div>
                   <label htmlFor="gender" className={labelClass}>Gender</label>
-                  <select id="gender" value={gender} onChange={(e) => setGender(e.target.value)} required className={selectClass}>
-                    <option value="">Select Gender</option>
-                    {genderOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select id="gender" value={gender} onChange={(e) => setGender(e.target.value)} onFocus={handleSelectFocus} required className={selectClass}>
+                      <option value="">Select Gender</option>
+                      {genderOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
 
                 <div>
@@ -480,10 +489,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
 
                 <div>
                   <label htmlFor="profession" className={labelClass}>Profession</label>
-                  <select id="profession" value={profession} onChange={(e) => setProfession(e.target.value)} required className={selectClass}>
-                    <option value="">Select Profession</option>
-                    {professionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select id="profession" value={profession} onChange={(e) => setProfession(e.target.value)} onFocus={handleSelectFocus} required className={selectClass}>
+                      <option value="">Select Profession</option>
+                      {professionOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
               </>
             )}
@@ -503,28 +515,37 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                 {/* Rashi - single dropdown */}
                 <div>
                   <label htmlFor="rashi" className={labelClass}>Rashi (Zodiac)</label>
-                  <select id="rashi" value={rashi} onChange={(e) => setRashi(e.target.value)} required className={selectClass}>
-                    <option value="">Select Rashi</option>
-                    {rashiOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select id="rashi" value={rashi} onChange={(e) => setRashi(e.target.value)} onFocus={handleSelectFocus} required className={selectClass}>
+                      <option value="">Select Rashi</option>
+                      {rashiOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Gotra - single dropdown */}
                 <div>
                   <label htmlFor="gotra" className={labelClass}>Gotra</label>
-                  <select id="gotra" value={gotra} onChange={(e) => setGotra(e.target.value)} required className={selectClass}>
-                    <option value="">Select Gotra</option>
-                    {gotraOptions.map((g) => <option key={g} value={g}>{g}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select id="gotra" value={gotra} onChange={(e) => setGotra(e.target.value)} onFocus={handleSelectFocus} required className={selectClass}>
+                      <option value="">Select Gotra</option>
+                      {gotraOptions.map((g) => <option key={g} value={g}>{g}</option>)}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Nakshatra - single dropdown */}
                 <div>
                   <label htmlFor="nakshatra" className={labelClass}>Nakshatra</label>
-                  <select id="nakshatra" value={nakshatra} onChange={(e) => setNakshatra(e.target.value)} required className={selectClass}>
-                    <option value="">Select Nakshatra</option>
-                    {nakshatraOptions.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
+                  <div className="relative">
+                    <select id="nakshatra" value={nakshatra} onChange={(e) => setNakshatra(e.target.value)} onFocus={handleSelectFocus} required className={selectClass}>
+                      <option value="">Select Nakshatra</option>
+                      {nakshatraOptions.map((n) => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-gray-400 dark:text-gray-500 absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  </div>
                 </div>
 
                 {/* Temples - searchable multi-select */}

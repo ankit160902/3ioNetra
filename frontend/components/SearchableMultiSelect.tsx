@@ -54,7 +54,11 @@ export default function SearchableMultiSelect({
 
   const openDropdown = () => {
     setIsOpen(true);
-    setTimeout(() => inputRef.current?.focus(), 0);
+    setTimeout(() => {
+      inputRef.current?.focus();
+      // Auto-scroll the trigger into view so the dropdown is visible
+      containerRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 50);
   };
 
   return (
@@ -100,7 +104,13 @@ export default function SearchableMultiSelect({
               setSearchTerm(e.target.value);
               if (!isOpen) setIsOpen(true);
             }}
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!isOpen) openDropdown();
+            }}
+            onFocus={() => {
+              if (!isOpen) openDropdown();
+            }}
             placeholder={selected.length > 0 ? 'Add more...' : placeholder}
             className="flex-1 bg-transparent outline-none text-sm font-bold text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
           />
