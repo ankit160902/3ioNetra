@@ -607,6 +607,7 @@ class CompanionEngine:
                         output_tokens=usage.get("output_tokens", 0),
                         intent=str(analysis.get("intent", "")),
                         phase=meta["active_phase"].value,
+                        response_mode=str(analysis.get("response_mode", "")),
                     )
                 except Exception as e:
                     logger.debug(f"Cost tracking failed: {e}")
