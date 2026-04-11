@@ -82,7 +82,10 @@ Extend the existing `IntentAgent` to classify a new field, `response_mode`, whic
 
 **Zero new services, zero new files on the Python side.** The change is surgical: extend the IntentAgent's output, add a new section to the existing `spiritual_mitra.yaml`, plumb one parameter through two pipeline functions, delete the existing hot-fix cruft.
 
-### The 4 modes
+### The 5 modes
+**Note (Apr 2026 addendum):** the original design used 4 modes and assumed closure would be handled by the `_CLOSURE_SET` fast-path. E2E testing proved that assumption wrong — multi-word closure signals (`"thank you, I needed to hear that"`, `"ok I'll try that"`) fall through to LLM classification, which was then forced to pick one of the 4 existing modes, all of which instruct the LLM to keep the conversation open. A 5th `closure` mode was added in commits `7f28567`..`a185f24`. See `docs/superpowers/specs/2026-04-12-e2e-test-report.md` for the finding and `C:\Users\RAVIRAJ SODHA\.claude\plans\mutable-tickling-gosling.md` for the fix plan.
+
+
 
 #### Mode 1 — `practical_first`
 
@@ -144,6 +147,24 @@ Extend the existing `IntentAgent` to classify a new field, `response_mode`, whic
 - "I don't know what I'm doing with my life"
 - "Why does this keep happening to me?"
 
+---
+
+#### Mode 5 — `closure` (added Apr 2026 as a bug-fix structural change)
+
+**Purpose:** User is ending this chapter of the conversation. They said something that signals acceptance, gratitude, or wind-down — *"thank you"*, *"ok"*, *"got it"*, *"I feel better now"*, *"thanks for listening"*, *"alright I'll try that"*, *"thank you, I needed to hear that"*. They are NOT asking for more. They are telling you that what you gave them has landed, and they are ready to go.
+
+**Forbidden:** Asking more questions. Offering new advice, suggestions, or follow-up practices. Inviting them to share more ("tell me more", "what else is on your mind"). Scripture, mantras, `[VERSE]` or `[MANTRA]` tags. Banned empathy phrases (*"I hear you"*, *"I understand"*, *"It sounds like"*) — enforced by a mode-aware check in `ResponseValidator` that flags HIGH severity and triggers regeneration. Any solving, teaching, or presence-holding — those modes are over; the user has closed the door.
+
+**Expected shape:** 1–2 sentences of warmth. Acknowledge, wish them well, STOP. Closure is a door closing softly, not a speech.
+
+**CURRENT TURN DOMINATES:** Even if prior turns were emotionally heavy (grief, burnout, despair), a clear closure signal in the current turn means the user has moved through that emotional moment. Do NOT reach back into the prior emotion to "hold space" — match where they are now, not where they were two turns ago.
+
+**Examples:**
+- "thank you, that helped"
+- "ok I'll try that"
+- "thanks, I feel better now"
+- "I appreciate it, take care"
+
 ### One mode per turn, re-classified every turn
 
 - **No blending.** If a query has both practical and spiritual dimensions ("I'm starting a new job, should I do a puja?"), the LLM picks the DOMINANT mode (usually the ASK — in this case `teaching`).
@@ -166,7 +187,8 @@ User message
 │     practical_first,                           │
 │     presence_first,                            │
 │     teaching,                                  │
-│     exploratory ]                              │
+│     exploratory,                               │
+│     closure ]   (5th mode added Apr 12 2026)  │
 │                                                │
 │ Classified by the SAME LLM call that already   │
 │ returns intent/emotion/urgency. No extra API   │
@@ -181,16 +203,19 @@ User message
 │                                                │
 │ RAG gating (replaces hardcoded keyword check): │
 │   practical_first  → skip RAG                  │
+│   closure          → skip RAG                  │
 │   presence_first   → skip RAG on early turns   │
 │   teaching         → always RAG (full power)   │
 │   exploratory      → RAG only if signals point │
 │                      at a concrete domain      │
 │                                                │
 │ Panchang injection: skipped for                │
-│ practical_first and presence_first             │
+│ practical_first, presence_first, closure       │
 │                                                │
 │ DELETED: the _practical_domains / _spiritual_  │
 │ _cues keyword block in companion_engine.py     │
+│ DELETED (Apr 12): speculative RAG dispatch —   │
+│ RAG now runs sequentially, mode-first.         │
 └──────────────────────────────────────────────┘
     │
     ▼
@@ -199,13 +224,14 @@ User message
 │                                                │
 │ Reads response_mode                            │
 │                                                │
-│ Injects ONE of 4 mode-specific prompt          │
+│ Injects ONE of 5 mode-specific prompt          │
 │ fragments from YAML:                           │
 │   prompts/spiritual_mitra.yaml →               │
 │     mode_prompts.[practical_first |            │
 │                   presence_first |             │
 │                   teaching |                    │
-│                   exploratory]                  │
+│                   exploratory |                 │
+│                   closure]                      │
 │                                                │
 │ Injected LAST, as "=== ACTIVE RESPONSE MODE    │
 │ ===", so it is the strongest recent signal     │
@@ -457,7 +483,7 @@ response_mode = mode_map.get(intent, "exploratory")
 
 ### 8.2 · `backend/models/llm_schemas.py`
 
-**Add** `response_mode: Literal["practical_first", "presence_first", "teaching", "exploratory"] = "exploratory"` field to the `IntentAnalysis` Pydantic model. This is what protects downstream code from bad LLM output.
+**Add** `response_mode: Literal["practical_first", "presence_first", "teaching", "exploratory", "closure"] = "exploratory"` field to the `IntentAnalysis` Pydantic model. This is what protects downstream code from bad LLM output. (The 5th value `"closure"` was added Apr 12 2026 — see the addendum under §5 "The 5 modes".)
 
 ### 8.3 · `backend/services/companion_engine.py`
 
