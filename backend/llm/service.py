@@ -1655,6 +1655,46 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             logger.exception(f"Error in generate_response_stream: {str(e)}")
             yield "I'm here with you. We can continue whenever you're ready."
 
+    async def complete_json(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        max_output_tokens: int = 2048,
+        temperature: float = 0.3,
+    ) -> str:
+        """Minimal Gemini call returning raw JSON text. Used by the dynamic
+        memory system's MemoryExtractor, MemoryUpdater, and ReflectionService.
+
+        Does NOT apply the spiritual_mitra system instruction — this is a
+        pure structured-output call. The caller is expected to parse the
+        returned string via Pydantic.
+
+        Raises RuntimeError if the LLM is unavailable. Other errors from
+        the Gemini client propagate as-is so callers can wrap them in
+        their own error handling.
+        """
+        if not self.available or not self.client:
+            raise RuntimeError("LLMService not available")
+
+        target_model = model or settings.GEMINI_FAST_MODEL
+
+        def _sync_call():
+            return self.client.models.generate_content(
+                model=target_model,
+                contents=prompt,
+                config={
+                    "temperature": temperature,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": max_output_tokens,
+                    "automatic_function_calling": __import__(
+                        "google.genai", fromlist=["types"]
+                    ).types.AutomaticFunctionCallingConfig(disable=True),
+                },
+            )
+
+        response = await asyncio.to_thread(_sync_call)
+        return (response.text or "").strip()
+
     async def generate_response(
         self,
         query: str,
