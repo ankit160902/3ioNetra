@@ -21,6 +21,25 @@ from services.cache_service import get_cache_service
 
 logger = logging.getLogger(__name__)
 
+# GPU access lock — serializes embedding model inference to prevent
+# VRAM contention on small GPUs (e.g., GTX 1650 4GB).
+#
+# Implementation note: asyncio.Lock instances bind to the running event loop
+# on first use (Python 3.10+).  A module-level Lock() created at import time
+# will raise "bound to a different event loop" if the event loop is replaced
+# (e.g. in tests or after uvicorn reload).  We therefore store one lock per
+# event-loop identity and create it lazily on first access.
+_gpu_locks: dict = {}
+
+
+def _gpu_lock() -> asyncio.Lock:
+    """Return the asyncio.Lock for the current event loop, creating it if needed."""
+    loop = asyncio.get_event_loop()
+    loop_id = id(loop)
+    if loop_id not in _gpu_locks:
+        _gpu_locks[loop_id] = asyncio.Lock()
+    return _gpu_locks[loop_id]
+
 
 def _get_onnx_providers() -> List[str]:
     """Return the explicit ONNX Runtime execution provider list.
@@ -648,7 +667,11 @@ class RAGPipeline:
             prefix = "query: " if is_query else "passage: "
             clean_text = prefix + clean_text
 
-        vec = (await asyncio.to_thread(self._embedding_model.encode, [clean_text], convert_to_tensor=False, show_progress_bar=False))[0]
+        async with _gpu_lock():
+            vec = (await asyncio.to_thread(
+                self._embedding_model.encode, [clean_text],
+                convert_to_tensor=False, show_progress_bar=False,
+            ))[0]
         return np.asarray(vec, dtype="float32")
 
     async def generate_embeddings_batch(self, texts: list, is_query: bool = True) -> list:
@@ -662,10 +685,11 @@ class RAGPipeline:
         if self._needs_instruction_prefix():
             prefix = "query: " if is_query else "passage: "
         clean_texts = [prefix + t.strip().replace("\n", " ") for t in texts]
-        vecs = await asyncio.to_thread(
-            self._embedding_model.encode, clean_texts,
-            convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),
-        )
+        async with _gpu_lock():
+            vecs = await asyncio.to_thread(
+                self._embedding_model.encode, clean_texts,
+                convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),
+            )
         return [np.asarray(v, dtype="float32") for v in vecs]
 
     # ------------------------------------------------------------------
