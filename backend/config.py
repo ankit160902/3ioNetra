@@ -4,7 +4,7 @@ Configuration management for 3ioNetra Spiritual Companion
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 class Settings(BaseSettings):
@@ -149,7 +149,26 @@ class Settings(BaseSettings):
     MEMORY_SCORE_FLOOR: float = 0.4                    # absolute score floor — weak matches aren't shown
     MEMORY_EXTRACTION_TIMEOUT_SECONDS: int = 30        # hard cap on async extraction task
     MEMORY_UPDATER_SIMILAR_K: int = 5                  # top-k similar memories shown to the Mem0 decider
+    MEMORY_PROFILE_CACHE_TTL_SECONDS: int = 300        # RelationalProfile Redis cache TTL (5 min per spec §8.2)
     MEMORY_PRUNE_IMPORTANCE_SAFETY_FLOOR: int = 8      # the ONE hardcoded safety floor — prune never touches this
+
+    # Tone families for tone-aware retrieval (spec §10.4). Sensitive memories
+    # only surface when the current turn's tone sits in the same family as
+    # the memory's tone_marker. Edit this dict to retune without code
+    # changes — e.g. move "relief" from recovering → warm if that feels
+    # closer. Unknown tones are treated as neutral.
+    MEMORY_TONE_FAMILIES: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "heavy": [
+                "grief", "despair", "anxiety", "overwhelm", "confusion",
+                "shame", "fear", "loneliness", "doubt", "anger",
+            ],
+            "recovering": ["resolve", "healing", "hope", "relief"],
+            "warm": ["gratitude", "joy", "devotion", "curiosity", "peace"],
+            "neutral": ["neutral", ""],
+        }
+    )
+
     REFLECTION_THRESHOLD: int = 30                     # importance sum that triggers consolidation
     REFLECTION_EPISODIC_WINDOW: int = 20               # how many recent memories reflection reads
     REFLECTION_MODEL: str = "gemini-2.5-flash"         # reflection uses slightly stronger model than extraction
