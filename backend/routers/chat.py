@@ -498,6 +498,44 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     return final_text
 
 
+def _dispatch_memory_extraction_post_response(
+    *,
+    session,
+    user_message: str,
+    assistant_response: str,
+    analysis: dict,
+) -> None:
+    """Fire-and-forget memory extraction after a response completes.
+
+    Safe to call unconditionally — the extractor's dispatch helper
+    already gates on anonymous user, trivial intents (GREETING/CLOSURE/
+    OFF_TOPIC), and is_off_topic. We additionally skip crisis turns
+    here (urgency=crisis) because crisis content must never enter the
+    regular memory pipeline — crisis_memory_hook handles the
+    meta-fact write via a separate code path.
+    """
+    if not analysis or analysis.get("urgency") == "crisis":
+        return
+    try:
+        from services.memory_extractor import dispatch_memory_extraction
+        asyncio.create_task(
+            dispatch_memory_extraction(
+                user_id=getattr(session.memory, "user_id", None),
+                session_id=session.session_id,
+                conversation_id=getattr(session, "conversation_id", None),
+                turn_number=session.turn_count,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                intent_analysis=analysis,
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            f"dispatch_memory_extraction scheduling failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+
+
 # ----------------------------------------------------------------------------
 # MAIN CONVERSATIONAL ENDPOINT
 # ----------------------------------------------------------------------------
@@ -542,6 +580,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         route_config,
         past_memories,
         route_response_mode,
+        route_analysis,
     ) = engine_result
 
     if is_ready_for_wisdom:
@@ -619,6 +658,15 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         _elapsed = (time.perf_counter() - _t_start) * 1000
         logger.info(f"REQUEST_END | cid={cid} | phase=guidance | {_elapsed:.0f}ms | turn={session.turn_count}")
         _sources = _build_sources(context_docs_used)
+        # Fire-and-forget dynamic-memory extraction. Runs after the response
+        # is composed so the user never waits on memory writes. Gating on
+        # anonymous / trivial intent / crisis happens inside the helper.
+        _dispatch_memory_extraction_post_response(
+            session=session,
+            user_message=query.message,
+            assistant_response=response_text,
+            analysis=route_analysis,
+        )
         return ConversationalResponse(
             session_id=session.session_id,
             phase=ConversationPhaseEnum.guidance,
@@ -648,6 +696,14 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             else ConversationPhaseEnum.listening
         )
         _sources = _build_sources(context_docs_used)
+        # Fire-and-forget dynamic-memory extraction for the listening path.
+        # Same gating as guidance branch — anonymous / trivial / crisis skip.
+        _dispatch_memory_extraction_post_response(
+            session=session,
+            user_message=query.message,
+            assistant_response=companion_response,
+            analysis=route_analysis,
+        )
         return ConversationalResponse(
             session_id=session.session_id,
             phase=_response_phase,
@@ -797,6 +853,15 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             }
 
             yield f"event: done\ndata: {json.dumps({'full_response': final_text, 'recommended_products': recommended_products, 'flow_metadata': flow_meta})}\n\n"
+
+            # Fire-and-forget dynamic-memory extraction after the stream
+            # closes. Meta dict from preamble already holds the analysis.
+            _dispatch_memory_extraction_post_response(
+                session=session,
+                user_message=query.message,
+                assistant_response=final_text,
+                analysis=meta.get("analysis", {}),
+            )
 
         except asyncio.CancelledError:
             # Client disconnected mid-stream — do NOT save partial response

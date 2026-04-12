@@ -951,6 +951,18 @@ class LLMService:
                 profile_parts.append("\n".join(panchang_lines))
                 has_data = True
             
+            # Relational profile — always-on "who you are speaking to" layer
+            # from the dynamic memory system. Rendered ABOVE past_memories
+            # because it's the narrative mental model, not a list of facts.
+            # Already crisis-safe: to_prompt_text() renders a generic safety
+            # note for crisis-flagged profiles, never verbatim content.
+            if user_profile.get('relational_profile'):
+                profile_parts.append(
+                    "\n   WHO YOU ARE SPEAKING TO — THE RELATIONSHIP SO FAR:"
+                )
+                profile_parts.append(f"   {user_profile['relational_profile']}")
+                has_data = True
+
             # Semantic Long-Term Memories — deduplicated
             if user_profile.get('past_memories'):
                 seen = set()

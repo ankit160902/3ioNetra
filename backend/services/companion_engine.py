@@ -199,35 +199,21 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
-        # Parallel Task Execution: Intent Analysis + Memory Retrieval ONLY.
-        # Speculative RAG was removed Apr 2026 — the mode-aware gating added
-        # in the response-mode system made parallel RAG a net negative because
-        # the RAG task would pay full reranker cost (60-170s on CPU) for queries
-        # that the mode gate then discards (practical_first, early presence).
-        # RAG now runs SEQUENTIALLY at the use site, gated on response_mode,
-        # inside the guidance/listening code paths below.
-        _t_parallel_start = time.perf_counter()
-        tasks = [
-            self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
-        ]
+        # Intent classification runs first. MemoryReader (below) depends on
+        # the analysis (response_mode, emotion) for its mode gate and tone
+        # filter, and we want to defer the reader until AFTER the crisis
+        # and off-topic short-circuits so those paths don't pay the ~100ms
+        # reader cost for responses that won't use the result anyway.
+        _t_intent_start = time.perf_counter()
+        analysis = await self.intent_agent.analyze_intent(
+            message, session.memory.get_memory_summary()
+        )
+        _intent_ms = (time.perf_counter() - _t_intent_start) * 1000
 
         user_id = getattr(session, 'user_id', None) or getattr(session.memory, 'user_id', None)
-        # Skip memory retrieval for trivial/greeting turns on first message (saves 500-800ms)
-        msg_words = len(message.strip().split())
-        should_retrieve_memory = user_id and (session.turn_count > 0 or msg_words > 3)
-        if should_retrieve_memory:
-            tasks.append(self.memory_service.retrieve_relevant_memories(user_id, message))
-        else:
-            tasks.append(asyncio.sleep(0, result=[]))
 
-        _results = await asyncio.gather(*tasks, return_exceptions=True)
-        _t_parallel_end = time.perf_counter()
-        _parallel_ms = (_t_parallel_end - _t_parallel_start) * 1000
-        analysis, past_memories = _results[0], _results[1]
-        logger.info(f"PERF_PREAMBLE parallel={_parallel_ms:.0f}ms intent_ok={not isinstance(_results[0], Exception)} mem_ok={not isinstance(_results[1], Exception)}")
-
-        # Guard: if IntentAgent returned an exception (via gather return_exceptions),
-        # use a safe fallback dict so downstream code doesn't crash.
+        # Guard: if IntentAgent returned an exception, fall back to a safe dict
+        # so downstream code doesn't crash.
         if isinstance(analysis, Exception):
             logger.warning(f"IntentAgent failed (non-fatal): {analysis}. Using fallback.")
             analysis = {
@@ -240,9 +226,11 @@ class CompanionEngine:
                 "product_rejection": False, "query_variants": [],
                 "expected_length": "moderate", "is_off_topic": False,
             }
-        if isinstance(past_memories, Exception):
-            logger.warning(f"Memory retrieval failed (non-fatal): {past_memories}")
-            past_memories = []
+
+        # Initialize reader-backed state — will be populated after the
+        # crisis/off-topic short-circuits fail to fire.
+        relational_profile_text: str = ""
+        past_memories: list = []
 
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
@@ -314,6 +302,39 @@ class CompanionEngine:
                 "off_topic_response": _off_topic_detector.get_redirect_message(),
                 "response_mode": analysis.get("response_mode", "exploratory"),
             }
+
+        # 1c. Dynamic MemoryReader — profile load (always-on, Redis-cached)
+        # + mode-gated episodic retrieval (scored, tone-filtered). Runs only
+        # for authenticated users AFTER crisis/off-topic short-circuits fail
+        # to fire — those paths never use memory so we save ~100ms on them.
+        if user_id:
+            _t_reader_start = time.perf_counter()
+            try:
+                from services import memory_reader
+                read_result = await memory_reader.load_and_retrieve(
+                    user_id=user_id,
+                    query=message,
+                    response_mode=analysis.get("response_mode"),
+                    analysis=analysis,
+                    session=session,
+                )
+                relational_profile_text = read_result.profile.to_prompt_text()
+                past_memories = [
+                    sm.memory.get("text", "")
+                    for sm in read_result.episodic
+                    if sm.memory.get("text")
+                ]
+            except Exception as exc:
+                logger.warning(
+                    f"MemoryReader failed (non-fatal): "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            _reader_ms = (time.perf_counter() - _t_reader_start) * 1000
+            logger.info(
+                f"PERF_PREAMBLE intent={_intent_ms:.0f}ms reader={_reader_ms:.0f}ms "
+                f"profile_len={len(relational_profile_text)} "
+                f"past_mem_count={len(past_memories)}"
+            )
 
         # 2. Store in Long-Term Memory if significant
         is_significant_update = (
@@ -419,6 +440,11 @@ class CompanionEngine:
                 has_rag_context=bool(context_docs),
             )
 
+            _guidance_user_profile = build_user_profile(session.memory, session)
+            if relational_profile_text:
+                _guidance_user_profile["relational_profile"] = relational_profile_text
+            if past_memories:
+                _guidance_user_profile["past_memories"] = past_memories
             return {
                 "is_ready_for_wisdom": True,
                 "readiness_trigger": readiness_trigger,
@@ -426,7 +452,7 @@ class CompanionEngine:
                 "turn_topics": turn_topics,
                 "recommended_products": products,
                 "active_phase": ConversationPhase.GUIDANCE,
-                "user_profile": build_user_profile(session.memory, session),
+                "user_profile": _guidance_user_profile,
                 "past_memories": past_memories,
                 "analysis": analysis,
                 "acknowledgement": random.choice(acknowledgements),
@@ -479,6 +505,8 @@ class CompanionEngine:
                     logger.warning(f"Listening-phase RAG/validation failed: {e}")
 
         user_profile = build_user_profile(session.memory, session)
+        if relational_profile_text:
+            user_profile["relational_profile"] = relational_profile_text
         if past_memories:
             user_profile["past_memories"] = past_memories
 
@@ -521,14 +549,21 @@ class CompanionEngine:
         Returns:
             (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics,
              recommended_products, active_phase, model_override, config_override,
-             past_memories, response_mode)
+             past_memories, response_mode, analysis)
 
-        The final element ``response_mode`` is the IntentAgent-classified
-        response shape for this turn — used by routers/chat.py to pass
-        the mode through to ResponseComposer for guidance-phase synthesis.
+        The element at index 9 (``response_mode``) is the IntentAgent-
+        classified response shape for this turn — used by routers/chat.py to
+        pass the mode through to ResponseComposer for guidance-phase synthesis.
+
+        The element at index 10 (``analysis``) is the full IntentAgent output
+        dict — used by routers/chat.py to gate the fire-and-forget memory
+        extraction dispatch (skip crisis / off-topic / greeting / closure
+        turns). Existing scripts and regression tests that access the tuple
+        by index only read items 0, 5, 9 and are unaffected by this addition.
         """
         meta = await self.process_message_preamble(session, message)
         _mode = meta.get("response_mode", "exploratory")
+        _analysis = meta.get("analysis", {})
 
         # LLM-based crisis short-circuit: IntentAgent detected urgency=crisis
         # (catches typos/misspellings that keyword check in _preflight missed).
@@ -536,7 +571,7 @@ class CompanionEngine:
             return (
                 meta["crisis_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []), _mode,
+                None, None, meta.get("past_memories", []), _mode, _analysis,
             )
 
         # Off-topic short-circuit: return canned redirect, skip LLM call entirely.
@@ -544,7 +579,7 @@ class CompanionEngine:
             return (
                 meta["off_topic_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []), _mode,
+                None, None, meta.get("past_memories", []), _mode, _analysis,
             )
 
         if meta["is_ready_for_wisdom"]:
@@ -552,7 +587,7 @@ class CompanionEngine:
                 meta["acknowledgement"], True, meta["context_docs"],
                 meta["turn_topics"], meta["recommended_products"], ConversationPhase.GUIDANCE,
                 meta.get("model_override"), meta.get("config_override"),
-                meta.get("past_memories", []), _mode,
+                meta.get("past_memories", []), _mode, _analysis,
             )
 
         # Listening phase — make the LLM call
@@ -591,7 +626,7 @@ class CompanionEngine:
             return (reply, False, meta["context_docs"], meta["turn_topics"],
                     meta["recommended_products"], meta["active_phase"],
                     meta.get("model_override"), meta.get("config_override"),
-                    meta.get("past_memories", []), _mode)
+                    meta.get("past_memories", []), _mode, _analysis)
 
         # Fallback (no LLM)
         return (
@@ -605,6 +640,7 @@ class CompanionEngine:
             None,
             [],
             _mode,
+            _analysis,
         )
 
     # ------------------------------------------------------------------
