@@ -142,6 +142,18 @@ async def update_memories_from_extraction(
                 f"{type(exc).__name__}: {exc}"
             )
 
+    # Reflection trigger — only if at least one ADD or UPDATE actually bumped
+    # the counter. DELETE and NOOP don't contribute toward the threshold.
+    if any(d.operation in ("ADD", "UPDATE") for d in decisions):
+        try:
+            from services.reflection_service import maybe_trigger_reflection
+            await maybe_trigger_reflection(user_id)
+        except Exception as exc:
+            logger.debug(
+                f"memory_writer: reflection trigger check failed for "
+                f"user={user_id}: {type(exc).__name__}: {exc}"
+            )
+
     return decisions
 
 
