@@ -1487,6 +1487,7 @@ Respond ONLY with 2 terms, separated by a newline."""
         query_variants: Optional[List[str]] = None,
         exclude_references: Optional[List[str]] = None,
         skip_rerank: bool = False,
+        response_mode: Optional[str] = None,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
@@ -1783,9 +1784,12 @@ Respond ONLY with 2 terms, separated by a newline."""
                 break
 
         # 5. Neural Re-ranking (Cross-Encoder) — skip when top result is already decisive
-        logger.info(f"PERF_RAG candidates={len(results)} before reranking (skip={skip_rerank})")
+        # Adaptive skip: modes that don't cite specific verses skip reranking
+        _skip_modes = frozenset({"presence_first", "closure"})
+        _effective_skip = skip_rerank or (response_mode in _skip_modes)
+        logger.info(f"PERF_RAG candidates={len(results)} before reranking (skip={_effective_skip}, mode={response_mode})")
         _t_rerank = time.perf_counter()
-        if skip_rerank:
+        if _effective_skip:
             # Caller will rerank merged results later (rerank-once pattern)
             for r in results:
                 r["rerank_score"] = r.get("score", 0)
