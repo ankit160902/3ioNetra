@@ -265,7 +265,11 @@ class CompanionEngine:
                 f"IntentAgent urgency=crisis for message '{message[:50]}'"
             )
             from services.crisis_response_composer import get_crisis_response_composer
+            from services.crisis_memory_hook import dispatch_crisis_meta_fact
             session.crisis_turn_count += 1
+            # Fire-and-forget meta-fact write: set prior_crisis_flag + bump
+            # count on user_profiles. NEVER stores verbatim crisis text.
+            dispatch_crisis_meta_fact(session.memory.user_id)
             crisis_response = get_crisis_response_composer().compose(session, message)
             return {
                 "is_ready_for_wisdom": False,

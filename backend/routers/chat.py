@@ -403,6 +403,10 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
         crisis_response = get_crisis_response_composer().compose(session, query.message)
         session.add_message('assistant', crisis_response)
         await session_manager.update_session(session)
+        # Fire-and-forget crisis meta-fact: flag the user's RelationalProfile
+        # so future turns bias softer. NEVER stores verbatim crisis content.
+        from services.crisis_memory_hook import dispatch_crisis_meta_fact
+        dispatch_crisis_meta_fact(session.memory.user_id)
     return session, is_crisis, crisis_response
 
 
