@@ -201,6 +201,51 @@ class ConversationMemory:
         if concept not in self.relevant_concepts:
             self.relevant_concepts.append(concept)
 
+    def get_memory_summary(self) -> str:
+        """Get a lightweight summary focused on current conversational context.
+
+        Profile fields (preferred_deity, rashi, gotra, temple_visits, purchase_history,
+        location, spiritual_interests) are intentionally excluded here — they are already
+        injected via the user profile section of the prompt. Repeating them here amplifies
+        bias and causes the LLM to loop on the same deity/temple/topic.
+        """
+        parts = []
+
+        if self.story.primary_concern:
+            parts.append(f"The user is currently dealing with {self.story.primary_concern}")
+
+        if self.story.emotional_state:
+            parts.append(f"They are feeling {self.story.emotional_state}")
+
+        if self.story.life_area:
+            parts.append(f"This relates to their {self.story.life_area}")
+
+        if self.story.trigger_event:
+            parts.append(f"Triggered by {self.story.trigger_event}")
+
+        if self.story.unmet_needs:
+            parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
+
+        return ". ".join(parts) if parts else "This is the start of the conversation."
+
+    def get_user_context_string(self) -> str:
+        """Get a string describing the user for personalization"""
+        parts = []
+
+        if self.user_name:
+            parts.append(self.user_name)
+
+        if self.story.age_group:
+            parts.append(self.story.age_group)
+
+        if self.story.gender:
+            parts.append(self.story.gender)
+
+        if self.story.profession:
+            parts.append(f"working as {self.story.profession}")
+
+        return ", ".join(parts) if parts else "anonymous seeker"
+
 
 # ---------------------------------------------------------------------------
 # Dynamic memory system (Apr 2026) — see docs/superpowers/specs/2026-04-12-
@@ -378,48 +423,3 @@ class RelationalProfile:
             created_at=self.created_at,
             updated_at=datetime.utcnow(),
         )
-
-    def get_memory_summary(self) -> str:
-        """Get a lightweight summary focused on current conversational context.
-
-        Profile fields (preferred_deity, rashi, gotra, temple_visits, purchase_history,
-        location, spiritual_interests) are intentionally excluded here — they are already
-        injected via the user profile section of the prompt. Repeating them here amplifies
-        bias and causes the LLM to loop on the same deity/temple/topic.
-        """
-        parts = []
-
-        if self.story.primary_concern:
-            parts.append(f"The user is currently dealing with {self.story.primary_concern}")
-
-        if self.story.emotional_state:
-            parts.append(f"They are feeling {self.story.emotional_state}")
-
-        if self.story.life_area:
-            parts.append(f"This relates to their {self.story.life_area}")
-
-        if self.story.trigger_event:
-            parts.append(f"Triggered by {self.story.trigger_event}")
-
-        if self.story.unmet_needs:
-            parts.append(f"They are seeking {', '.join(self.story.unmet_needs)}")
-
-        return ". ".join(parts) if parts else "This is the start of the conversation."
-
-    def get_user_context_string(self) -> str:
-        """Get a string describing the user for personalization"""
-        parts = []
-
-        if self.user_name:
-            parts.append(self.user_name)
-
-        if self.story.age_group:
-            parts.append(self.story.age_group)
-
-        if self.story.gender:
-            parts.append(self.story.gender)
-
-        if self.story.profession:
-            parts.append(f"working as {self.story.profession}")
-
-        return ", ".join(parts) if parts else "anonymous seeker"
