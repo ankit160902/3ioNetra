@@ -47,6 +47,32 @@ async def lifespan(app: FastAPI):
     companion_engine = get_companion_engine()
     companion_engine.set_rag_pipeline(rag_pipe)
 
+    # 3a. Dynamic memory system (spec 2026-04-12-dynamic-memory-design.md).
+    # Eagerly initialize the LongTermMemoryService singleton so the MongoDB
+    # index creation in LongTermMemoryService._ensure_indexes() runs at boot
+    # rather than on the first request. The index set includes the new
+    # bi-temporal indexes on user_memories
+    # ((user_id, invalid_at), (user_id, importance -1), (user_id, sensitivity))
+    # plus the user_profiles unique index — all required by the new reader
+    # and the /api/memory router. CompanionEngine already triggers this
+    # transitively via its __init__, but we call it again explicitly so a
+    # future refactor of engine.__init__ can't silently break index creation.
+    from services.memory_service import get_memory_service
+    get_memory_service(rag_pipe)
+    # Import the dynamic-memory modules so any syntax or circular-import
+    # error surfaces at boot rather than on the first request that uses
+    # them. All four are free-function modules with no instantiation cost.
+    from services import memory_reader  # noqa: F401
+    from services import memory_writer  # noqa: F401
+    from services import memory_extractor  # noqa: F401
+    from services import reflection_service  # noqa: F401
+    from services import crisis_memory_hook  # noqa: F401
+    logger.info(
+        "Dynamic memory system ready "
+        "(reader + writer + extractor + reflection + crisis hook, "
+        "indexes ensured)"
+    )
+
     # 3b. Pre-initialize cache (surface Redis issues at boot, not first request)
     from services.cache_service import get_cache_service
     get_cache_service()
