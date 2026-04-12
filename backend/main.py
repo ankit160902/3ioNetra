@@ -18,7 +18,7 @@ from config import settings
 from rag.pipeline import RAGPipeline
 
 # Import routers after they are created
-from routers import auth, chat, admin
+from routers import auth, chat, admin, memory
 from routers.dependencies import set_rag_pipeline
 
 # Setup logging via dictConfig — see logging_config.py for the rationale.
@@ -156,6 +156,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(chat.router)
 app.include_router(admin.router)
+app.include_router(memory.router)
 
 @app.get("/")
 async def root():
