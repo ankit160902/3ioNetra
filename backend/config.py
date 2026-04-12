@@ -148,6 +148,7 @@ class Settings(BaseSettings):
     MEMORY_EPISODIC_TOP_K: int = 3                     # top-k episodic memories injected per turn
     MEMORY_SCORE_FLOOR: float = 0.4                    # absolute score floor — weak matches aren't shown
     MEMORY_EXTRACTION_TIMEOUT_SECONDS: int = 30        # hard cap on async extraction task
+    MEMORY_UPDATER_SIMILAR_K: int = 5                  # top-k similar memories shown to the Mem0 decider
     MEMORY_PRUNE_IMPORTANCE_SAFETY_FLOOR: int = 8      # the ONE hardcoded safety floor — prune never touches this
     REFLECTION_THRESHOLD: int = 30                     # importance sum that triggers consolidation
     REFLECTION_EPISODIC_WINDOW: int = 20               # how many recent memories reflection reads

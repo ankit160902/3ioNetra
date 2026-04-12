@@ -146,8 +146,9 @@ async def _extract_with_timeout(
     assistant_response: str,
 ) -> None:
     """Inner coroutine run by dispatch_memory_extraction. Wraps extract_memories
-    in a timeout guard so a hung Gemini call cannot leak a zombie task.
-    Further storage (MemoryUpdater) will be wired in by the next commit."""
+    and the MemoryUpdater storage pipeline in a single timeout guard so a
+    hung Gemini call (either extraction or decision) cannot leak a zombie
+    task."""
     try:
         async with asyncio.timeout(settings.MEMORY_EXTRACTION_TIMEOUT_SECONDS):
             result = await extract_memories(
@@ -159,13 +160,16 @@ async def _extract_with_timeout(
                 assistant_response=assistant_response,
                 relational_profile_text="",
             )
-            # NOTE: Commit 7 will wire MemoryUpdater in here. For now, we
-            # just log the extraction result so the pipeline is observable.
             if result.facts:
-                logger.info(
-                    f"MemoryExtractor: user={user_id} produced "
-                    f"{len(result.facts)} fact(s), awaiting storage pipeline "
-                    f"(MemoryUpdater not yet wired)."
+                # Lazy import to avoid any circular-import risk between
+                # memory_extractor and memory_writer at module load time.
+                from services.memory_writer import update_memories_from_extraction
+                await update_memories_from_extraction(
+                    user_id=user_id,
+                    session_id=session_id,
+                    conversation_id=conversation_id,
+                    turn_number=turn_number,
+                    extraction=result,
                 )
     except asyncio.TimeoutError:
         logger.warning(
