@@ -1270,6 +1270,8 @@ Respond ONLY with 2 terms, separated by a newline."""
         if not results:
             return results
 
+        _t0 = time.perf_counter()
+
         # Check reranker cache before running CrossEncoder
         cache = get_cache_service()
         _doc_refs = tuple(sorted(r.get("reference", str(i)) for i, r in enumerate(results)))
@@ -1287,6 +1289,9 @@ Respond ONLY with 2 terms, separated by a newline."""
         except Exception:
             pass  # Cache miss or unavailable — proceed with reranking
 
+        _t1 = time.perf_counter()
+        logger.info(f"PERF_RERANK cache_check={round((_t1-_t0)*1000)}ms")
+
         self._ensure_reranker_model()
 
         # Cap candidates to reduce reranking time
@@ -1303,6 +1308,9 @@ Respond ONLY with 2 terms, separated by a newline."""
             content = " ".join(p for p in parts if p)
             pairs.append([query, content])
 
+        _t2 = time.perf_counter()
+        logger.info(f"PERF_RERANK pairs_built={round((_t2-_t1)*1000)}ms n_pairs={len(pairs)}")
+
         try:
             # Cross-encoder scores (duck-typing supports API-based rerankers)
             if self._reranker_model is not None:
@@ -1315,7 +1323,10 @@ Respond ONLY with 2 terms, separated by a newline."""
                     re_scores = [0.0] * len(results)
             else:
                 re_scores = [0.0] * len(results)
-            
+
+            _t3 = time.perf_counter()
+            logger.info(f"PERF_RERANK predict={round((_t3-_t2)*1000)}ms model={type(self._reranker_model).__name__}")
+
             # Attach and re-sort
             for i, score in enumerate(re_scores):
                 results[i]["rerank_score"] = float(score)
