@@ -594,40 +594,36 @@ class RAGPipeline:
             return
         if self._reranker_model is not None:
             return
-        from sentence_transformers import CrossEncoder
-        # Pass fix_mistral_regex=True to the underlying tokenizer so the
-        # outdated regex warning from the bge-reranker-v2-m3 tokenizer is
-        # silenced. Without this, every cold start emits a HuggingFace
-        # warning about an incorrect regex pattern that may slightly
-        # affect tokenization quality.
-        _tokenizer_args = {"fix_mistral_regex": True}
-        if settings.RERANKER_ONNX_ENABLED:
+
+        _local_reranker = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "models", "reranker"
+        )
+        _docker_reranker = "/app/models/reranker"
+        _model_dir = _docker_reranker if os.path.isdir(_docker_reranker) else _local_reranker
+
+        # 1. Try ONNX on CPU (preferred — no VRAM contention)
+        _onnx_path = os.path.join(_model_dir, "onnx", "model.onnx")
+        if os.path.exists(_onnx_path):
             try:
-                # Load from local DEV cache if ONNX model exists there, else from HuggingFace
-                _local_reranker = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "reranker")
-                _onnx_path = os.path.join(_local_reranker, "onnx", "model.onnx")
-                _reranker_src = _local_reranker if os.path.exists(_onnx_path) else settings.RERANKER_MODEL
-                providers = _get_onnx_providers()
-                logger.info(
-                    "RAGPipeline: loading reranker with ONNX backend from "
-                    f"{_reranker_src} (providers={providers})"
-                )
-                self._reranker_model = CrossEncoder(
-                    _reranker_src,
-                    backend="onnx",
-                    model_kwargs={"provider": providers[0]},
-                    tokenizer_args=_tokenizer_args,
-                )
-                _model_type = type(self._reranker_model.model).__name__
-                logger.info(f"RAGPipeline: reranker loaded — model_type={_model_type} device={self._reranker_model.device}")
-                if "ORT" in _model_type:
-                    return
-                # If sentence_transformers silently fell back to PyTorch, log and keep it
-                logger.warning(f"ONNX backend requested but got {_model_type} — keeping as-is")
+                from rag.onnx_reranker import ONNXReranker
+                self._reranker_model = ONNXReranker(_model_dir)
+                logger.info("RAGPipeline: reranker loaded via ONNX (CPU)")
                 return
             except Exception as e:
                 logger.warning(f"ONNX reranker load failed, falling back to PyTorch: {e}")
-        self._load_model("_reranker_model", CrossEncoder, "reranker", settings.RERANKER_MODEL, "re-ranker")
+
+        # 2. PyTorch fallback — force CPU to prevent VRAM contention with embedding model
+        from sentence_transformers import CrossEncoder
+        logger.info(f"RAGPipeline: loading reranker via PyTorch (CPU) from {_model_dir}")
+        try:
+            if os.path.isdir(_model_dir) and os.listdir(_model_dir):
+                self._reranker_model = CrossEncoder(_model_dir, device="cpu")
+            else:
+                self._reranker_model = CrossEncoder(settings.RERANKER_MODEL, device="cpu")
+            logger.info(f"RAGPipeline: reranker loaded on {self._reranker_model.device}")
+        except Exception as exc:
+            logger.exception(f"RAGPipeline: failed to load reranker: {exc}")
+            self._reranker_model = None
 
     def _needs_instruction_prefix(self) -> bool:
         """Check if the embedding model requires query/passage prefixes (e.g., E5 models)."""
