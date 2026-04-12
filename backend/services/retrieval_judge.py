@@ -139,7 +139,7 @@ class RetrievalJudge:
 
         # Parallel search for all sub-queries (with reduced top_k per sub-query)
         sub_top_k = min(search_kwargs.get("top_k", settings.RETRIEVAL_TOP_K), settings.RERANK_TOP_K)
-        sub_search_kwargs = {**search_kwargs, "top_k": sub_top_k}
+        sub_search_kwargs = {**search_kwargs, "top_k": sub_top_k, "skip_rerank": True}
         sub_search_kwargs.pop("scripture_filter", None)  # Sub-queries need full corpus access
         tasks = [
             rag_pipeline.search(query=sq, **sub_search_kwargs)
@@ -156,6 +156,25 @@ class RetrievalJudge:
 
         if not merged:
             return await rag_pipeline.search(query=query, **search_kwargs)
+
+        # Rerank-once: single CrossEncoder pass on the merged candidate pool
+        intent = intent_analysis.get("intent")
+        life_domain = intent_analysis.get("life_domain")
+        _intent_enum = None
+        if intent and not isinstance(intent, str):
+            _intent_enum = intent
+        elif isinstance(intent, str):
+            try:
+                from models.session import IntentType
+                _intent_enum = IntentType(intent)
+            except (ValueError, KeyError):
+                pass
+        merged = await rag_pipeline.rerank(
+            query=query,
+            candidates=merged,
+            intent=_intent_enum,
+            life_domain=life_domain,
+        )
 
         # Judge relevance
         try:
@@ -185,8 +204,15 @@ class RetrievalJudge:
             logger.info(f"Judge scored {judgment.score}/5, retrying ({retries_left} retries remaining)")
             try:
                 rewritten = await self._rewrite_query(query, last_reason, intent_analysis)
-                retry_docs = await rag_pipeline.search(query=rewritten, **search_kwargs)
+                retry_search_kwargs = {**search_kwargs, "skip_rerank": True}
+                retry_docs = await rag_pipeline.search(query=rewritten, **retry_search_kwargs)
                 current_merged = self._merge_results([current_merged, retry_docs])
+                # Rerank the expanded pool after merge
+                current_merged = await rag_pipeline.rerank(
+                    query=query, candidates=current_merged,
+                    intent=_intent_enum,
+                    life_domain=life_domain,
+                )
             except Exception as e:
                 logger.warning(f"Query rewrite/retry failed: {e}")
                 break
