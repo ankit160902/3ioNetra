@@ -243,6 +243,7 @@ class RAGPipeline:
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        global _rag_pipeline_instance
         self.verses: List[Dict] = []
         self.embeddings: Optional[np.ndarray] = None
         self.dim: int = 0
@@ -255,6 +256,8 @@ class RAGPipeline:
         from services.query_normalizer import get_query_normalizer
         self._query_normalizer = get_query_normalizer()
         self._data_dir_override: Optional[Path] = Path(data_dir) if data_dir is not None else None
+        # Register as the module-level singleton so get_rag_pipeline() works
+        _rag_pipeline_instance = self
 
     def __bool__(self) -> bool:
         return self.available
@@ -1392,6 +1395,25 @@ Respond ONLY with 2 terms, separated by a newline."""
             results.sort(key=lambda x: x.get("score", 0), reverse=True)
             return results
 
+    async def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        intent: Optional[IntentType] = None,
+        life_domain: Optional[str] = None,
+    ) -> List[Dict]:
+        """Public reranking entry point for the rerank-once pattern.
+
+        Called by retrieval_judge after merging results from parallel
+        skip_rerank=True searches. Caps candidates at MAX_RERANK_CANDIDATES,
+        runs CrossEncoder, and returns sorted results.
+        """
+        if not candidates:
+            return candidates
+        if len(candidates) > settings.MAX_RERANK_CANDIDATES:
+            candidates = candidates[:settings.MAX_RERANK_CANDIDATES]
+        return await self._rerank_results(query, candidates, intent=intent, life_domain=life_domain)
+
     @staticmethod
     def _mmr_diversify(
         results: List[Dict],
@@ -1464,6 +1486,7 @@ Respond ONLY with 2 terms, separated by a newline."""
         life_domain: Optional[str] = None,
         query_variants: Optional[List[str]] = None,
         exclude_references: Optional[List[str]] = None,
+        skip_rerank: bool = False,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
@@ -1760,15 +1783,19 @@ Respond ONLY with 2 terms, separated by a newline."""
                 break
 
         # 5. Neural Re-ranking (Cross-Encoder) — skip when top result is already decisive
-        logger.info(f"PERF_RAG candidates={len(results)} before reranking")
+        logger.info(f"PERF_RAG candidates={len(results)} before reranking (skip={skip_rerank})")
         _t_rerank = time.perf_counter()
-        if results and len(results) >= 2:
+        if skip_rerank:
+            # Caller will rerank merged results later (rerank-once pattern)
+            for r in results:
+                r["rerank_score"] = r.get("score", 0)
+                r["final_score"] = r.get("score", 0)
+        elif results and len(results) >= 2:
             top_score = results[0].get("score", 0)
             second_score = results[1].get("score", 0)
             gap = top_score - second_score
             if top_score >= settings.SKIP_RERANK_THRESHOLD and gap >= settings.SKIP_RERANK_GAP:
                 logger.info(f"Skipping reranker: top={top_score:.3f} gap={gap:.3f} (threshold={settings.SKIP_RERANK_THRESHOLD})")
-                # Assign fused scores as final scores to maintain downstream compatibility
                 for r in results:
                     r["rerank_score"] = r.get("score", 0)
                     r["final_score"] = r.get("score", 0)
@@ -1990,8 +2017,30 @@ Respond ONLY with 2 terms, separated by a newline."""
                 answer = top.get("text") or top.get("meaning") or "I found a relevant verse for you."
             else:
                 answer = "I'm here to listen to what you're going through."
-            
+
             yield {
                 "type": "answer",
                 "text": answer,
             }
+
+
+# ---------------------------------------------------------------------------
+# Singleton factory — consistent with all other service singletons in this
+# codebase. Returns the module-level RAGPipeline instance when available,
+# or None if the pipeline has not been initialised yet.
+# ---------------------------------------------------------------------------
+
+_rag_pipeline_instance: Optional["RAGPipeline"] = None
+
+
+def get_rag_pipeline() -> Optional["RAGPipeline"]:
+    """Return the module-level RAGPipeline singleton.
+
+    Returns None when the pipeline has not been initialised (e.g. in unit
+    tests that never call ``RAGPipeline()``). Callers should guard:
+
+        pipeline = get_rag_pipeline()
+        if pipeline is None or not pipeline.available:
+            return []
+    """
+    return _rag_pipeline_instance
