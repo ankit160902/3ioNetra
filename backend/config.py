@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     SPLADE_REQUIRED: bool = Field(default=False, env="SPLADE_REQUIRED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
     RERANKER_ENABLED: bool = Field(default=True, env="RERANKER_ENABLED")
-    MAX_RERANK_CANDIDATES: int = Field(default=10, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
+    MAX_RERANK_CANDIDATES: int = Field(default=12, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
     SKIP_RERANK_THRESHOLD: float = Field(default=0.75, env="SKIP_RERANK_THRESHOLD")
@@ -342,7 +342,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
     MODEL_ECONOMY: str = "gemini-2.5-flash"
-    MODEL_STANDARD: str = "gemini-2.5-pro"
+    MODEL_STANDARD: str = "gemini-2.5-flash"
     MODEL_PREMIUM: str = "gemini-2.5-pro"
     MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")
 
