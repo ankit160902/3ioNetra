@@ -153,7 +153,7 @@ class AuthResponse(BaseModel):
 
 class SaveConversationRequest(BaseModel):
     """Request to save a conversation"""
-    conversation_id: Optional[str] = None
+    conversation_id: str
     title: str
     messages: List[dict]
 

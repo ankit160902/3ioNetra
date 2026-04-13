@@ -947,17 +947,6 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
     if not user:
         raise HTTPException(status_code=401)
 
-    # ConversationStorage.save_conversation uses conversation_id as the
-    # session_id key for upsert. If it's missing, the storage layer silently
-    # returns "" and nothing is persisted — but the route used to still
-    # report {"message": "Saved"}, which is a contract lie. Validate up front
-    # so callers get a clear 400 instead of a phantom success.
-    if not request.conversation_id:
-        raise HTTPException(
-            status_code=400,
-            detail="conversation_id is required (use the active session_id)",
-        )
-
     # 1. Get memory snapshot if active session exists
     session_manager = get_session_manager()
     session = await session_manager.get_session(request.conversation_id)
