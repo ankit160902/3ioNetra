@@ -761,7 +761,9 @@ async def main():
             result = await run_scenario(scenario, args.url)
             results.append(result)
         except Exception as e:
-            print(f"\n  [{scenario.id}] EXCEPTION: {e}")
+            import traceback
+            print(f"\n  [{scenario.id}] EXCEPTION: {type(e).__name__}: {e}")
+            traceback.print_exc()
             results.append(ScenarioResult(
                 scenario_id=scenario.id,
                 name=scenario.name,

@@ -163,11 +163,8 @@ turn_topics = update_memory(memory, session, text)
 - Shown product deduplication
 
 ```python
-recommender = ProductRecommender(product_service, panchang_service)
-products = await recommender.recommend(
-    session, message, analysis, turn_topics,
-    is_ready_for_wisdom=True, life_domain="spiritual"
-)
+recommender = ProductRecommender(product_service)
+products = await recommender.recommend(session, message, analysis)
 ```
 
 **Tests:** 20 (gatekeeper gates, rejection, acceptance, recommend paths, product maps)
@@ -504,7 +501,6 @@ Test in `tests/unit/test_conversation_fsm.py`.
 ### Backwards Compatibility
 
 - **CompanionEngine constructor:** All new kwargs default to `None` → falls back to singleton factories
-- **`record_suggestion()`:** Thin delegate on CompanionEngine → `self.product_recommender.record_suggestion()`
 - **API contract:** Zero changes to request/response schemas
 - **Frontend:** No changes needed
 - **Docker:** No changes to Dockerfile or docker-compose.yml

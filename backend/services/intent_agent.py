@@ -82,43 +82,44 @@ class IntentAgent:
          "sensitivity_note": brief note if emotional sensitivity matters (empty string otherwise)
        }}
 
-       INTENT RULES (read carefully):
-       - "explicit_search" (confidence 0.8-1.0, max_results 3-5):
-         User's PRIMARY intent is buying/shopping. They are actively looking for products.
-         Examples: "I want to buy a mala", "show me puja items", "recommend a Hanuman murti",
-         "what items do I need for havan", "I want to purchase incense",
-         "suggest products for stress", "what products can help with career",
-         "recommend products for my puja room"
-       - "contextual_need" (confidence 0.5-0.7, max_results 2-3):
-         User's message indicates openness to product suggestions in context. Two sub-cases:
-         a) Practice/ritual context: User discusses a practice requiring items AND asks what they need.
-            Examples: "What do I need for shraddh ceremony?", "I want to set up a home temple, what should I get?"
-         b) Help-seeking context: After sharing emotional/life struggles, user explicitly asks for
-            suggestions, recommendations, or "something that can help." The ask must be explicit —
-            continued venting without asking is still "none".
-            Examples: "Can you suggest something that might help?", "Is there anything that can
-            help with this?", "Kuch suggest karo", "Please recommend something",
-            "What can I do/use/try?", "Suggest something please",
-            "Is there anything that can bring peace?", "I need help, suggest something"
-         NOTE: If user mentions a practice (japa, puja, meditation) WITHOUT asking for items, this is "none".
-         NOTE: If user asks for spiritual advice only ("suggest a mantra"), this is "none".
-       - "casual_mention" (confidence 0.2-0.4, max_results 1):
-         Products mentioned but NOT the primary ask. Show at most 1 product.
-         Examples: "Tell me about meditation, and by the way do you have any products?"
-       - "negative" (confidence 0.8-1.0, max_results 0):
-         User rejects, criticizes, or dismisses products.
-         Examples: "Stop suggesting products", "Your products are overpriced", "No more shopping",
-         "I don't want to buy anything", "not interested in products"
-       - "none" (confidence 0.0, max_results 0):
-         DEFAULT. No product interest detected. Use this for:
-         * Pure emotional venting WITHOUT asking for suggestions (just sharing pain)
-         * Mantra/verse/scripture/philosophy questions
-         * Advice requests where user asks HOW to do something (not what to buy)
-         * Panchang/tithi/nakshatra queries
-         * Travel/pilgrimage/itinerary planning
-         * Greetings, closures, thank-you messages
-         * ANY first message of a conversation (NEVER recommend products on turn 1)
-         * When the user just MENTIONED a practice — that does NOT mean they want items
+       ## Product Awareness
+
+       IMPORTANT: When you set product_signal.intent to anything other than "none",
+       the system will show product cards to the user in the chat interface. This is
+       the ONLY way products appear — the text response itself must NEVER mention
+       product names, prices, or shopping URLs. Your job is to decide WHETHER to show
+       product cards by setting the right intent and search_keywords.
+
+       You are a friend who happens to know a shop (my3ionetra.com). You never bring up
+       products unless the moment genuinely calls for it. Here is how you think about it:
+
+       - If someone is hurting, you LISTEN. You do not hand them a catalog.
+       - If someone is exploring spirituality casually, you talk. You do not sell.
+       - If someone has been discussing a practice across several turns and naturally
+         reaches the point where they would need something (e.g. "I want to start doing
+         japa daily"), THAT is when you might set product_signal to show them a mala.
+       - If someone directly asks "do you have products?", "where can I buy X?",
+         "can you recommend items for Y?", or "I want to buy Z", you MUST set
+         product_signal.intent to "explicit_search" with relevant search_keywords.
+         This is how the user gets product cards. Do NOT just describe where to shop
+         in your text response — set the signal so the system can show actual products.
+       - If someone has told you before that they do not want product suggestions,
+         you respect that permanently.
+
+       The bar is: would a thoughtful human friend mention a product here, or would
+       it feel forced? When in doubt, set intent to "none".
+
+       You will receive the user's product interaction history (how many times they have
+       been shown products, whether they have rejected them, their preference). Use this
+       to calibrate. A user who has been shown products 5 times this month needs a higher
+       bar than a new user.
+
+       product_signal output rules:
+       - "explicit_search": user asks to buy, find, or get product recommendations. ALWAYS use this when user says "buy", "purchase", "where can I get", "recommend items/products", "I need [item] for [practice]". confidence 0.8-1.0, max_results 3-5. search_keywords MUST contain specific product terms (e.g. ["rudraksha mala", "mala"] or ["puja thali", "diya", "incense"]).
+       - "contextual_need": the conversation has naturally reached a point where a product genuinely helps and the user has expressed readiness (e.g. "I want to start doing japa daily" after several turns of discussion). confidence 0.5-0.7, max_results 1-2.
+       - "casual_mention": products tangentially relevant but not the user's ask. confidence 0.2-0.4, max_results 1.
+       - "negative": user rejects or criticizes products. confidence 0.8-1.0, max_results 0.
+       - "none": DEFAULT. No product interest detected. This includes emotional sharing, advice-seeking, scripture questions, greetings, closures, and any turn where recommending would feel forced. confidence 0.0, max_results 0.
 
        TYPE FILTER RULES:
        - "physical_only": User asks for objects/items (murti, mala, diya, incense)
@@ -451,13 +452,6 @@ class IntentAgent:
         elif any(w in message_lower for w in ["bye", "thanks", "thank you", "ok", "no", "nothing"]):
             intent = IntentType.CLOSURE
 
-        product_rejection_phrases = [
-            "stop suggesting products", "don't want products", "no products",
-            "not interested in shopping", "don't recommend", "stop recommending",
-            "no recommendations", "don't show products", "stop showing products",
-        ]
-        is_product_rejection = any(phrase in message_lower for phrase in product_rejection_phrases)
-
         # Suppress needs_direct_answer when the message has emotional weight, even if
         # it contains a question word. Without this, "What should I do? I'm so lost"
         # would short-circuit straight to guidance instead of being heard first.
@@ -466,24 +460,28 @@ class IntentAgent:
             "?" in message or any(w in message_lower for w in ["how", "what", "where", "why"])
         )
 
-        # Build structured product signal instead of flat boolean
-        product_signal = {
-            "intent": "none", "confidence": 0.0, "type_filter": "any",
-            "search_keywords": [], "max_results": 0, "sensitivity_note": "",
-        }
-        if is_product_rejection:
+        # Product signal — minimal fallback (LLM handles the real logic)
+        _buy_words = {"buy", "purchase", "order", "shop", "shopping", "price", "cost"}
+        _reject_phrases = {"stop suggesting products", "stop recommending", "no more products",
+                          "don't show products", "dont show products"}
+        msg_lower = message.lower()
+
+        if any(p in msg_lower for p in _reject_phrases):
             product_signal = {
-                "intent": "negative", "confidence": 0.9, "type_filter": "any",
+                "intent": "negative", "confidence": 1.0, "type_filter": "any",
                 "search_keywords": [], "max_results": 0, "sensitivity_note": "",
             }
-        elif any(w in message_lower for w in ["buy", "purchase", "order"]):
+        elif any(w in msg_lower.split() for w in _buy_words):
             product_signal = {
                 "intent": "explicit_search", "confidence": 0.6, "type_filter": "any",
-                "search_keywords": [], "max_results": 3, "sensitivity_note": "",
+                "search_keywords": [w for w in msg_lower.split() if len(w) > 3 and w not in _buy_words],
+                "max_results": 3, "sensitivity_note": "",
             }
-        # Note: "product", "recommend", "suggest" alone do NOT trigger products
-        # in the fallback. Only explicit buy/purchase words do. This prevents
-        # "your products are overpriced" from triggering recommendations.
+        else:
+            product_signal = {
+                "intent": "none", "confidence": 0.0, "type_filter": "any",
+                "search_keywords": [], "max_results": 0, "sensitivity_note": "",
+            }
 
         # Derive response_mode from intent + emotional weight. Used when the
         # LLM classifier is unavailable — keeps mode-aware downstream code
