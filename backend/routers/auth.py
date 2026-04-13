@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Header, Cookie, Depends, Request, 
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict
 from models.api_schemas import UserRegisterRequest, UserLoginRequest, AuthResponse, UserResponse
+from config import settings
 from services.auth_service import get_auth_service
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -32,9 +33,9 @@ async def get_current_user(
 
     # Priority 2: Authorization header (backwards compat)
     if not token and authorization:
-        if " " not in authorization:
-            raise HTTPException(status_code=401, detail="Invalid authorization header")
-        token = authorization.split(" ")[1]
+        if not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Authorization header must use Bearer scheme")
+        token = authorization.split(" ", 1)[1]
 
     if not token:
         return None
@@ -67,10 +68,10 @@ async def get_verified_user(
     if not authorization:
         raise HTTPException(status_code=401, detail="Authorization header required")
 
-    if " " not in authorization:
-        raise HTTPException(status_code=401, detail="Invalid authorization header format")
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authorization header must use Bearer scheme")
 
-    token = authorization.split(" ")[1]
+    token = authorization.split(" ", 1)[1]
 
     try:
         auth_service = get_auth_service()
@@ -94,7 +95,7 @@ def _set_auth_cookie(response: JSONResponse, token: str) -> JSONResponse:
         key=AUTH_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=False,  # Set to True in production (HTTPS only)
+        secure=not settings.DEBUG,
         samesite="lax",
         max_age=AUTH_COOKIE_MAX_AGE,
         path="/",
@@ -188,8 +189,8 @@ async def logout_user(authorization: Optional[str] = Header(None), request: Requ
     if request and request.cookies.get(AUTH_COOKIE_NAME):
         token = request.cookies[AUTH_COOKIE_NAME]
     # Fallback to header
-    if not token and authorization and " " in authorization:
-        token = authorization.split(" ")[1]
+    if not token and authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1]
 
     if token:
         auth_service = get_auth_service()
