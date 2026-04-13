@@ -663,28 +663,37 @@ def test_streaming(client, token: str):
     body = {"session_id": sid, "message": "Tell me about the significance of Om in Hinduism"}
 
     start = time.perf_counter()
-    events_collected = {"status": [], "token": [], "metadata": [], "done": []}
+    events_collected = {"status": [], "token": [], "metadata": [], "done": [], "error": []}
     full_text = ""
     try:
         with client.stream("POST", f"{BASE}/api/conversation/stream",
                            json=body, headers=headers, timeout=TIMEOUT) as resp:
             first_token_time = None
+            current_event_type = "message"  # SSE default event type
             for line in resp.iter_lines():
-                if not line or not line.startswith("data: "):
+                # SSE comment (starts with ':') — skip
+                if not line or line.startswith(":"):
                     continue
-                raw = line[6:]
-                if raw == "[DONE]":
-                    break
-                try:
-                    evt = json.loads(raw)
-                    etype = evt.get("event", "unknown")
-                    events_collected.setdefault(etype, []).append(evt)
-                    if etype == "token":
-                        if first_token_time is None:
-                            first_token_time = (time.perf_counter() - start) * 1000
-                        full_text += evt.get("data", "")
-                except json.JSONDecodeError:
-                    pass
+                # Event type line — track it for the next data line
+                if line.startswith("event: "):
+                    current_event_type = line[7:].strip()
+                    continue
+                # Data line — parse JSON and file under tracked event type
+                if line.startswith("data: "):
+                    raw = line[6:]
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        evt = json.loads(raw)
+                        events_collected.setdefault(current_event_type, []).append(evt)
+                        if current_event_type == "token":
+                            if first_token_time is None:
+                                first_token_time = (time.perf_counter() - start) * 1000
+                            full_text += evt.get("text", "")
+                    except json.JSONDecodeError:
+                        pass
+                    # Reset to default after consuming data
+                    current_event_type = "message"
         elapsed = (time.perf_counter() - start) * 1000
 
         log_result("streaming", "connection", True, f"total_ms={elapsed:.0f}", elapsed)
