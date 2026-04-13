@@ -318,6 +318,14 @@ class RelationalProfile:
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    # Product interaction memory (cross-session)
+    product_preference: str = "neutral"
+    product_shown_count: int = 0
+    product_last_shown_at: Optional[str] = None
+    product_last_rejected_at: Optional[str] = None
+    product_rejection_count: int = 0
+    product_purchased_items: List[str] = field(default_factory=list)
+
     def to_prompt_text(self) -> str:
         """Render this profile as the text block injected into the LLM prompt.
 
@@ -354,6 +362,21 @@ class RelationalProfile:
 
         return "\n\n".join(parts)
 
+    def to_product_context(self) -> str:
+        """Serialize product interaction history as a one-line LLM context string."""
+        if self.product_preference == "opted_out":
+            return (
+                f"Product history: user opted out of product suggestions "
+                f"on {self.product_last_rejected_at}. Do not recommend products."
+            )
+        parts = [f"shown {self.product_shown_count} times across sessions"]
+        if self.product_last_shown_at:
+            parts.append(f"last on {self.product_last_shown_at}")
+        if self.product_rejection_count > 0:
+            parts.append(f"rejected {self.product_rejection_count} time(s)")
+        parts.append(f"preference: {self.product_preference}")
+        return "Product history: " + ", ".join(parts) + "."
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "user_id": self.user_id,
@@ -370,6 +393,12 @@ class RelationalProfile:
             "reflection_count": self.reflection_count,
             "created_at": _iso_or_none(self.created_at),
             "updated_at": _iso_or_none(self.updated_at),
+            "product_preference": self.product_preference,
+            "product_shown_count": self.product_shown_count,
+            "product_last_shown_at": self.product_last_shown_at,
+            "product_last_rejected_at": self.product_last_rejected_at,
+            "product_rejection_count": self.product_rejection_count,
+            "product_purchased_items": self.product_purchased_items,
         }
 
     @classmethod
@@ -391,6 +420,12 @@ class RelationalProfile:
             reflection_count=int(data.get("reflection_count", 0) or 0),
             created_at=_parse_iso_datetime(data.get("created_at")),
             updated_at=_parse_iso_datetime(data.get("updated_at")),
+            product_preference=data.get("product_preference", "neutral"),
+            product_shown_count=data.get("product_shown_count", 0),
+            product_last_shown_at=data.get("product_last_shown_at"),
+            product_last_rejected_at=data.get("product_last_rejected_at"),
+            product_rejection_count=data.get("product_rejection_count", 0),
+            product_purchased_items=data.get("product_purchased_items", []),
         )
 
     def apply_reflection(self, patch: "ReflectionProfilePatch") -> "RelationalProfile":
