@@ -1,15 +1,51 @@
-"""Product recommendation service.
+"""Product recommendation service — LLM-as-sole-authority.
 
-Extracted from CompanionEngine — owns the recommend() entry point,
-search helpers, and session dedup logic.
+The IntentAgent emits a ``product_signal`` dict with intent, keywords, and
+max_results.  This module trusts that signal completely:
+
+  1. Hard safety rails (crisis, opted-out user) → empty.
+  2. LLM says none/negative → empty (with opt-out bookkeeping).
+  3. Otherwise search with the LLM's keywords and return results.
+
+No hardcoded maps, no proactive inference, no emotion heuristics.
 """
+import asyncio
 import logging
-from typing import Dict, List
+from datetime import datetime
+from typing import Dict, List, Set
 
-from models.session import SessionState, IntentType
+from models.session import SessionState
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (profile I/O)
+# ---------------------------------------------------------------------------
+
+async def load_relational_profile(user_id: str):
+    """Load RelationalProfile from memory reader (Redis-cached)."""
+    from services.memory_reader import load_relational_profile as _load
+    return await _load(user_id)
+
+
+async def update_product_interaction(user_id: str, field_updates: dict):
+    """Write product interaction fields to the user_profiles document."""
+    from services.auth_service import get_mongo_client
+    db = get_mongo_client()
+    if db is None:
+        return
+    await asyncio.to_thread(
+        db.user_profiles.update_one,
+        {"user_id": user_id},
+        {"$set": field_updates},
+        upsert=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# ProductRecommender
+# ---------------------------------------------------------------------------
 
 class ProductRecommender:
     """Handles all product recommendation logic.
@@ -30,165 +66,112 @@ class ProductRecommender:
         session: SessionState,
         message: str,
         analysis: Dict,
-        turn_topics: List[str],
-        is_ready_for_wisdom: bool,
-        life_domain: str = "unknown",
     ) -> List[Dict]:
-        """Single entry point for product recommendations.
+        """LLM-as-sole-authority product recommendation.
 
-        Handles: rejection detection, explicit requests, intent-recommended,
-        proactive inference, filtering, recording.
+        Three steps:
+        1. Hard safety: crisis -> empty, opted_out -> empty
+        2. Trust the LLM: intent none/negative -> empty
+        3. Search and return: use LLM's keywords to find products
         """
-        intent = analysis.get("intent")
+        signal = analysis.get("product_signal") or {}
+        intent = signal.get("intent", "none")
+        user_id = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
 
-        # Read the structured ProductSignal (falls back to legacy boolean)
-        product_signal = analysis.get("product_signal", {})
-
-        # Validate the signal — catches emotion conflicts, follow-up context,
-        # adversarial exploitation, negative sentiment, and Turn 1 leaks.
-        # Only suppresses, never triggers. The IntentAgent remains the sole
-        # positive authority for product recommendations.
-        from services.product_validator import validate_product_signal
-        product_signal = validate_product_signal(product_signal, analysis, message, session)
-
-        product_intent = product_signal.get("intent", "none")
-        type_filter_raw = product_signal.get("type_filter", "any")
-        type_filter = None if type_filter_raw == "any" else type_filter_raw.replace("_only", "")
-        max_results = product_signal.get("max_results", 0)
-
-        # Detect rejection from the signal AND from message text
-        self._detect_product_rejection(session, message, analysis)
-
-        is_explicit = (
-            "Product Inquiry" in turn_topics
-            or intent == IntentType.PRODUCT_SEARCH
-            or product_intent == "explicit_search"
-        )
-
-        products = []
-
-        # Path 1: Explicit user request — bypasses all gates except crisis.
-        # Uses split counter (explicit_product_count) with generous cap (10).
-        if is_explicit:
-            products = await self._search_explicit(
-                session, message, analysis, life_domain,
-                product_type=type_filter,
-                limit=max_results or 5,
-            )
-            if products:
-                session.explicit_product_count += 1
-
-        # Path 2: Contextual need — IntentAgent says items are needed
-        elif product_intent == "contextual_need" and max_results > 0:
-            products = await self._search_intent_recommended(
-                session, analysis, life_domain,
-                product_type=type_filter,
-                limit=max_results or 3,
-            )
-            if products:
-                session.product_event_count += 1
-
-        # Path 2b: Casual mention — show at most 1-2 products
-        elif product_intent == "casual_mention" and max_results > 0:
-            products = await self._search_intent_recommended(
-                session, analysis, life_domain,
-                product_type=type_filter,
-                limit=min(max_results, 2),
-            )
-            if products:
-                session.product_event_count += 1
-
-        # All other cases (none, negative): no products
-
-        # Post-processing: filter already-shown + record
-        if products:
-            products = self._filter_shown(session, products)
-            self._record_shown(session, products)
-
-        return products
-
-    # ------------------------------------------------------------------
-    # Internal: search paths
-    # ------------------------------------------------------------------
-
-    async def _search_explicit(self, session, message, analysis, life_domain,
-                               product_type=None, limit=5) -> List[Dict]:
-        """Explicit product request — bypasses all gates except crisis."""
-        if self._should_suppress(session, analysis, is_explicit_request=True):
+        # Step 1: Hard safety
+        if analysis.get("urgency") == "crisis":
             return []
 
-        search_terms = self._build_search_query(analysis, session, message)
-        products = await self.product_service.search_products(
-            search_terms, life_domain=life_domain,
-            emotion=analysis.get("emotion", ""),
-            deity=self._get_conversation_deity(session, analysis),
-            product_type=product_type,
-            limit=limit,
-        )
-        if not products:
-            products = await self.product_service.get_recommended_products(
-                category=life_domain if life_domain != "unknown" else None)
-        if products:
-            session.product_event_count += 1
-        return products
+        profile = None
+        if user_id:
+            try:
+                profile = await load_relational_profile(user_id)
+            except Exception as e:
+                logger.warning(f"Failed to load product profile: {e}")
 
-    async def _search_intent_recommended(self, session, analysis, life_domain,
-                                         product_type=None, limit=3) -> List[Dict]:
-        """Intent agent recommended products — two-stage search.
+        if profile and profile.product_preference == "opted_out":
+            if intent == "explicit_search":
+                logger.info(f"User {user_id} opted out but explicitly asked — re-engaging")
+                try:
+                    await update_product_interaction(user_id, {"product_preference": "neutral"})
+                except Exception:
+                    pass
+            else:
+                return []
 
-        Stage 1: Text search using signal_keywords from ProductSignal.
-                 Matches product names directly (e.g. "mala" → "Rudraksha Mala").
-        Stage 2: Metadata search using enriched fields (practices, deities, etc.).
-                 Catches products tagged with relevant attributes.
-        Results are merged (text search preferred, metadata supplements).
-        """
-        if self._should_suppress(session, analysis, is_explicit_request=False):
+        # Step 2: Trust the LLM
+        if intent == "negative":
+            if user_id:
+                try:
+                    updates = {
+                        "product_rejection_count": (profile.product_rejection_count + 1) if profile else 1,
+                        "product_last_rejected_at": datetime.utcnow().isoformat(),
+                    }
+                    _hard_phrases = {
+                        "stop suggesting products", "stop recommending",
+                        "no more products", "don't show products",
+                        "dont show products", "i hate your products",
+                    }
+                    if any(p in message.lower() for p in _hard_phrases):
+                        updates["product_preference"] = "opted_out"
+                    await update_product_interaction(user_id, updates)
+                except Exception as e:
+                    logger.warning(f"Failed to update rejection: {e}")
             return []
 
-        product_signal = analysis.get("product_signal", {})
-        signal_keywords = product_signal.get("search_keywords", [])
+        if intent == "none":
+            return []
 
-        practices = self._detect_practices_from_context(session, analysis)
-        deity = self._get_conversation_deity(session, analysis)
-        emotion = analysis.get("emotion", "") if analysis else ""
+        # Step 3: Search and return
+        keywords = signal.get("search_keywords", [])
+        max_results = signal.get("max_results", 3)
+        type_filter = signal.get("type_filter", "any")
 
-        logger.info(f"Intent-recommended search: signal_kw={signal_keywords} practices={practices} deity={deity} domain={life_domain} emotion={emotion} type={product_type}")
+        if not keywords:
+            return []
 
-        products = []
-
-        # Stage 1: Text search with signal_keywords (direct product name matching)
-        if signal_keywords:
-            keyword_query = " ".join(signal_keywords[:6])
+        try:
             products = await self.product_service.search_products(
-                keyword_query, life_domain=life_domain,
-                emotion=emotion, deity=deity,
-                product_type=product_type,
-                limit=limit,
+                query=" ".join(keywords),
+                limit=max_results + 2,
+                product_type=type_filter if type_filter != "any" else None,
             )
+        except Exception as e:
+            logger.warning(f"Product search failed: {e}")
+            return []
 
-        # Stage 2: Metadata search (enriched field matching)
-        if len(products) < limit:
-            metadata_products = await self.product_service.search_by_metadata(
-                practices=practices if practices else None,
-                deities=[deity] if deity else None,
-                emotions=[emotion] if emotion else None,
-                life_domains=[life_domain.lower()] if life_domain and life_domain != "unknown" else None,
-                product_type=product_type,
-                limit=limit,
-            )
-            # Merge: supplement with metadata results, deduped by ID
-            existing_ids = {p.get("_id") for p in products}
-            for mp in metadata_products:
-                if mp.get("_id") not in existing_ids and len(products) < limit:
-                    products.append(mp)
-                    existing_ids.add(mp.get("_id"))
+        if len(products) < max_results:
+            try:
+                meta_products = await self.product_service.search_by_metadata(
+                    keywords=keywords,
+                    limit=max_results - len(products),
+                )
+                seen_ids = {str(p.get("_id", "")) for p in products}
+                for mp in meta_products:
+                    if str(mp.get("_id", "")) not in seen_ids:
+                        products.append(mp)
+            except Exception as e:
+                logger.warning(f"Metadata search failed: {e}")
+
+        products = self._filter_shown(session, products)
+        products = products[:max_results]
 
         if products:
-            session.last_proactive_product_turn = session.turn_count
+            self._record_shown(session, products)
+            if user_id:
+                try:
+                    shown_count = (profile.product_shown_count + 1) if profile else 1
+                    await update_product_interaction(user_id, {
+                        "product_shown_count": shown_count,
+                        "product_last_shown_at": datetime.utcnow().isoformat(),
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to update product shown: {e}")
+
         return products
 
     # ------------------------------------------------------------------
-    # Internal: helpers
+    # Internal: session dedup
     # ------------------------------------------------------------------
 
     def _filter_shown(self, session, products):
@@ -204,12 +187,12 @@ class ProductRecommender:
         """Record products as shown in this session.
 
         Maintains two parallel structures:
-          * ``shown_product_ids`` (Set[str]) — fast O(1) dedupe gate for
+          * ``shown_product_ids`` (Set[str]) -- fast O(1) dedupe gate for
             ``_filter_shown``.
-          * ``recent_products`` (List[Dict]) — FIFO of last 5 products with
+          * ``recent_products`` (List[Dict]) -- FIFO of last 10 products with
             name + category metadata, surfaced to the LLM via the user
             profile so follow-up questions like "how do I use that mala?"
-            land on the actual recommended item. Added Apr 2026.
+            land on the actual recommended item.
         """
         for p in products:
             pid = p.get("_id")
@@ -229,6 +212,6 @@ class ProductRecommender:
                 "description_snippet": (p.get("description") or "")[:150],
                 "product_type": p.get("product_type", "physical"),
             })
-        # FIFO cap — keep only the last 10 products visible to the LLM.
+        # FIFO cap -- keep only the last 10 products visible to the LLM.
         if len(session.recent_products) > 10:
             session.recent_products = session.recent_products[-10:]
