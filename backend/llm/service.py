@@ -801,8 +801,16 @@ class LLMService:
         context_docs: Optional[List[Dict]] = None,
         user_profile: Optional[Dict] = None,
         memory_context: Optional[Any] = None,
+        response_mode: Optional[str] = None,
     ) -> str:
-        """Build context-aware prompt for Gemini with user profile personalization"""
+        """Build context-aware prompt for Gemini with user profile personalization.
+
+        ``response_mode`` (optional) is the IntentAgent-classified shape for
+        this turn's response. When present, a mode-specific block from
+        ``spiritual_mitra.yaml`` → ``mode_prompts.<mode>`` is injected as
+        the final instruction before the user query, overriding any
+        conflicting guidance from the phase prompt.
+        """
 
         # Determine if conversation topic is spiritual (controls panchang/astro inclusion)
         life_area = (user_profile or {}).get('life_area', '')
@@ -816,18 +824,6 @@ class LLMService:
             or any(kw in query_lower for kw in _spiritual_keywords)
         )
         is_guidance_phase = phase in (ConversationPhase.GUIDANCE, ConversationPhase.SYNTHESIS)
-
-        # Detect practical topics — gate panchang and adjust response structure
-        _practical_topic_keywords = {"job", "salary", "budget", "debt", "resume", "interview",
-                                     "boss", "deadline", "exam", "grade", "doctor", "medication",
-                                     "rent", "loan", "commute", "promotion", "appraisal",
-                                     "work hours", "office", "colleague", "manager",
-                                     "savings", "expenses", "emi", "insurance",
-                                     "school", "college", "admission", "study",
-                                     "weight", "exercise", "diet", "sleep schedule",
-                                     "relationship", "divorce", "marriage", "fight",
-                                     "parenting", "child", "teenager"}
-        _is_practical_topic = any(kw in query_lower for kw in _practical_topic_keywords)
 
         # Format user profile if available
         profile_text = ""
@@ -891,12 +887,14 @@ class LLMService:
                 profile_parts.append(f"   • Past Pilgrimages: {', '.join(user_profile.get('temple_visits', []))}")
                 has_data = True
 
-            # Current Panchang — include for spiritual topics or guidance phase,
-            # but skip for practical-only topics (job, budget, health logistics)
-            # where tithi/nakshatra references feel irrelevant.
+            # Current Panchang — include only when response_mode is teaching or
+            # exploratory AND the topic is spiritual or the phase is guidance.
+            # In practical_first and presence_first modes, tithi/nakshatra
+            # references are irrelevant (study strategy, financial triage) or
+            # harmful (someone in grief doesn't need "today's tithi is...").
             if (user_profile.get('current_panchang')
-                    and (is_spiritual_topic or is_guidance_phase)
-                    and not _is_practical_topic):
+                    and response_mode in ("teaching", "exploratory")
+                    and (is_spiritual_topic or is_guidance_phase)):
                 p = user_profile['current_panchang']
                 panchang_lines = ["   • CURRENT PANCHANG (Today):"]
                 if p.get('date') or p.get('vaara'):
@@ -953,6 +951,18 @@ class LLMService:
                 profile_parts.append("\n".join(panchang_lines))
                 has_data = True
             
+            # Relational profile — always-on "who you are speaking to" layer
+            # from the dynamic memory system. Rendered ABOVE past_memories
+            # because it's the narrative mental model, not a list of facts.
+            # Already crisis-safe: to_prompt_text() renders a generic safety
+            # note for crisis-flagged profiles, never verbatim content.
+            if user_profile.get('relational_profile'):
+                profile_parts.append(
+                    "\n   WHO YOU ARE SPEAKING TO — THE RELATIONSHIP SO FAR:"
+                )
+                profile_parts.append(f"   {user_profile['relational_profile']}")
+                has_data = True
+
             # Semantic Long-Term Memories — deduplicated
             if user_profile.get('past_memories'):
                 seen = set()
@@ -1327,24 +1337,6 @@ CONTEXT & JOURNEY:
         else:
             _length_hint = ""
 
-        # Practical topic: enforce 30/70 word split for real-world problems
-        _practical_ask_phrases = ["how do i", "what should i", "how can i", "help me with",
-                                  "suggest something", "what to do", "guide me", "kuch suggest",
-                                  "kya karu", "kaise", "help me", "what can i do"]
-        _is_practical_ask = (
-            _is_practical_topic
-            and any(phrase in query_lower for phrase in _practical_ask_phrases)
-        )
-        if _is_practical_ask and not _length_hint:
-            _length_hint = (
-                "RESPONSE STRUCTURE: The user is asking about a real-world problem. "
-                "First 30% of your response (~40-60 words): give CONCRETE practical advice — "
-                "what they can actually DO (specific action steps, timeline, or resource). "
-                "Remaining 70% (~90-150 words): spiritual grounding — dharmic principle, "
-                "practice, or mantra that supports the practical action. "
-                "Do NOT skip the practical part. Lead with it.\n"
-            )
-
         # Programmatic language/script constraint — overrides Gemini's default
         # mirror inference, which is unreliable when the system prompt contains
         # heavy Hindi vocabulary. Computed from the actual user query script.
@@ -1372,6 +1364,25 @@ CONTEXT & JOURNEY:
         history_text = _trimmed.get("conversation_history", history_text)
         scripture_context = _trimmed.get("rag_context", scripture_context)
         returning_user_section = _trimmed.get("returning_user", returning_user_section)
+
+        # Mode-specific prompt fragment (response-mode system, Apr 2026).
+        # Injected as the FINAL instruction before "Your response:" so it is
+        # the strongest recent signal the LLM sees. Overrides any conflicting
+        # guidance from the phase prompt (see phase_prompts.listening /
+        # phase_prompts.guidance "MODE AWARENESS" header). When response_mode
+        # is None (unplumbed caller), the block is simply skipped.
+        _mode_block_text = ""
+        if response_mode:
+            _mode_block_raw = self.prompt_manager.get_prompt(
+                'spiritual_mitra', f'mode_prompts.{response_mode}', default=""
+            )
+            if _mode_block_raw:
+                _mode_block_text = (
+                    "\n═══════════════════════════════════════════════════════════\n"
+                    "ACTIVE RESPONSE MODE (final instruction — overrides conflicts above):\n"
+                    "═══════════════════════════════════════════════════════════\n"
+                    f"{_mode_block_raw}\n"
+                )
 
         prompt = f"""
 {profile_text}
@@ -1411,6 +1422,7 @@ GREETING RULE: When user just says "Hello", "Hi", "Namaste" — respond with a s
 Do NOT force panchang, verses, deity names, or practices into every response. A warm 2-3 sentence reply is almost always better than one that tries to include everything. One verse maximum. Use deity NAMES (Shiva, Krishna) not just "He".
 Do NOT repeat any mantra, practice, or advice you already gave in this conversation. The user heard you the first time.
 {_length_hint}
+{_mode_block_text}
 Your response:
 """
         
@@ -1539,6 +1551,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
         memory_context: Optional[Any] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        response_mode: Optional[str] = None,
     ):
         """
         Stream context-aware spiritual companion response.
@@ -1587,6 +1600,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                 context_docs,
                 user_profile,
                 memory_context=memory_context,
+                response_mode=response_mode,
             )
 
             # Handle grounding instruction flag (from retrieval judge)
@@ -1653,6 +1667,46 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
             logger.exception(f"Error in generate_response_stream: {str(e)}")
             yield "I'm here with you. We can continue whenever you're ready."
 
+    async def complete_json(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        max_output_tokens: int = 2048,
+        temperature: float = 0.3,
+    ) -> str:
+        """Minimal Gemini call returning raw JSON text. Used by the dynamic
+        memory system's MemoryExtractor, MemoryUpdater, and ReflectionService.
+
+        Does NOT apply the spiritual_mitra system instruction — this is a
+        pure structured-output call. The caller is expected to parse the
+        returned string via Pydantic.
+
+        Raises RuntimeError if the LLM is unavailable. Other errors from
+        the Gemini client propagate as-is so callers can wrap them in
+        their own error handling.
+        """
+        if not self.available or not self.client:
+            raise RuntimeError("LLMService not available")
+
+        target_model = model or settings.GEMINI_FAST_MODEL
+
+        def _sync_call():
+            return self.client.models.generate_content(
+                model=target_model,
+                contents=prompt,
+                config={
+                    "temperature": temperature,
+                    "response_mime_type": "application/json",
+                    "max_output_tokens": max_output_tokens,
+                    "automatic_function_calling": __import__(
+                        "google.genai", fromlist=["types"]
+                    ).types.AutomaticFunctionCallingConfig(disable=True),
+                },
+            )
+
+        response = await asyncio.to_thread(_sync_call)
+        return (response.text or "").strip()
+
     async def generate_response(
         self,
         query: str,
@@ -1663,6 +1717,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
         memory_context: Optional[Any] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        response_mode: Optional[str] = None,
     ) -> str:
         """
         Generate context-aware spiritual companion response.
@@ -1711,6 +1766,7 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                 context_docs,
                 user_profile,
                 memory_context=memory_context,
+                response_mode=response_mode,
             )
 
             # Handle grounding instruction flag (from retrieval judge)

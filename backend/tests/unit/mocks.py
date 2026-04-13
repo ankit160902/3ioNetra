@@ -36,9 +36,11 @@ class MockLLM:
         memory_context: Optional[Any] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        response_mode: Optional[str] = None,
     ) -> str:
         self.call_count += 1
         self.last_query = query
+        self.last_response_mode = response_mode
         return self._response
 
     async def generate_response_stream(
@@ -51,9 +53,11 @@ class MockLLM:
         memory_context: Optional[Any] = None,
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
+        response_mode: Optional[str] = None,
     ) -> AsyncIterator[str]:
         self.call_count += 1
         self.last_query = query
+        self.last_response_mode = response_mode
         for word in self._response.split():
             yield word + " "
 
@@ -111,6 +115,7 @@ class MockIntent:
             "product_search_keywords": [],
             "product_rejection": False,
             "query_variants": [],
+            "response_mode": "presence_first",
         }
         self._available = available
         self.call_count = 0

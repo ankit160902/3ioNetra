@@ -21,6 +21,25 @@ from services.cache_service import get_cache_service
 
 logger = logging.getLogger(__name__)
 
+# GPU access lock — serializes embedding model inference to prevent
+# VRAM contention on small GPUs (e.g., GTX 1650 4GB).
+#
+# Implementation note: asyncio.Lock instances bind to the running event loop
+# on first use (Python 3.10+).  A module-level Lock() created at import time
+# will raise "bound to a different event loop" if the event loop is replaced
+# (e.g. in tests or after uvicorn reload).  We therefore store one lock per
+# event-loop identity and create it lazily on first access.
+_gpu_locks: dict = {}
+
+
+def _gpu_lock() -> asyncio.Lock:
+    """Return the asyncio.Lock for the current event loop, creating it if needed."""
+    loop = asyncio.get_event_loop()
+    loop_id = id(loop)
+    if loop_id not in _gpu_locks:
+        _gpu_locks[loop_id] = asyncio.Lock()
+    return _gpu_locks[loop_id]
+
 
 def _get_onnx_providers() -> List[str]:
     """Return the explicit ONNX Runtime execution provider list.
@@ -224,6 +243,7 @@ class RAGPipeline:
     """
 
     def __init__(self, data_dir: Optional[Path] = None) -> None:
+        global _rag_pipeline_instance
         self.verses: List[Dict] = []
         self.embeddings: Optional[np.ndarray] = None
         self.dim: int = 0
@@ -236,6 +256,8 @@ class RAGPipeline:
         from services.query_normalizer import get_query_normalizer
         self._query_normalizer = get_query_normalizer()
         self._data_dir_override: Optional[Path] = Path(data_dir) if data_dir is not None else None
+        # Register as the module-level singleton so get_rag_pipeline() works
+        _rag_pipeline_instance = self
 
     def __bool__(self) -> bool:
         return self.available
@@ -594,40 +616,36 @@ class RAGPipeline:
             return
         if self._reranker_model is not None:
             return
-        from sentence_transformers import CrossEncoder
-        # Pass fix_mistral_regex=True to the underlying tokenizer so the
-        # outdated regex warning from the bge-reranker-v2-m3 tokenizer is
-        # silenced. Without this, every cold start emits a HuggingFace
-        # warning about an incorrect regex pattern that may slightly
-        # affect tokenization quality.
-        _tokenizer_args = {"fix_mistral_regex": True}
-        if settings.RERANKER_ONNX_ENABLED:
+
+        _local_reranker = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "models", "reranker"
+        )
+        _docker_reranker = "/app/models/reranker"
+        _model_dir = _docker_reranker if os.path.isdir(_docker_reranker) else _local_reranker
+
+        # 1. Try ONNX on CPU (preferred — no VRAM contention)
+        _onnx_path = os.path.join(_model_dir, "onnx", "model.onnx")
+        if os.path.exists(_onnx_path):
             try:
-                # Load from local DEV cache if ONNX model exists there, else from HuggingFace
-                _local_reranker = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "reranker")
-                _onnx_path = os.path.join(_local_reranker, "onnx", "model.onnx")
-                _reranker_src = _local_reranker if os.path.exists(_onnx_path) else settings.RERANKER_MODEL
-                providers = _get_onnx_providers()
-                logger.info(
-                    "RAGPipeline: loading reranker with ONNX backend from "
-                    f"{_reranker_src} (providers={providers})"
-                )
-                self._reranker_model = CrossEncoder(
-                    _reranker_src,
-                    backend="onnx",
-                    model_kwargs={"provider": providers[0]},
-                    tokenizer_args=_tokenizer_args,
-                )
-                _model_type = type(self._reranker_model.model).__name__
-                logger.info(f"RAGPipeline: reranker loaded — model_type={_model_type} device={self._reranker_model.device}")
-                if "ORT" in _model_type:
-                    return
-                # If sentence_transformers silently fell back to PyTorch, log and keep it
-                logger.warning(f"ONNX backend requested but got {_model_type} — keeping as-is")
+                from rag.onnx_reranker import ONNXReranker
+                self._reranker_model = ONNXReranker(_model_dir)
+                logger.info("RAGPipeline: reranker loaded via ONNX (CPU)")
                 return
             except Exception as e:
                 logger.warning(f"ONNX reranker load failed, falling back to PyTorch: {e}")
-        self._load_model("_reranker_model", CrossEncoder, "reranker", settings.RERANKER_MODEL, "re-ranker")
+
+        # 2. PyTorch fallback — force CPU to prevent VRAM contention with embedding model
+        from sentence_transformers import CrossEncoder
+        logger.info(f"RAGPipeline: loading reranker via PyTorch (CPU) from {_model_dir}")
+        try:
+            if os.path.isdir(_model_dir) and os.listdir(_model_dir):
+                self._reranker_model = CrossEncoder(_model_dir, device="cpu")
+            else:
+                self._reranker_model = CrossEncoder(settings.RERANKER_MODEL, device="cpu")
+            logger.info(f"RAGPipeline: reranker loaded on {self._reranker_model.device}")
+        except Exception as exc:
+            logger.exception(f"RAGPipeline: failed to load reranker: {exc}")
+            self._reranker_model = None
 
     def _needs_instruction_prefix(self) -> bool:
         """Check if the embedding model requires query/passage prefixes (e.g., E5 models)."""
@@ -652,7 +670,11 @@ class RAGPipeline:
             prefix = "query: " if is_query else "passage: "
             clean_text = prefix + clean_text
 
-        vec = (await asyncio.to_thread(self._embedding_model.encode, [clean_text], convert_to_tensor=False, show_progress_bar=False))[0]
+        async with _gpu_lock():
+            vec = (await asyncio.to_thread(
+                self._embedding_model.encode, [clean_text],
+                convert_to_tensor=False, show_progress_bar=False,
+            ))[0]
         return np.asarray(vec, dtype="float32")
 
     async def generate_embeddings_batch(self, texts: list, is_query: bool = True) -> list:
@@ -666,10 +688,11 @@ class RAGPipeline:
         if self._needs_instruction_prefix():
             prefix = "query: " if is_query else "passage: "
         clean_texts = [prefix + t.strip().replace("\n", " ") for t in texts]
-        vecs = await asyncio.to_thread(
-            self._embedding_model.encode, clean_texts,
-            convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),
-        )
+        async with _gpu_lock():
+            vecs = await asyncio.to_thread(
+                self._embedding_model.encode, clean_texts,
+                convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),
+            )
         return [np.asarray(v, dtype="float32") for v in vecs]
 
     # ------------------------------------------------------------------
@@ -1247,6 +1270,8 @@ Respond ONLY with 2 terms, separated by a newline."""
         if not results:
             return results
 
+        _t0 = time.perf_counter()
+
         # Check reranker cache before running CrossEncoder
         cache = get_cache_service()
         _doc_refs = tuple(sorted(r.get("reference", str(i)) for i, r in enumerate(results)))
@@ -1264,6 +1289,9 @@ Respond ONLY with 2 terms, separated by a newline."""
         except Exception:
             pass  # Cache miss or unavailable — proceed with reranking
 
+        _t1 = time.perf_counter()
+        logger.info(f"PERF_RERANK cache_check={round((_t1-_t0)*1000)}ms")
+
         self._ensure_reranker_model()
 
         # Cap candidates to reduce reranking time
@@ -1280,6 +1308,9 @@ Respond ONLY with 2 terms, separated by a newline."""
             content = " ".join(p for p in parts if p)
             pairs.append([query, content])
 
+        _t2 = time.perf_counter()
+        logger.info(f"PERF_RERANK pairs_built={round((_t2-_t1)*1000)}ms n_pairs={len(pairs)}")
+
         try:
             # Cross-encoder scores (duck-typing supports API-based rerankers)
             if self._reranker_model is not None:
@@ -1292,7 +1323,10 @@ Respond ONLY with 2 terms, separated by a newline."""
                     re_scores = [0.0] * len(results)
             else:
                 re_scores = [0.0] * len(results)
-            
+
+            _t3 = time.perf_counter()
+            logger.info(f"PERF_RERANK predict={round((_t3-_t2)*1000)}ms model={type(self._reranker_model).__name__}")
+
             # Attach and re-sort
             for i, score in enumerate(re_scores):
                 results[i]["rerank_score"] = float(score)
@@ -1372,6 +1406,25 @@ Respond ONLY with 2 terms, separated by a newline."""
             results.sort(key=lambda x: x.get("score", 0), reverse=True)
             return results
 
+    async def rerank(
+        self,
+        query: str,
+        candidates: List[Dict],
+        intent: Optional[IntentType] = None,
+        life_domain: Optional[str] = None,
+    ) -> List[Dict]:
+        """Public reranking entry point for the rerank-once pattern.
+
+        Called by retrieval_judge after merging results from parallel
+        skip_rerank=True searches. Caps candidates at MAX_RERANK_CANDIDATES,
+        runs CrossEncoder, and returns sorted results.
+        """
+        if not candidates:
+            return candidates
+        if len(candidates) > settings.MAX_RERANK_CANDIDATES:
+            candidates = candidates[:settings.MAX_RERANK_CANDIDATES]
+        return await self._rerank_results(query, candidates, intent=intent, life_domain=life_domain)
+
     @staticmethod
     def _mmr_diversify(
         results: List[Dict],
@@ -1444,6 +1497,8 @@ Respond ONLY with 2 terms, separated by a newline."""
         life_domain: Optional[str] = None,
         query_variants: Optional[List[str]] = None,
         exclude_references: Optional[List[str]] = None,
+        skip_rerank: bool = False,
+        response_mode: Optional[str] = None,
     ) -> List[Dict]:
         """
         Advanced RAG Search:
@@ -1740,15 +1795,22 @@ Respond ONLY with 2 terms, separated by a newline."""
                 break
 
         # 5. Neural Re-ranking (Cross-Encoder) — skip when top result is already decisive
-        logger.info(f"PERF_RAG candidates={len(results)} before reranking")
+        # Adaptive skip: modes that don't cite specific verses skip reranking
+        _skip_modes = frozenset({"presence_first", "closure"})
+        _effective_skip = skip_rerank or (response_mode in _skip_modes)
+        logger.info(f"PERF_RAG candidates={len(results)} before reranking (skip={_effective_skip}, mode={response_mode})")
         _t_rerank = time.perf_counter()
-        if results and len(results) >= 2:
+        if _effective_skip:
+            # Caller will rerank merged results later (rerank-once pattern)
+            for r in results:
+                r["rerank_score"] = r.get("score", 0)
+                r["final_score"] = r.get("score", 0)
+        elif results and len(results) >= 2:
             top_score = results[0].get("score", 0)
             second_score = results[1].get("score", 0)
             gap = top_score - second_score
             if top_score >= settings.SKIP_RERANK_THRESHOLD and gap >= settings.SKIP_RERANK_GAP:
                 logger.info(f"Skipping reranker: top={top_score:.3f} gap={gap:.3f} (threshold={settings.SKIP_RERANK_THRESHOLD})")
-                # Assign fused scores as final scores to maintain downstream compatibility
                 for r in results:
                     r["rerank_score"] = r.get("score", 0)
                     r["final_score"] = r.get("score", 0)
@@ -1970,8 +2032,30 @@ Respond ONLY with 2 terms, separated by a newline."""
                 answer = top.get("text") or top.get("meaning") or "I found a relevant verse for you."
             else:
                 answer = "I'm here to listen to what you're going through."
-            
+
             yield {
                 "type": "answer",
                 "text": answer,
             }
+
+
+# ---------------------------------------------------------------------------
+# Singleton factory — consistent with all other service singletons in this
+# codebase. Returns the module-level RAGPipeline instance when available,
+# or None if the pipeline has not been initialised yet.
+# ---------------------------------------------------------------------------
+
+_rag_pipeline_instance: Optional["RAGPipeline"] = None
+
+
+def get_rag_pipeline() -> Optional["RAGPipeline"]:
+    """Return the module-level RAGPipeline singleton.
+
+    Returns None when the pipeline has not been initialised (e.g. in unit
+    tests that never call ``RAGPipeline()``). Callers should guard:
+
+        pipeline = get_rag_pipeline()
+        if pipeline is None or not pipeline.available:
+            return []
+    """
+    return _rag_pipeline_instance

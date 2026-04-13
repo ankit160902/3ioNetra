@@ -50,6 +50,40 @@ async def get_current_user(
     except Exception:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
+
+async def get_verified_user(
+    authorization: Optional[str] = Header(None),
+    request: Request = None,
+):
+    """Verify a specific Authorization header token. Ignores cookies.
+
+    Unlike get_current_user (which checks cookies first for seamless browser
+    auth), this dependency ONLY reads the Authorization header. Used by
+    /verify so callers can test whether a specific token is valid without
+    cookie fallback masking the result.
+
+    Raises 401 if no header token is provided or if the token is invalid.
+    """
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+
+    if " " not in authorization:
+        raise HTTPException(status_code=401, detail="Invalid authorization header format")
+
+    token = authorization.split(" ")[1]
+
+    try:
+        auth_service = get_auth_service()
+        user = await asyncio.to_thread(auth_service.verify_token, token)
+        if user is None:
+            raise HTTPException(status_code=401, detail="Token expired or invalid")
+        return user
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=401, detail="Authentication failed")
+
+
 # ----------------------------------------------------------------------------
 # AUTHENTICATION ENDPOINTS
 # ----------------------------------------------------------------------------
@@ -137,15 +171,13 @@ async def login_user(request: UserLoginRequest):
         )
 
 @router.get("/verify", response_model=UserResponse)
-async def verify_auth(user: Dict = Depends(get_current_user)):
+async def verify_auth(user: Dict = Depends(get_verified_user)):
+    """Verify a specific authentication token from the Authorization header.
+
+    This endpoint validates the header token only — cookies are intentionally
+    ignored so callers get an accurate answer about the specific token they
+    provided.
     """
-    Verify authentication token.
-    """
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
-        )
     return UserResponse(**user)
 
 @router.post("/logout")

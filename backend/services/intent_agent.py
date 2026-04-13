@@ -152,6 +152,45 @@ class IntentAgent:
           a spiritual companion might reasonably engage with.
         - When in doubt, return False — let the conversation flow naturally.
 
+    14. "response_mode": How the response should be shaped. Choose ONE:
+        - "practical_first": User brought a solvable real-world problem (study
+          strategy, job search, budgeting, health logistics, relationship
+          communication, time management, exam prep, interview prep, financial
+          triage). Answer is mostly PRACTICAL — direct, actionable, friend-voice.
+          Minimal or no explicit spirituality. Spiritual content appears ONLY as
+          a brief optional tip that genuinely helps the immediate problem (e.g.
+          "30 seconds of silence before the exam"), framed as a practical hack.
+        - "presence_first": User is in raw emotional pain (grief, despair,
+          loneliness, shame, overwhelm, hopelessness) and is VENTING or SHARING,
+          NOT asking for advice. Answer is acknowledgment + holding space, no
+          scripture, no practical pivot, no mantras. Short (3-5 sentences).
+        - "teaching": User is explicitly asking about dharma, scripture,
+          philosophy, mantras, rituals, festivals, deities, or panchang. This
+          is full spiritual mode — rich answer, scripture allowed, verses and
+          mantras allowed, domain compass applies.
+        - "exploratory": User is vague, searching, doesn't know what they need
+          ("I feel lost", "I don't know what to do"). Answer is warmth + ONE
+          clarifying question. No solutions, no scripture yet.
+        - "closure": User is signaling the END of this exchange — gratitude,
+          acceptance, "I feel better now", "thanks for listening", "ok I'll
+          try that", "thank you, I needed to hear that", or a short positive
+          acknowledgement of advice given. The signal is acceptance, not more
+          sharing. Classify as closure when the CURRENT TURN is a wind-down,
+          REGARDLESS of how emotional the prior turns were. This rule dominates
+          conversation-history bias — if the prior 3 turns were about grief
+          and this turn is "thank you, that helped", the mode is closure, not
+          presence_first. The response should be 1-2 sentences of warmth,
+          not an invitation to continue.
+
+        TIE-BREAKER: If a query has both dimensions ("I'm starting a new job
+        on Monday, should I do a puja?"), pick the DOMINANT mode — usually the
+        ASK (puja -> teaching) over the context (job -> practical_first).
+        Another example: "I'm anxious about my exam tomorrow" has emotion but
+        the dominant need is practical exam strategy -> practical_first.
+
+        WHEN IN DOUBT: default to "exploratory" — it's the safest fallback
+        because it invites more context rather than committing to a direction.
+
     Respond ONLY with the valid JSON object.
     """
 
@@ -239,18 +278,28 @@ class IntentAgent:
             "product_search_keywords": [], "product_rejection": False,
             "query_variants": [], "expected_length": "moderate",
             "is_off_topic": False,
+            # Response mode — default is exploratory so an unmatched fast-path
+            # short-circuit leaves the LLM in the safest "ask one question" mode
+            "response_mode": "exploratory",
         }
 
         # (a) GREETING — exact match or short greeting pattern
         if msg_lower in self._GREETING_SET:
-            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown", "expected_length": "brief"}
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral",
+                    "life_domain": "unknown", "expected_length": "brief",
+                    "response_mode": "exploratory"}
         first_word = msg_lower.split()[0] if msg_lower else ""
         if first_word in {"hi", "hey", "hello", "namaste", "namaskar", "pranam", "hii", "hiii"} and len(msg_lower.split()) <= 4:
-            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral", "life_domain": "unknown", "expected_length": "brief"}
+            return {**_base, "intent": IntentType.GREETING, "emotion": "neutral",
+                    "life_domain": "unknown", "expected_length": "brief",
+                    "response_mode": "exploratory"}
 
-        # (b) CLOSURE
+        # (b) CLOSURE — route to the dedicated closure mode so the response is
+        # a 1-2 sentence warm wind-down instead of an invitation to keep talking.
         if msg_lower in self._CLOSURE_SET:
-            return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude", "life_domain": "unknown", "expected_length": "brief"}
+            return {**_base, "intent": IntentType.CLOSURE, "emotion": "gratitude",
+                    "life_domain": "unknown", "expected_length": "brief",
+                    "response_mode": "closure"}
 
         # (c) OFF_TOPIC — short-circuit before normal classification.
         # We skip this check if the message also has emotional weight (e.g.
@@ -261,12 +310,14 @@ class IntentAgent:
                 if phrase in msg_lower:
                     return {**_base, "intent": IntentType.OTHER, "emotion": "neutral",
                             "life_domain": "unknown", "is_off_topic": True,
-                            "expected_length": "brief"}
+                            "expected_length": "brief",
+                            "response_mode": "exploratory"}
 
         # (d) ASKING_PANCHANG — substring check
         if any(kw in msg_lower for kw in self._PANCHANG_KEYWORDS):
             return {**_base, "intent": IntentType.ASKING_PANCHANG, "emotion": "neutral",
-                    "life_domain": "spiritual", "needs_direct_answer": True, "expected_length": "detailed"}
+                    "life_domain": "spiritual", "needs_direct_answer": True,
+                    "expected_length": "detailed", "response_mode": "teaching"}
 
         # (e) EXPRESSING_EMOTION — short messages with emotion keywords
         words = msg_lower.split()
@@ -278,7 +329,8 @@ class IntentAgent:
                         if keyword in remainder:
                             return {**_base, "intent": IntentType.EXPRESSING_EMOTION,
                                     "emotion": emotion, "life_domain": "unknown",
-                                    "summary": msg_lower, "expected_length": "moderate"}
+                                    "summary": msg_lower, "expected_length": "moderate",
+                                    "response_mode": "presence_first"}
                     break
 
         # (f) ASKING_INFO — starts with question prefix.
@@ -290,7 +342,8 @@ class IntentAgent:
                     break  # fall through to LLM analysis
                 return {**_base, "intent": IntentType.ASKING_INFO, "emotion": "curiosity",
                         "life_domain": "unknown", "needs_direct_answer": True,
-                        "summary": msg_lower, "expected_length": "detailed"}
+                        "summary": msg_lower, "expected_length": "detailed",
+                        "response_mode": "teaching"}
 
         return None
 
@@ -349,6 +402,8 @@ class IntentAgent:
             except Exception as pydantic_err:
                 logger.warning(f"IntentAgent Pydantic validation failed: {pydantic_err}. Using raw parsed with defaults.")
                 # Manually build a valid dict from parsed JSON + defaults
+                _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
+                _raw_mode = str(parsed.get("response_mode", "exploratory")).strip().lower()
                 data = {
                     "intent": parsed.get("intent", "OTHER"),
                     "emotion": parsed.get("emotion", "neutral"),
@@ -367,9 +422,14 @@ class IntentAgent:
                     "query_variants": parsed.get("query_variants", []),
                     "expected_length": parsed.get("expected_length", "moderate"),
                     "is_off_topic": parsed.get("is_off_topic", False),
+                    "response_mode": _raw_mode if _raw_mode in _valid_modes else "exploratory",
                 }
             data["intent"] = IntentType(data.get("intent", "OTHER"))
-            logger.info(f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} | signal: {data.get('product_signal', {}).get('intent', 'n/a')}")
+            logger.info(
+                f"LLM Intent Analysis for '{message[:30]}...': {data.get('intent')} "
+                f"| mode: {data.get('response_mode', 'n/a')} "
+                f"| signal: {data.get('product_signal', {}).get('intent', 'n/a')}"
+            )
             self._cache.set(msg_lower, data, 1800)  # 30-min TTL
             return data
 
@@ -425,6 +485,25 @@ class IntentAgent:
         # in the fallback. Only explicit buy/purchase words do. This prevents
         # "your products are overpriced" from triggering recommendations.
 
+        # Derive response_mode from intent + emotional weight. Used when the
+        # LLM classifier is unavailable — keeps mode-aware downstream code
+        # functioning with sensible defaults.
+        mode_map = {
+            IntentType.GREETING: "exploratory",
+            IntentType.CLOSURE: "closure",
+            IntentType.ASKING_INFO: "teaching",
+            IntentType.ASKING_PANCHANG: "teaching",
+            IntentType.PRODUCT_SEARCH: "teaching",
+            IntentType.SEEKING_GUIDANCE: "practical_first",
+            IntentType.EXPRESSING_EMOTION: "presence_first",
+            IntentType.OTHER: "exploratory",
+        }
+        response_mode = mode_map.get(intent, "exploratory")
+        # If the message has emotional weight but intent was misread as
+        # SEEKING_GUIDANCE (question word + feelings), lean presence_first.
+        if has_emotion and intent == IntentType.SEEKING_GUIDANCE:
+            response_mode = "presence_first"
+
         return {
             "intent": intent,
             "emotion": "neutral",
@@ -440,6 +519,7 @@ class IntentAgent:
             "product_rejection": product_signal["intent"] == "negative",
             "query_variants": [],
             "is_off_topic": False,
+            "response_mode": response_mode,
         }
 
 _intent_agent = None

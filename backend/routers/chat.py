@@ -403,6 +403,10 @@ async def _preflight(query, user, session_manager, companion_engine, safety_vali
         crisis_response = get_crisis_response_composer().compose(session, query.message)
         session.add_message('assistant', crisis_response)
         await session_manager.update_session(session)
+        # Fire-and-forget crisis meta-fact: flag the user's RelationalProfile
+        # so future turns bias softer. NEVER stores verbatim crisis content.
+        from services.crisis_memory_hook import dispatch_crisis_meta_fact
+        dispatch_crisis_meta_fact(session.memory.user_id)
     return session, is_crisis, crisis_response
 
 
@@ -482,6 +486,8 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     record_suggested_verses(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
+        session.last_guidance_turn = session.turn_count
+        session.phase = ConversationPhase.LISTENING
     def _on_save_done(t):
         try:
             exc = t.exception()
@@ -492,6 +498,44 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     task = asyncio.create_task(session_manager.update_session(session))
     task.add_done_callback(_on_save_done)
     return final_text
+
+
+def _dispatch_memory_extraction_post_response(
+    *,
+    session,
+    user_message: str,
+    assistant_response: str,
+    analysis: dict,
+) -> None:
+    """Fire-and-forget memory extraction after a response completes.
+
+    Safe to call unconditionally — the extractor's dispatch helper
+    already gates on anonymous user, trivial intents (GREETING/CLOSURE/
+    OFF_TOPIC), and is_off_topic. We additionally skip crisis turns
+    here (urgency=crisis) because crisis content must never enter the
+    regular memory pipeline — crisis_memory_hook handles the
+    meta-fact write via a separate code path.
+    """
+    if not analysis or analysis.get("urgency") == "crisis":
+        return
+    try:
+        from services.memory_extractor import dispatch_memory_extraction
+        asyncio.create_task(
+            dispatch_memory_extraction(
+                user_id=getattr(session.memory, "user_id", None),
+                session_id=session.session_id,
+                conversation_id=getattr(session, "conversation_id", None),
+                turn_number=session.turn_count,
+                user_message=user_message,
+                assistant_response=assistant_response,
+                intent_analysis=analysis,
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            f"dispatch_memory_extraction scheduling failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
 
 
 # ----------------------------------------------------------------------------
@@ -527,7 +571,19 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     engine_result, speculative_docs = await _run_speculative_rag(
         session, query, rag_pipeline, companion_engine, streaming=False
     )
-    companion_response, is_ready_for_wisdom, context_docs_used, turn_topics, recommended_products, active_phase, route_model, route_config, past_memories = engine_result
+    (
+        companion_response,
+        is_ready_for_wisdom,
+        context_docs_used,
+        turn_topics,
+        recommended_products,
+        active_phase,
+        route_model,
+        route_config,
+        past_memories,
+        route_response_mode,
+        route_analysis,
+    ) = engine_result
 
     if is_ready_for_wisdom:
         # Use engine's already-retrieved + validated docs as primary source
@@ -549,6 +605,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             model_override=route_model,
             config_override=route_config,
             session=session,
+            response_mode=route_response_mode,
         )
 
         # Grounding verification — regenerate if response cites non-existent sources.
@@ -588,6 +645,7 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
                     model_override=route_model,
                     config_override=grounding_config,
                     session=session,
+                    response_mode=route_response_mode,
                 )
 
         response_text = await _postprocess_and_save(
@@ -602,6 +660,15 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
         _elapsed = (time.perf_counter() - _t_start) * 1000
         logger.info(f"REQUEST_END | cid={cid} | phase=guidance | {_elapsed:.0f}ms | turn={session.turn_count}")
         _sources = _build_sources(context_docs_used)
+        # Fire-and-forget dynamic-memory extraction. Runs after the response
+        # is composed so the user never waits on memory writes. Gating on
+        # anonymous / trivial intent / crisis happens inside the helper.
+        _dispatch_memory_extraction_post_response(
+            session=session,
+            user_message=query.message,
+            assistant_response=response_text,
+            analysis=route_analysis,
+        )
         return ConversationalResponse(
             session_id=session.session_id,
             phase=ConversationPhaseEnum.guidance,
@@ -631,6 +698,14 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
             else ConversationPhaseEnum.listening
         )
         _sources = _build_sources(context_docs_used)
+        # Fire-and-forget dynamic-memory extraction for the listening path.
+        # Same gating as guidance branch — anonymous / trivial / crisis skip.
+        _dispatch_memory_extraction_post_response(
+            session=session,
+            user_message=query.message,
+            assistant_response=companion_response,
+            analysis=route_analysis,
+        )
         return ConversationalResponse(
             session_id=session.session_id,
             phase=_response_phase,
@@ -726,6 +801,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                     model_override=meta.get("model_override"),
                     config_override=meta.get("config_override"),
                     session=session,
+                    response_mode=meta.get("response_mode", "exploratory"),
                 ):
                     full_text_parts.append(token)
                     yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
@@ -741,6 +817,7 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                         memory_context=session.memory,
                         model_override=meta.get("model_override"),
                         config_override=meta.get("config_override"),
+                        response_mode=meta.get("response_mode", "exploratory"),
                     ):
                         full_text_parts.append(token)
                         yield f"event: token\ndata: {json.dumps({'text': token})}\n\n"
@@ -778,6 +855,15 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
             }
 
             yield f"event: done\ndata: {json.dumps({'full_response': final_text, 'recommended_products': recommended_products, 'flow_metadata': flow_meta})}\n\n"
+
+            # Fire-and-forget dynamic-memory extraction after the stream
+            # closes. Meta dict from preamble already holds the analysis.
+            _dispatch_memory_extraction_post_response(
+                session=session,
+                user_message=query.message,
+                assistant_response=final_text,
+                analysis=meta.get("analysis", {}),
+            )
 
         except asyncio.CancelledError:
             # Client disconnected mid-stream — do NOT save partial response
@@ -862,17 +948,6 @@ async def get_conversation(conversation_id: str, user: dict = Depends(get_curren
 async def save_conversation(request: SaveConversationRequest, user: dict = Depends(get_current_user)):
     if not user:
         raise HTTPException(status_code=401)
-
-    # ConversationStorage.save_conversation uses conversation_id as the
-    # session_id key for upsert. If it's missing, the storage layer silently
-    # returns "" and nothing is persisted — but the route used to still
-    # report {"message": "Saved"}, which is a contract lie. Validate up front
-    # so callers get a clear 400 instead of a phantom success.
-    if not request.conversation_id:
-        raise HTTPException(
-            status_code=400,
-            detail="conversation_id is required (use the active session_id)",
-        )
 
     # 1. Get memory snapshot if active session exists
     session_manager = get_session_manager()

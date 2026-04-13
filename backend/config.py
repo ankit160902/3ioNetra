@@ -4,7 +4,7 @@ Configuration management for 3ioNetra Spiritual Companion
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional
+from typing import Dict, List, Optional
 
 
 class Settings(BaseSettings):
@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     SPLADE_REQUIRED: bool = Field(default=False, env="SPLADE_REQUIRED")
     SPLADE_MODEL: str = "naver/splade-cocondenser-ensembledistil"
     RERANKER_ENABLED: bool = Field(default=True, env="RERANKER_ENABLED")
-    MAX_RERANK_CANDIDATES: int = Field(default=10, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
+    MAX_RERANK_CANDIDATES: int = Field(default=12, env="MAX_RERANK_CANDIDATES")  # cap candidates sent to CrossEncoder
 
     # Reranker skip — when top candidate is decisive, skip neural reranking
     SKIP_RERANK_THRESHOLD: float = Field(default=0.75, env="SKIP_RERANK_THRESHOLD")
@@ -135,6 +135,44 @@ class Settings(BaseSettings):
     MEMORY_MAX_RESULTS: int = 5
     MAX_DOCS_PER_TRADITION: int = 3
     MEMORY_SIMILARITY_THRESHOLD: float = 0.35  # min cosine sim for memory recall
+
+    # Dynamic memory system (Apr 2026 — see 2026-04-12-dynamic-memory-design.md).
+    # Scoring weights and thresholds for the new MemoryReader + MemoryExtractor
+    # + ReflectionService pipeline. All tunable without code changes.
+    MEMORY_HALF_LIFE_DAYS: int = 30                    # recency decay half-life
+    MEMORY_IMPORTANCE_FLOOR_THRESHOLD: int = 8         # importance >= this: never fully decays
+    MEMORY_IMPORTANCE_FLOOR_VALUE: float = 0.3         # minimum recency floor for important memories
+    MEMORY_WEIGHT_RECENCY: float = 0.5                 # Generative Agents used 1.0 — we lower
+    MEMORY_WEIGHT_IMPORTANCE: float = 1.0              # slightly stronger than relevance
+    MEMORY_WEIGHT_RELEVANCE: float = 1.0               # cosine similarity weight
+    MEMORY_EPISODIC_TOP_K: int = 3                     # top-k episodic memories injected per turn
+    MEMORY_SCORE_FLOOR: float = 0.4                    # absolute score floor — weak matches aren't shown
+    MEMORY_EXTRACTION_TIMEOUT_SECONDS: int = 30        # hard cap on async extraction task
+    MEMORY_UPDATER_SIMILAR_K: int = 5                  # top-k similar memories shown to the Mem0 decider
+    MEMORY_PROFILE_CACHE_TTL_SECONDS: int = 300        # RelationalProfile Redis cache TTL (5 min per spec §8.2)
+    MEMORY_PRUNE_IMPORTANCE_SAFETY_FLOOR: int = 8      # the ONE hardcoded safety floor — prune never touches this
+
+    # Tone families for tone-aware retrieval (spec §10.4). Sensitive memories
+    # only surface when the current turn's tone sits in the same family as
+    # the memory's tone_marker. Edit this dict to retune without code
+    # changes — e.g. move "relief" from recovering → warm if that feels
+    # closer. Unknown tones are treated as neutral.
+    MEMORY_TONE_FAMILIES: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "heavy": [
+                "grief", "despair", "anxiety", "overwhelm", "confusion",
+                "shame", "fear", "loneliness", "doubt", "anger",
+            ],
+            "recovering": ["resolve", "healing", "hope", "relief"],
+            "warm": ["gratitude", "joy", "devotion", "curiosity", "peace"],
+            "neutral": ["neutral", ""],
+        }
+    )
+
+    REFLECTION_THRESHOLD: int = 30                     # importance sum that triggers consolidation
+    REFLECTION_EPISODIC_WINDOW: int = 20               # how many recent memories reflection reads
+    REFLECTION_MODEL: str = "gemini-2.5-flash"         # reflection uses slightly stronger model than extraction
+    BACKFILL_CONVERSATION_COUNT: int = 10              # how many prior conversations cold-start backfill processes
 
     # Semantic Response Cache (saves 5-15s on repeat patterns)
     RESPONSE_CACHE_ENABLED: bool = Field(default=True, env="RESPONSE_CACHE_ENABLED")
@@ -304,7 +342,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     MODEL_ROUTING_ENABLED: bool = Field(default=True, env="MODEL_ROUTING_ENABLED")
     MODEL_ECONOMY: str = "gemini-2.5-flash"
-    MODEL_STANDARD: str = "gemini-2.5-pro"
+    MODEL_STANDARD: str = "gemini-2.5-flash"
     MODEL_PREMIUM: str = "gemini-2.5-pro"
     MODEL_COST_TRACKING_ENABLED: bool = Field(default=False, env="MODEL_COST_TRACKING_ENABLED")
 

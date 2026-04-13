@@ -283,6 +283,49 @@ def check_formulaic_endings(text: str) -> CheckResult:
     return CheckResult(name="formulaic_endings", passed=True)
 
 
+# Phrases banned specifically in presence-holding / closure modes. Subset of
+# HOLLOW_PHRASES but with mode-specific framing so the regeneration hint can
+# point the LLM at the mode contract it violated. This check layers on top
+# of check_hollow_phrases — both run, and the more specific (mode-aware)
+# message gives the regeneration a sharper instruction.
+_BANNED_EMPATHY_BY_MODE = ("i hear you", "i understand", "it sounds like")
+_MODES_THAT_FORBID_EMPATHY = ("presence_first", "closure")
+
+
+def check_banned_empathy_by_mode(text: str, response_mode: Optional[str]) -> CheckResult:
+    """HIGH-severity check: banned empathy phrases in presence_first / closure.
+
+    This is the structural backstop for Bug 1 from the E2E test report. The
+    mode_prompts.presence_first and mode_prompts.closure YAML blocks both
+    explicitly forbid "I hear you" / "I understand" / "It sounds like". When
+    the LLM slips into these phrases under strong emotional conversation
+    context, this check catches the violation, reports the specific mode
+    that's being violated, and triggers ResponseComposer's regeneration
+    loop with a mode-aware corrective hint.
+
+    Passes silently when response_mode is None or a mode that DOES allow
+    these phrases (teaching, practical_first, exploratory).
+    """
+    if response_mode not in _MODES_THAT_FORBID_EMPATHY:
+        return CheckResult(name="banned_empathy_by_mode", passed=True)
+    low = text.lower()
+    hits = [p for p in _BANNED_EMPATHY_BY_MODE if p in low]
+    if not hits:
+        return CheckResult(name="banned_empathy_by_mode", passed=True)
+    return CheckResult(
+        name="banned_empathy_by_mode",
+        passed=False,
+        severity=Severity.HIGH,
+        reason=(
+            f"Response uses banned empathy phrase(s) {hits} which are explicitly "
+            f"forbidden in {response_mode} mode. The {response_mode} mode_prompts "
+            "block says to be SPECIFIC about what you notice, not generic. "
+            "Rewrite without any of these phrases — name the actual thing the "
+            "user said that you noticed."
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Verse auto-wrap (in-place repair)
 # ---------------------------------------------------------------------------
@@ -365,12 +408,24 @@ class ResponseValidator:
             ) or {}
         return constraints
 
-    def validate(self, text: str, *, phase: Optional[str] = None) -> ValidationReport:
+    def validate(
+        self,
+        text: str,
+        *,
+        phase: Optional[str] = None,
+        response_mode: Optional[str] = None,
+    ) -> ValidationReport:
         """Run every check against ``text``. Returns an aggregate report.
 
         Repairs (verse auto-wrap) are applied in place to the working text;
         downstream checks see the repaired version so a freshly-wrapped
         verse doesn't trip the length check incorrectly.
+
+        ``response_mode`` (optional) enables mode-specific checks. Today that
+        means upgrading hollow-phrase detection to HIGH severity (forcing a
+        regeneration) when the active mode is ``presence_first`` or ``closure``
+        — both modes explicitly forbid "I hear you" / "I understand" / "It
+        sounds like" in their YAML mode_prompts blocks.
         """
         results: List[CheckResult] = []
         working = text or ""
@@ -411,6 +466,14 @@ class ResponseValidator:
         # Style: hollow phrases + formulaic endings
         results.append(check_hollow_phrases(working))
         results.append(check_formulaic_endings(working))
+
+        # Mode-aware banned empathy phrase enforcement — layered on top of
+        # the uniform hollow-phrase check above. In presence_first and
+        # closure modes, the mode_prompts block explicitly forbids "I hear
+        # you" / "I understand" / "It sounds like" as a contract violation.
+        # We elevate detection to HIGH severity so the composer regenerates
+        # once with corrective hints.
+        results.append(check_banned_empathy_by_mode(working, response_mode))
 
         # Aggregate pass/fail: HIGH or MEDIUM with no repair = fail
         passed = all(

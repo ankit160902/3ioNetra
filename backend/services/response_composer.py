@@ -163,6 +163,7 @@ class ResponseComposer:
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
         session=None,
+        response_mode: Optional[str] = None,
     ) -> str:
         """
         Compose a response using:
@@ -224,12 +225,14 @@ class ResponseComposer:
                 memory_context=memory,
                 model_override=model_override,
                 config_override=config_override,
+                response_mode=response_mode,
             )
             # Final gate: run ResponseValidator and optionally regenerate
             # once with corrective hints if a HIGH-severity check fails.
             response = await self._validate_and_repair(
                 response,
                 phase=phase,
+                response_mode=response_mode,
                 regenerate=lambda hints: self.llm.generate_response(
                     query=llm_query,
                     context_docs=context_docs,
@@ -239,6 +242,7 @@ class ResponseComposer:
                     memory_context=memory,
                     model_override=model_override,
                     config_override=self._merge_correction_hints(config_override, hints),
+                    response_mode=response_mode,
                 ),
             )
             # Cache the response for future similar queries (per-user)
@@ -258,6 +262,7 @@ class ResponseComposer:
         *,
         phase: Optional[ConversationPhase],
         regenerate,
+        response_mode: Optional[str] = None,
     ) -> str:
         """Run the ResponseValidator and optionally regenerate.
 
@@ -268,9 +273,13 @@ class ResponseComposer:
               correction hints, then re-validate.
             * Return the best version we have. We never return raw text that
               still contains a known scratchpad leak — that's the contract.
+
+        ``response_mode`` is threaded through to the validator so mode-aware
+        checks (presence_first / closure banned-empathy enforcement) can
+        fire with mode-specific corrective hints.
         """
         phase_value = phase.value if phase else None
-        report = self.validator.validate(response, phase=phase_value)
+        report = self.validator.validate(response, phase=phase_value, response_mode=response_mode)
         attempts = 0
         max_attempts = max(0, int(settings.LLM_REGENERATION_RETRIES))
 
@@ -285,7 +294,7 @@ class ResponseComposer:
             except Exception as exc:
                 logger.warning(f"Regeneration failed: {exc} — keeping original response")
                 break
-            report = self.validator.validate(response, phase=phase_value)
+            report = self.validator.validate(response, phase=phase_value, response_mode=response_mode)
 
         # Verse auto-wrap and similar in-place repairs are baked into report.text
         return report.text
@@ -319,6 +328,7 @@ class ResponseComposer:
         model_override: Optional[str] = None,
         config_override: Optional[Dict] = None,
         session=None,
+        response_mode: Optional[str] = None,
     ):
         """
         Stream response synthesis using LLMService.generate_response_stream.
@@ -368,6 +378,7 @@ class ResponseComposer:
                 memory_context=memory,
                 model_override=model_override,
                 config_override=config_override,
+                response_mode=response_mode,
             ):
                 full_response_parts.append(chunk)
                 yield chunk

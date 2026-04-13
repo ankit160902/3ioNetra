@@ -181,6 +181,7 @@ class CompanionEngine:
                 memory_context=session.memory,
                 model_override=routing.model_name,
                 config_override=routing.config_override,
+                response_mode=analysis.get("response_mode", "exploratory"),
             ):
                 yield {"type": "token", "content": token}
         else:
@@ -198,53 +199,21 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
-        # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval + Speculative RAG
-        _t_parallel_start = time.perf_counter()
-        tasks = [
-            self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
-        ]
+        # Intent classification runs first. MemoryReader (below) depends on
+        # the analysis (response_mode, emotion) for its mode gate and tone
+        # filter, and we want to defer the reader until AFTER the crisis
+        # and off-topic short-circuits so those paths don't pay the ~100ms
+        # reader cost for responses that won't use the result anyway.
+        _t_intent_start = time.perf_counter()
+        analysis = await self.intent_agent.analyze_intent(
+            message, session.memory.get_memory_summary()
+        )
+        _intent_ms = (time.perf_counter() - _t_intent_start) * 1000
 
         user_id = getattr(session, 'user_id', None) or getattr(session.memory, 'user_id', None)
-        # Skip memory retrieval for trivial/greeting turns on first message (saves 500-800ms)
-        msg_words = len(message.strip().split())
-        should_retrieve_memory = user_id and (session.turn_count > 0 or msg_words > 3)
-        if should_retrieve_memory:
-            tasks.append(self.memory_service.retrieve_relevant_memories(user_id, message))
-        else:
-            tasks.append(asyncio.sleep(0, result=[]))
 
-        # Speculative RAG: start search in parallel with intent for any substantive message.
-        # Runs from turn 1 to eliminate the sequential _retrieve_and_validate bottleneck.
-        _trivial = message.strip().lower() in TRIVIAL_MESSAGES
-        _panchang_kw = {"panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"}
-        _is_panchang_q = any(k in message.lower() for k in _panchang_kw)
-        _speculative_rag_eligible = (
-            msg_words > 3
-            and not _trivial
-            and not _is_panchang_q
-            and self.rag_pipeline and self.rag_pipeline.available
-        )
-        if _speculative_rag_eligible:
-            _spec_query = self._build_listening_query(message, session.memory)
-            tasks.append(self.rag_pipeline.search(
-                query=_spec_query, language="en",
-                top_k=settings.RETRIEVAL_TOP_K,
-                min_score=settings.MIN_SIMILARITY_SCORE,
-            ))
-        else:
-            tasks.append(asyncio.sleep(0, result=[]))
-
-        _results = await asyncio.gather(*tasks, return_exceptions=True)
-        _t_parallel_end = time.perf_counter()
-        _parallel_ms = (_t_parallel_end - _t_parallel_start) * 1000
-        analysis, past_memories = _results[0], _results[1]
-        speculative_rag_docs = _results[2] if not isinstance(_results[2], Exception) else []
-        logger.info(f"PERF_PREAMBLE parallel={_parallel_ms:.0f}ms intent_ok={not isinstance(_results[0], Exception)} mem_ok={not isinstance(_results[1], Exception)} rag_ok={not isinstance(_results[2], Exception)} rag_docs={len(speculative_rag_docs) if isinstance(speculative_rag_docs, list) else 0}")
-        if isinstance(_results[2], Exception):
-            logger.warning(f"Speculative RAG failed (non-fatal): {_results[2]}")
-
-        # Guard: if IntentAgent returned an exception (via gather return_exceptions),
-        # use a safe fallback dict so downstream code doesn't crash.
+        # Guard: if IntentAgent returned an exception, fall back to a safe dict
+        # so downstream code doesn't crash.
         if isinstance(analysis, Exception):
             logger.warning(f"IntentAgent failed (non-fatal): {analysis}. Using fallback.")
             analysis = {
@@ -257,12 +226,21 @@ class CompanionEngine:
                 "product_rejection": False, "query_variants": [],
                 "expected_length": "moderate", "is_off_topic": False,
             }
-        if isinstance(past_memories, Exception):
-            logger.warning(f"Memory retrieval failed (non-fatal): {past_memories}")
-            past_memories = []
+
+        # Initialize reader-backed state — will be populated after the
+        # crisis/off-topic short-circuits fail to fire.
+        relational_profile_text: str = ""
+        past_memories: list = []
 
         # 1. Update session signals from LLM analysis
         collect_signals_from_analysis(session, analysis)
+
+        # Observability: log the chosen response_mode so runtime behavior is
+        # traceable. Follows the existing IntentAgent logger.info pattern.
+        logger.info(
+            f"Mode selected: {analysis.get('response_mode', 'exploratory')} "
+            f"for '{message[:50]}' (session={session.session_id}, turn={session.turn_count})"
+        )
 
         # 1a. LLM-based crisis detection — catches typos/misspellings that the
         # keyword-based check in _preflight missed. The IntentAgent sees the
@@ -275,7 +253,11 @@ class CompanionEngine:
                 f"IntentAgent urgency=crisis for message '{message[:50]}'"
             )
             from services.crisis_response_composer import get_crisis_response_composer
+            from services.crisis_memory_hook import dispatch_crisis_meta_fact
             session.crisis_turn_count += 1
+            # Fire-and-forget meta-fact write: set prior_crisis_flag + bump
+            # count on user_profiles. NEVER stores verbatim crisis text.
+            dispatch_crisis_meta_fact(session.memory.user_id)
             crisis_response = get_crisis_response_composer().compose(session, message)
             return {
                 "is_ready_for_wisdom": False,
@@ -290,6 +272,7 @@ class CompanionEngine:
                 "model_override": None,
                 "config_override": None,
                 "crisis_response": crisis_response,
+                "response_mode": analysis.get("response_mode", "presence_first"),
             }
 
         # 1b. Off-topic short-circuit — if the intent agent (or fast-path) flagged
@@ -317,7 +300,41 @@ class CompanionEngine:
                 "model_override": None,
                 "config_override": None,
                 "off_topic_response": _off_topic_detector.get_redirect_message(),
+                "response_mode": analysis.get("response_mode", "exploratory"),
             }
+
+        # 1c. Dynamic MemoryReader — profile load (always-on, Redis-cached)
+        # + mode-gated episodic retrieval (scored, tone-filtered). Runs only
+        # for authenticated users AFTER crisis/off-topic short-circuits fail
+        # to fire — those paths never use memory so we save ~100ms on them.
+        if user_id:
+            _t_reader_start = time.perf_counter()
+            try:
+                from services import memory_reader
+                read_result = await memory_reader.load_and_retrieve(
+                    user_id=user_id,
+                    query=message,
+                    response_mode=analysis.get("response_mode"),
+                    analysis=analysis,
+                    session=session,
+                )
+                relational_profile_text = read_result.profile.to_prompt_text()
+                past_memories = [
+                    sm.memory.get("text", "")
+                    for sm in read_result.episodic
+                    if sm.memory.get("text")
+                ]
+            except Exception as exc:
+                logger.warning(
+                    f"MemoryReader failed (non-fatal): "
+                    f"{type(exc).__name__}: {exc}"
+                )
+            _reader_ms = (time.perf_counter() - _t_reader_start) * 1000
+            logger.info(
+                f"PERF_PREAMBLE intent={_intent_ms:.0f}ms reader={_reader_ms:.0f}ms "
+                f"profile_len={len(relational_profile_text)} "
+                f"past_mem_count={len(past_memories)}"
+            )
 
         # 2. Store in Long-Term Memory if significant
         is_significant_update = (
@@ -378,52 +395,38 @@ class CompanionEngine:
                 )
             )
 
-            # 📚 SCRIPTURE RETRIEVAL — use speculative RAG if available (already ran in parallel with intent)
+            # 📚 SCRIPTURE RETRIEVAL — mode-gated, sequential (post-Apr-2026).
             context_docs = []
             is_verse_request = "Verse Request" in turn_topics
             is_product_request = "Product Inquiry" in turn_topics
-            # Gate RAG for purely practical topics — the LLM gives better
-            # practical advice when it doesn't have scripture to lean on.
-            # Spiritual grounding still comes from the persona's dharmic
-            # principles — just not specific verse citations.
-            _spiritual_cues = {"mantra", "verse", "spiritual", "prayer", "meditate",
-                               "puja", "ritual", "god", "deity", "temple", "scripture",
-                               "gita", "veda", "karma", "dharma", "moksha"}
-            _practical_domains = {"work", "career", "finance", "health", "education",
-                                  "relationship", "family", "money", "job"}
-            _life_domain_lower = (analysis.get("life_domain") or "unknown").lower()
-            _is_practical_only = (
-                not any(kw in message.lower() for kw in _spiritual_cues)
-                and any(d in _life_domain_lower for d in _practical_domains)
+            # Gate RAG based on response_mode (LLM-classified, not keyword-matched).
+            # practical_first / closure → skip RAG entirely; these modes never
+            # surface scripture.
+            # presence_first on early turns → skip RAG; the user needs presence,
+            # not citations.
+            # teaching → always use RAG (full scripture power).
+            # exploratory → let RAG run if it has something concrete to surface.
+            _response_mode = analysis.get("response_mode", "exploratory")
+            _skip_rag_for_mode = (
+                _response_mode in ("practical_first", "closure")
+                or (_response_mode == "presence_first" and session.turn_count <= 2)
             )
             should_get_verses = (
                 is_verse_request
-                or (is_ready and not is_product_request and not _is_practical_only)
+                or (is_ready and not is_product_request and not _skip_rag_for_mode)
             )
 
             if should_get_verses and self.rag_pipeline and self.rag_pipeline.available:
-                if speculative_rag_docs:
-                    # Reuse docs from parallel RAG — skip the expensive _retrieve_and_validate call
-                    from services.context_validator import get_context_validator
-                    ctx_validator = get_context_validator()
-                    context_docs = ctx_validator.validate(
-                        docs=speculative_rag_docs, intent=intent,
-                        query=message, min_score=settings.MIN_SIMILARITY_SCORE,
-                        max_per_source=settings.MAX_DOCS_PER_SOURCE,
-                        max_docs=settings.RERANK_TOP_K,
+                # Sequential RAG: with speculative dispatch removed (Apr 2026),
+                # we only run RAG here, only for modes that need it. This costs
+                # ~1-2s on teaching queries but saves 60-170s on practical/closure
+                # turns that used to pay speculative reranker cost for nothing.
+                try:
+                    context_docs, _top_score = await self._retrieve_and_validate(
+                        session, message, analysis, intent, "guidance",
                     )
-                    logger.info(f"Guidance: reused {len(context_docs)} speculative RAG docs (skipped redundant search)")
-                elif not _speculative_rag_eligible:
-                    # Speculative RAG wasn't eligible (trivial/panchang) — run sequential search
-                    try:
-                        context_docs, _top_score = await self._retrieve_and_validate(
-                            session, message, analysis, intent, "guidance",
-                        )
-                    except Exception as e:
-                        logger.warning(f"Guidance-phase RAG/validation failed: {e}")
-                else:
-                    # Speculative RAG ran but returned empty — proceed without scripture docs
-                    logger.info("Guidance: speculative RAG returned empty, proceeding without scripture context")
+                except Exception as e:
+                    logger.warning(f"Guidance-phase RAG/validation failed: {e}")
 
             # Now await the product recommendation that's been running in
             # parallel with the RAG/validation work above.
@@ -437,6 +440,11 @@ class CompanionEngine:
                 has_rag_context=bool(context_docs),
             )
 
+            _guidance_user_profile = build_user_profile(session.memory, session)
+            if relational_profile_text:
+                _guidance_user_profile["relational_profile"] = relational_profile_text
+            if past_memories:
+                _guidance_user_profile["past_memories"] = past_memories
             return {
                 "is_ready_for_wisdom": True,
                 "readiness_trigger": readiness_trigger,
@@ -444,12 +452,13 @@ class CompanionEngine:
                 "turn_topics": turn_topics,
                 "recommended_products": products,
                 "active_phase": ConversationPhase.GUIDANCE,
-                "user_profile": build_user_profile(session.memory, session),
+                "user_profile": _guidance_user_profile,
                 "past_memories": past_memories,
                 "analysis": analysis,
                 "acknowledgement": random.choice(acknowledgements),
                 "model_override": routing.model_name,
                 "config_override": routing.config_override,
+                "response_mode": analysis.get("response_mode", "exploratory"),
             }
 
         # ------------------------------------------------------------------
@@ -458,6 +467,16 @@ class CompanionEngine:
         context_docs = []
 
         if self.available and self.rag_pipeline and self.rag_pipeline.available:
+            # Listening-phase RAG gating — layered. Mode-based skips come first
+            # (practical_first / closure / early presence_first all skip RAG
+            # entirely); then the pre-existing intent-based skips for greetings,
+            # short acknowledgments, and panchang queries act as belt-and-
+            # suspenders guards in case the mode classification is unavailable.
+            _response_mode_listen = analysis.get("response_mode", "exploratory")
+            _skip_rag_listen_mode = (
+                _response_mode_listen in ("practical_first", "closure")
+                or (_response_mode_listen == "presence_first" and session.turn_count <= 2)
+            )
             skip_rag_intents = {IntentType.GREETING, IntentType.CLOSURE}
             # Skip RAG for emotional expressions in early turns — they need presence, not scripture
             skip_rag_early = session.turn_count <= 2 and intent == IntentType.EXPRESSING_EMOTION
@@ -469,34 +488,25 @@ class CompanionEngine:
             skip_rag_short = _is_short_ack or (_msg_words <= 8 and _detected_emotion in _positive_emotions)
             panchang_keywords = ["panchang", "tithi", "nakshatra", "muhurat", "today's day", "calendar"]
             _is_panchang = any(k in message.lower() for k in panchang_keywords)
-            if intent in skip_rag_intents or skip_rag_early or skip_rag_short:
+            if _skip_rag_listen_mode:
+                logger.info(f"Skipping RAG for mode={_response_mode_listen} in listening phase")
+            elif intent in skip_rag_intents or skip_rag_early or skip_rag_short:
                 logger.info(f"Skipping RAG for {intent} intent in listening phase (turn={session.turn_count}, words={_msg_words}, emotion={_detected_emotion})")
             elif _is_panchang:
                 logger.info("Skipping RAG for Panchang-related query in listening phase")
-            elif speculative_rag_docs:
-                # Reuse docs from parallel RAG — skip redundant search
-                from services.context_validator import get_context_validator
-                ctx_validator = get_context_validator()
-                context_docs = ctx_validator.validate(
-                    docs=speculative_rag_docs, intent=intent,
-                    query=message, min_score=settings.MIN_SIMILARITY_SCORE,
-                    max_per_source=settings.MAX_DOCS_PER_SOURCE,
-                    max_docs=settings.RERANK_TOP_K,
-                )
-                logger.info(f"Listening: reused {len(context_docs)} speculative RAG docs")
-            elif not _speculative_rag_eligible:
-                # Speculative RAG wasn't eligible — run sequential search
+            else:
+                # Sequential RAG: run the search only when the mode and intent
+                # checks all agree the query needs scripture context.
                 try:
                     context_docs, _top_score = await self._retrieve_and_validate(
                         session, message, analysis, intent, "listening",
                     )
                 except Exception as e:
                     logger.warning(f"Listening-phase RAG/validation failed: {e}")
-            else:
-                # Speculative RAG ran but returned empty — proceed without scripture docs
-                logger.info("Listening: speculative RAG returned empty, proceeding without scripture context")
 
         user_profile = build_user_profile(session.memory, session)
+        if relational_profile_text:
+            user_profile["relational_profile"] = relational_profile_text
         if past_memories:
             user_profile["past_memories"] = past_memories
 
@@ -527,6 +537,7 @@ class CompanionEngine:
             "analysis": analysis,
             "model_override": routing.model_name,
             "config_override": routing.config_override,
+            "response_mode": analysis.get("response_mode", "exploratory"),
         }
 
     async def process_message(
@@ -537,9 +548,22 @@ class CompanionEngine:
         """
         Returns:
             (assistant_text, is_ready_for_wisdom, context_docs_used, turn_topics,
-             recommended_products, active_phase, model_override, config_override, past_memories)
+             recommended_products, active_phase, model_override, config_override,
+             past_memories, response_mode, analysis)
+
+        The element at index 9 (``response_mode``) is the IntentAgent-
+        classified response shape for this turn — used by routers/chat.py to
+        pass the mode through to ResponseComposer for guidance-phase synthesis.
+
+        The element at index 10 (``analysis``) is the full IntentAgent output
+        dict — used by routers/chat.py to gate the fire-and-forget memory
+        extraction dispatch (skip crisis / off-topic / greeting / closure
+        turns). Existing scripts and regression tests that access the tuple
+        by index only read items 0, 5, 9 and are unaffected by this addition.
         """
         meta = await self.process_message_preamble(session, message)
+        _mode = meta.get("response_mode", "exploratory")
+        _analysis = meta.get("analysis", {})
 
         # LLM-based crisis short-circuit: IntentAgent detected urgency=crisis
         # (catches typos/misspellings that keyword check in _preflight missed).
@@ -547,7 +571,7 @@ class CompanionEngine:
             return (
                 meta["crisis_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []),
+                None, None, meta.get("past_memories", []), _mode, _analysis,
             )
 
         # Off-topic short-circuit: return canned redirect, skip LLM call entirely.
@@ -555,14 +579,15 @@ class CompanionEngine:
             return (
                 meta["off_topic_response"], False, [],
                 meta["turn_topics"], [], ConversationPhase.LISTENING,
-                None, None, meta.get("past_memories", []),
+                None, None, meta.get("past_memories", []), _mode, _analysis,
             )
 
         if meta["is_ready_for_wisdom"]:
             return (
                 meta["acknowledgement"], True, meta["context_docs"],
                 meta["turn_topics"], meta["recommended_products"], ConversationPhase.GUIDANCE,
-                meta.get("model_override"), meta.get("config_override"), meta.get("past_memories", []),
+                meta.get("model_override"), meta.get("config_override"),
+                meta.get("past_memories", []), _mode, _analysis,
             )
 
         # Listening phase — make the LLM call
@@ -576,6 +601,7 @@ class CompanionEngine:
                 memory_context=session.memory,
                 model_override=meta.get("model_override"),
                 config_override=meta.get("config_override"),
+                response_mode=meta.get("response_mode"),
             )
 
             # Cost tracking
@@ -592,13 +618,15 @@ class CompanionEngine:
                         output_tokens=usage.get("output_tokens", 0),
                         intent=str(analysis.get("intent", "")),
                         phase=meta["active_phase"].value,
+                        response_mode=str(analysis.get("response_mode", "")),
                     )
                 except Exception as e:
                     logger.debug(f"Cost tracking failed: {e}")
 
             return (reply, False, meta["context_docs"], meta["turn_topics"],
                     meta["recommended_products"], meta["active_phase"],
-                    meta.get("model_override"), meta.get("config_override"), meta.get("past_memories", []))
+                    meta.get("model_override"), meta.get("config_override"),
+                    meta.get("past_memories", []), _mode, _analysis)
 
         # Fallback (no LLM)
         return (
@@ -611,6 +639,8 @@ class CompanionEngine:
             None,
             None,
             [],
+            _mode,
+            _analysis,
         )
 
     # ------------------------------------------------------------------

@@ -41,6 +41,7 @@ class RequestCostRecord:
     estimated_cost_usd: float
     intent: str
     phase: str
+    response_mode: str = ""
 
 
 def estimate_cost(model_name: str, input_tokens: int, output_tokens: int) -> float:
@@ -96,6 +97,7 @@ class CostTracker:
         output_tokens: int,
         intent: str = "",
         phase: str = "",
+        response_mode: str = "",
     ):
         """Log a cost record."""
         cost = estimate_cost(model_name, input_tokens, output_tokens)
@@ -109,13 +111,14 @@ class CostTracker:
             estimated_cost_usd=cost,
             intent=intent,
             phase=phase,
+            response_mode=response_mode,
         )
 
         # Always log to structured logger
         logger.info(
             f"MODEL_COST | model={model_name} tier={tier} "
             f"in={input_tokens} out={output_tokens} "
-            f"cost=${cost:.6f} intent={intent} phase={phase}"
+            f"cost=${cost:.6f} intent={intent} phase={phase} mode={response_mode}"
         )
 
         # Optionally persist to MongoDB (non-blocking if in async context)
