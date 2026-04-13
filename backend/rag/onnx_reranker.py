@@ -29,7 +29,7 @@ def _worker_predict(pairs: List[List[str]], model_dir: str) -> List[float]:
 
     # Each worker process loads its own model instance (once, cached via global)
     global _worker_session, _worker_tokenizer
-    if "_worker_session" not in dir() or _worker_session is None:
+    if globals().get("_worker_session") is None:
         onnx_dir = os.path.join(model_dir, "onnx")
         onnx_path = os.path.join(onnx_dir, "model.onnx")
         tokenizer_path = onnx_dir if os.path.exists(os.path.join(onnx_dir, "tokenizer.json")) else model_dir

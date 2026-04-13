@@ -250,21 +250,21 @@ class TestPydanticFallbackPreservesMode:
         # Simulates the 'parsed' dict that intent_agent.py builds when
         # pydantic validation fails — we verify the coercion logic matches.
         parsed = {"intent": "SEEKING_GUIDANCE", "response_mode": "practical_first"}
-        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory"}
+        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
         raw = str(parsed.get("response_mode", "exploratory")).strip().lower()
         result = raw if raw in _valid_modes else "exploratory"
         assert result == "practical_first"
 
     def test_missing_parsed_mode_defaults_to_exploratory(self):
         parsed = {"intent": "SEEKING_GUIDANCE"}
-        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory"}
+        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
         raw = str(parsed.get("response_mode", "exploratory")).strip().lower()
         result = raw if raw in _valid_modes else "exploratory"
         assert result == "exploratory"
 
     def test_garbage_parsed_mode_coerces_safely(self):
         parsed = {"intent": "SEEKING_GUIDANCE", "response_mode": "SPIRITUAL_ASSAULT_MODE"}
-        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory"}
+        _valid_modes = {"practical_first", "presence_first", "teaching", "exploratory", "closure"}
         raw = str(parsed.get("response_mode", "exploratory")).strip().lower()
         result = raw if raw in _valid_modes else "exploratory"
         assert result == "exploratory"

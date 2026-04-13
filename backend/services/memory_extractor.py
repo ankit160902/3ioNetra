@@ -222,7 +222,8 @@ async def dispatch_memory_extraction(
         return
 
     # Gate 2: trivial intent
-    intent_raw = str(intent_analysis.get("intent", "")).upper() if intent_analysis else ""
+    _intent_val = intent_analysis.get("intent", "") if intent_analysis else ""
+    intent_raw = (getattr(_intent_val, "value", _intent_val) or "").upper()
     if intent_raw in _NO_EXTRACTION_INTENTS:
         return
 
