@@ -473,8 +473,6 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     elif safety_validator.check_dependency_signals(query_message):
         final_text = safety_validator.append_dependency_redirect(final_text)
     session.add_message('assistant', final_text)
-    # Record practice suggestions for future product inference
-    companion_engine.record_suggestion(session, final_text)
     # Record verse/mantra history for diversity (anti-repetition).
     # detect_repetition runs BEFORE record_suggested_verses so it compares the
     # new response against the prior history (not against itself). It only

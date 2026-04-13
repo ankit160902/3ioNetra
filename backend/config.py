@@ -247,13 +247,6 @@ class Settings(BaseSettings):
     RERANKER_CACHE_ENABLED: bool = Field(default=True, env="RERANKER_CACHE_ENABLED")
     RERANKER_CACHE_TTL: int = Field(default=86400, env="RERANKER_CACHE_TTL")  # 24h
 
-    # ------------------------------------------------------------------
-    # Product Recommendation Throttling
-    # ------------------------------------------------------------------
-    PRODUCT_SESSION_CAP: int = 3                    # Max proactive product events per session
-    PRODUCT_COOLDOWN_TURNS: int = 7                 # Min turns between proactive product events
-    PRODUCT_COOLDOWN_AFTER_REJECTION: int = 10      # Cooldown turns after user rejects products
-    PRODUCT_MIN_TURN_FOR_PROACTIVE: int = 2         # Allow products from turn 2 (not the very first message)
     # Emotions where product recommendations are suppressed entirely.
     # PRODUCT_SUPPRESS_EMOTIONS REMOVED (Apr 2026 adaptive architecture).
     # The IntentAgent's `recommend_products` boolean now makes the contextual
