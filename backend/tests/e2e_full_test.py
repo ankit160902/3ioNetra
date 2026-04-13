@@ -616,7 +616,9 @@ def test_memory_system(client, token: str):
         log_result("memory", "hard_delete", resp.status_code == 200, "", ms)
 
     # Memory without auth — should fail
-    resp, ms = timed_request(client, "get", f"{BASE}/api/memory", timeout=10)
+    # Use a fresh client with no cookies to test true unauthenticated access
+    with httpx.Client() as fresh_client:
+        resp, ms = timed_request(fresh_client, "get", f"{BASE}/api/memory", timeout=10)
     log_result("memory", "list_no_auth", resp.status_code in (401, 403),
                f"status={resp.status_code}", ms)
 
