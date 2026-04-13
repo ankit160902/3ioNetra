@@ -430,11 +430,7 @@ class CompanionEngine:
             # own exceptions and returns [] on failure, so awaiting the task
             # at the end is safe.
             product_task = asyncio.create_task(
-                self.product_recommender.recommend(
-                    session, message, analysis, turn_topics,
-                    is_ready_for_wisdom=True,
-                    life_domain=analysis.get("life_domain", "unknown"),
-                )
+                self.product_recommender.recommend(session, message, analysis)
             )
 
             # 📚 SCRIPTURE RETRIEVAL — mode-gated, sequential (post-Apr-2026).
@@ -553,11 +549,7 @@ class CompanionEngine:
             user_profile["past_memories"] = past_memories
 
         # 🛍️ PRODUCT RECOMMENDATION (listening phase — delegated to ProductRecommender)
-        products = await self.product_recommender.recommend(
-            session, message, analysis, turn_topics,
-            is_ready_for_wisdom=False,
-            life_domain=analysis.get("life_domain", "unknown"),
-        )
+        products = await self.product_recommender.recommend(session, message, analysis)
 
         # Model routing decision
         routing = self.model_router.route(
@@ -832,9 +824,6 @@ class CompanionEngine:
         """Extract signals and update narrative story. Delegates to memory_updater module."""
         return _update_memory_impl(memory, session, text)
 
-    def record_suggestion(self, session: SessionState, assistant_text: str) -> None:
-        """Delegate to ProductRecommender for practice suggestion tracking."""
-        self.product_recommender.record_suggestion(session, assistant_text)
 
 
 # ------------------------------------------------------------------
