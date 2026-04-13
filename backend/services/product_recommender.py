@@ -132,7 +132,7 @@ class ProductRecommender:
 
         try:
             products = await self.product_service.search_products(
-                query=" ".join(keywords),
+                query_text=" ".join(keywords),
                 limit=max_results + 2,
                 product_type=type_filter if type_filter != "any" else None,
             )
@@ -143,7 +143,7 @@ class ProductRecommender:
         if len(products) < max_results:
             try:
                 meta_products = await self.product_service.search_by_metadata(
-                    keywords=keywords,
+                    practices=keywords,
                     limit=max_results - len(products),
                 )
                 seen_ids = {str(p.get("_id", "")) for p in products}
