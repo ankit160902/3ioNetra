@@ -249,11 +249,11 @@ class Settings(BaseSettings):
 
     # Emotions where product recommendations are suppressed entirely.
     # PRODUCT_SUPPRESS_EMOTIONS REMOVED (Apr 2026 adaptive architecture).
-    # The IntentAgent's `recommend_products` boolean now makes the contextual
+    # The IntentAgent's `product_signal.intent` field now makes the contextual
     # decision about whether products are appropriate — it sees the emotion,
     # intent, and full message. The hardcoded emotion list was over-blocking
     # (e.g. "I'm anxious about my puja, what items do I need?" was blocked).
-    # Crisis-level blocking remains in _should_suppress (safety, non-negotiable).
+    # Crisis-level blocking remains in ProductRecommender (safety, non-negotiable).
     #
     # PRODUCT_GUIDANCE_CONTEXT_ENABLED and PRODUCT_LISTENING_PROACTIVE_ENABLED
     # also removed — they gated Path 3 (proactive inference) which is deleted.

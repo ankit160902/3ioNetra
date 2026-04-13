@@ -69,7 +69,7 @@ class CompanionEngine:
         self.intent_agent = intent_agent if intent_agent is not None else get_intent_agent()
         self.memory_service = memory_service if memory_service is not None else get_memory_service(rag_pipeline)
         self.product_service = product_service if product_service is not None else get_product_service()
-        self.product_recommender = ProductRecommender(self.product_service, self.panchang)
+        self.product_recommender = ProductRecommender(self.product_service)
         self.model_router = model_router if model_router is not None else get_model_router()
         self.available = self.llm.available
         logger.info(f"CompanionEngine initialized (LLM available={self.available})")
@@ -82,6 +82,29 @@ class CompanionEngine:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def _build_product_context(self, session: SessionState) -> str:
+        """Build product interaction context string for IntentAgent.
+
+        Loads the RelationalProfile (Redis-cached) and appends the
+        session-level product count. Used by both streaming and
+        non-streaming code paths.
+        """
+        product_context = ""
+        _uid = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
+        if _uid:
+            try:
+                from services.memory_reader import load_relational_profile
+                _profile = await load_relational_profile(_uid)
+                product_context = _profile.to_product_context()
+            except Exception as e:
+                logger.debug(f"Product context load failed (non-fatal): {e}")
+
+        _session_products = len(getattr(session, "shown_product_ids", set()))
+        if _session_products > 0:
+            product_context += f" Products shown this session: {_session_products}."
+
+        return product_context
 
     async def generate_response_stream(
         self,
@@ -96,21 +119,7 @@ class CompanionEngine:
 
         # Build context with product interaction history for LLM
         memory_summary = session.memory.get_memory_summary()
-        product_context = ""
-        _uid = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
-        if _uid:
-            try:
-                from services.memory_reader import load_relational_profile
-                _profile = await load_relational_profile(_uid)
-                product_context = _profile.to_product_context()
-            except Exception:
-                pass
-
-        # Add session-level product count
-        _session_products = len(getattr(session, "shown_product_ids", set()))
-        if _session_products > 0:
-            product_context += f" Products shown this session: {_session_products}."
-
+        product_context = await self._build_product_context(session)
         context_with_products = memory_summary
         if product_context:
             context_with_products += "\n" + product_context
@@ -227,21 +236,7 @@ class CompanionEngine:
         # reader cost for responses that won't use the result anyway.
         # Build context with product interaction history for LLM
         memory_summary = session.memory.get_memory_summary()
-        product_context = ""
-        _uid = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
-        if _uid:
-            try:
-                from services.memory_reader import load_relational_profile
-                _profile = await load_relational_profile(_uid)
-                product_context = _profile.to_product_context()
-            except Exception:
-                pass
-
-        # Add session-level product count
-        _session_products = len(getattr(session, "shown_product_ids", set()))
-        if _session_products > 0:
-            product_context += f" Products shown this session: {_session_products}."
-
+        product_context = await self._build_product_context(session)
         context_with_products = memory_summary
         if product_context:
             context_with_products += "\n" + product_context

@@ -12,7 +12,7 @@ No hardcoded maps, no proactive inference, no emotion heuristics.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Dict, List, Set
+from typing import Dict, List
 
 from models.session import SessionState
 
@@ -29,16 +29,33 @@ async def load_relational_profile(user_id: str):
     return await _load(user_id)
 
 
-async def update_product_interaction(user_id: str, field_updates: dict):
-    """Write product interaction fields to the user_profiles document."""
+async def update_product_interaction(
+    user_id: str,
+    field_updates: dict,
+    increments: dict | None = None,
+):
+    """Write product interaction fields to the user_profiles document.
+
+    Args:
+        user_id: The user whose profile to update.
+        field_updates: Fields to ``$set`` (timestamps, preference strings).
+        increments: Fields to ``$inc`` (counters like shown_count).
+    """
     from services.auth_service import get_mongo_client
     db = get_mongo_client()
     if db is None:
         return
+    update_ops: dict = {}
+    if field_updates:
+        update_ops["$set"] = field_updates
+    if increments:
+        update_ops["$inc"] = increments
+    if not update_ops:
+        return
     await asyncio.to_thread(
         db.user_profiles.update_one,
         {"user_id": user_id},
-        {"$set": field_updates},
+        update_ops,
         upsert=True,
     )
 
@@ -53,9 +70,8 @@ class ProductRecommender:
     Depends on: ProductService (via port injection).
     """
 
-    def __init__(self, product_service, panchang_service=None):
+    def __init__(self, product_service):
         self.product_service = product_service
-        self.panchang_service = panchang_service
 
     # ------------------------------------------------------------------
     # Public API
@@ -77,6 +93,12 @@ class ProductRecommender:
         signal = analysis.get("product_signal") or {}
         intent = signal.get("intent", "none")
         user_id = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
+
+        logger.info(
+            f"PRODUCT_REC session={session.session_id} intent={intent} "
+            f"keywords={signal.get('search_keywords', [])} max={signal.get('max_results', 0)} "
+            f"urgency={analysis.get('urgency')} user={user_id}"
+        )
 
         # Step 1: Hard safety
         if analysis.get("urgency") == "crisis":
@@ -103,8 +125,7 @@ class ProductRecommender:
         if intent == "negative":
             if user_id:
                 try:
-                    updates = {
-                        "product_rejection_count": (profile.product_rejection_count + 1) if profile else 1,
+                    set_fields = {
                         "product_last_rejected_at": datetime.utcnow().isoformat(),
                     }
                     _hard_phrases = {
@@ -113,8 +134,11 @@ class ProductRecommender:
                         "dont show products", "i hate your products",
                     }
                     if any(p in message.lower() for p in _hard_phrases):
-                        updates["product_preference"] = "opted_out"
-                    await update_product_interaction(user_id, updates)
+                        set_fields["product_preference"] = "opted_out"
+                    await update_product_interaction(
+                        user_id, set_fields,
+                        increments={"product_rejection_count": 1},
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to update rejection: {e}")
             return []
@@ -142,8 +166,18 @@ class ProductRecommender:
 
         if len(products) < max_results:
             try:
+                # Use semantic fields from the analysis for metadata search
+                # (life_domain, emotion, entities) rather than product-name
+                # keywords which don't match the practices/deities arrays.
+                _life_domain = analysis.get("life_domain")
+                _emotion = analysis.get("emotion")
+                _entities = analysis.get("entities") or {}
                 meta_products = await self.product_service.search_by_metadata(
-                    practices=keywords,
+                    life_domains=[_life_domain] if _life_domain and _life_domain != "unknown" else None,
+                    emotions=[_emotion] if _emotion and _emotion not in ("neutral", "unknown") else None,
+                    deities=_entities.get("deity") if isinstance(_entities.get("deity"), list) else (
+                        [_entities["deity"]] if _entities.get("deity") else None
+                    ),
                     limit=max_results - len(products),
                 )
                 seen_ids = {str(p.get("_id", "")) for p in products}
@@ -153,6 +187,8 @@ class ProductRecommender:
             except Exception as e:
                 logger.warning(f"Metadata search failed: {e}")
 
+        logger.info(f"PRODUCT_SEARCH_RESULT pre_filter={len(products)} keywords={keywords}")
+
         products = self._filter_shown(session, products)
         products = products[:max_results]
 
@@ -160,11 +196,11 @@ class ProductRecommender:
             self._record_shown(session, products)
             if user_id:
                 try:
-                    shown_count = (profile.product_shown_count + 1) if profile else 1
-                    await update_product_interaction(user_id, {
-                        "product_shown_count": shown_count,
-                        "product_last_shown_at": datetime.utcnow().isoformat(),
-                    })
+                    await update_product_interaction(
+                        user_id,
+                        {"product_last_shown_at": datetime.utcnow().isoformat()},
+                        increments={"product_shown_count": 1},
+                    )
                 except Exception as e:
                     logger.warning(f"Failed to update product shown: {e}")
 
