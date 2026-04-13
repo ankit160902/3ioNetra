@@ -94,12 +94,33 @@ class CompanionEngine:
         """
         turn_topics = self._update_memory(session.memory, session, message)
 
+        # Build context with product interaction history for LLM
+        memory_summary = session.memory.get_memory_summary()
+        product_context = ""
+        _uid = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
+        if _uid:
+            try:
+                from services.memory_reader import load_relational_profile
+                _profile = await load_relational_profile(_uid)
+                product_context = _profile.to_product_context()
+            except Exception:
+                pass
+
+        # Add session-level product count
+        _session_products = len(getattr(session, "shown_product_ids", set()))
+        if _session_products > 0:
+            product_context += f" Products shown this session: {_session_products}."
+
+        context_with_products = memory_summary
+        if product_context:
+            context_with_products += "\n" + product_context
+
         # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
-        tasks = [
-            self.intent_agent.analyze_intent(message, session.memory.get_memory_summary()),
-        ]
-        
         user_id = getattr(session, 'user_id', None) or getattr(session.memory, 'user_id', None)
+        tasks = [
+            self.intent_agent.analyze_intent(message, context_with_products),
+        ]
+
         if user_id:
             tasks.append(self.memory_service.retrieve_relevant_memories(user_id, message))
         else:
@@ -204,9 +225,30 @@ class CompanionEngine:
         # filter, and we want to defer the reader until AFTER the crisis
         # and off-topic short-circuits so those paths don't pay the ~100ms
         # reader cost for responses that won't use the result anyway.
+        # Build context with product interaction history for LLM
+        memory_summary = session.memory.get_memory_summary()
+        product_context = ""
+        _uid = getattr(session.memory, "user_id", None) or getattr(session, "user_id", None)
+        if _uid:
+            try:
+                from services.memory_reader import load_relational_profile
+                _profile = await load_relational_profile(_uid)
+                product_context = _profile.to_product_context()
+            except Exception:
+                pass
+
+        # Add session-level product count
+        _session_products = len(getattr(session, "shown_product_ids", set()))
+        if _session_products > 0:
+            product_context += f" Products shown this session: {_session_products}."
+
+        context_with_products = memory_summary
+        if product_context:
+            context_with_products += "\n" + product_context
+
         _t_intent_start = time.perf_counter()
         analysis = await self.intent_agent.analyze_intent(
-            message, session.memory.get_memory_summary()
+            message, context_with_products
         )
         _intent_ms = (time.perf_counter() - _t_intent_start) * 1000
 
