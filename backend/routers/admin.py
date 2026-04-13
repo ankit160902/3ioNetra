@@ -82,14 +82,52 @@ async def generate_embeddings(text: str):
     embeddings = await pipeline.generate_embeddings(text)
     return {"text": text, "embeddings": embeddings.tolist(), "dimension": len(embeddings)}
 
+def _resolve_tz_offset(tz_value: str) -> Optional[float]:
+    """Resolve a timezone string to a numeric UTC offset in hours.
+
+    Accepts:
+      - Numeric strings: '5.5', '-8', '0'
+      - IANA timezone names: 'Asia/Kolkata', 'America/New_York'
+    Returns None if the value is neither.
+    """
+    # Try numeric first (backwards compat)
+    try:
+        return float(tz_value)
+    except (ValueError, TypeError):
+        pass
+
+    # Try IANA timezone name
+    try:
+        from zoneinfo import ZoneInfo
+        tz_info = ZoneInfo(tz_value)
+        now = datetime.now(tz_info)
+        offset_seconds = now.utcoffset().total_seconds()
+        return offset_seconds / 3600
+    except (KeyError, ImportError, AttributeError):
+        return None
+
 @router.get("/panchang/today")
-async def get_today_panchang(lat: float = 28.6139, lon: float = 77.2090, tz: float = 5.5):
-    """Get current Panchang for the given location with enriched spiritual context."""
+async def get_today_panchang(lat: float = 28.6139, lon: float = 77.2090, tz: str = "5.5"):
+    """Get current Panchang for the given location with enriched spiritual context.
+
+    tz accepts either an IANA timezone name (e.g. 'Asia/Kolkata') or a
+    numeric UTC offset (e.g. '5.5'). IANA names are resolved to the
+    current UTC offset automatically.
+    """
     panchang_service = get_panchang_service()
     if not panchang_service.available:
         raise HTTPException(status_code=503, detail="Panchang service unavailable")
+
+    # Resolve tz: try numeric first (backwards compat), then IANA name
+    tz_offset = _resolve_tz_offset(tz)
+    if tz_offset is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid timezone: '{tz}'. Use IANA name (e.g. 'Asia/Kolkata') or numeric offset (e.g. '5.5').",
+        )
+
     result = panchang_service.get_enriched_panchang(
-        datetime.now(), latitude=lat, longitude=lon, timezone_offset=tz
+        datetime.now(), latitude=lat, longitude=lon, timezone_offset=tz_offset
     )
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
