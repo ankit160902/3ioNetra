@@ -486,6 +486,8 @@ async def _postprocess_and_save(text, session, query_message, safety_validator, 
     record_suggested_verses(session, final_text)
     if is_guidance:
         session.memory.readiness_for_wisdom = settings.READINESS_POST_GUIDANCE
+        session.last_guidance_turn = session.turn_count
+        session.phase = ConversationPhase.LISTENING
     def _on_save_done(t):
         try:
             exc = t.exception()

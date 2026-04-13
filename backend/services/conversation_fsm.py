@@ -91,6 +91,17 @@ class ConversationFSM:
             conditions=["is_closure_intent"],
             before="set_trigger_closure",
         )
+        # 1b. Return to LISTENING after guidance — the default post-guidance path.
+        # After a guidance turn, the companion must listen before offering more
+        # wisdom. This transition fires unconditionally (except for closure) so
+        # the oscillation cooldown and listening-first guards can function.
+        self.machine.add_transition(
+            trigger="step",
+            source="GUIDANCE",
+            dest="LISTENING",
+            unless=["is_closure_intent"],
+            before="set_trigger_back_to_listening",
+        )
         # 2a. Explicit user-initiated request (panchang, product, verse — bypasses all gates)
         # These represent unambiguous user signals where the user has explicitly named
         # what they want. Listening-first does not apply because the user is not venting.
@@ -362,3 +373,6 @@ class ConversationFSM:
 
     def set_trigger_listening(self, event=None):
         self._trigger_reason = "listening"
+
+    def set_trigger_back_to_listening(self, event=None):
+        self._trigger_reason = "post_guidance_listening"
