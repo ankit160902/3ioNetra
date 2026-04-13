@@ -115,6 +115,15 @@ async def lifespan(app: FastAPI):
         from services.query_logger import get_query_logger
         await get_query_logger().close()
 
+    # 4. Shut down ONNX reranker worker process pool (if active)
+    try:
+        from rag.onnx_reranker import _process_pool
+        if _process_pool is not None:
+            _process_pool.shutdown(wait=False)
+            logger.info("ONNX reranker worker pool shut down")
+    except Exception:
+        pass
+
     logger.info("👋 3ioNetra Backend Shutdown Complete.")
 
 # Initialize FastAPI app

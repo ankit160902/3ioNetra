@@ -1,6 +1,6 @@
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import datetime
 from config import settings
@@ -9,6 +9,7 @@ from services.tts_service import get_tts_service
 from services.context_validator import get_context_validator
 from pydantic import BaseModel
 from routers.dependencies import get_rag_pipeline
+from routers.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["admin"])
@@ -33,8 +34,10 @@ async def health_check():
     }
 
 @router.post("/cache/flush")
-async def flush_response_cache():
-    """Flush stale response cache entries from Redis."""
+async def flush_response_cache(user: dict = Depends(get_current_user)):
+    """Flush stale response cache entries from Redis. Requires authentication."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     from services.cache_service import get_cache_service
     cache = get_cache_service()
     count = await cache.flush_prefix("response_semantic")
@@ -74,8 +77,10 @@ async def search_scripture(
     return {"query": query, "results": results, "count": len(results)}
 
 @router.post("/embeddings/generate")
-async def generate_embeddings(text: str):
-    """Generate embeddings for text (utility endpoint)."""
+async def generate_embeddings(text: str, user: dict = Depends(get_current_user)):
+    """Generate embeddings for text (utility endpoint). Requires authentication."""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
     pipeline = get_rag_pipeline()
     if not pipeline or not pipeline.available:
         raise HTTPException(status_code=503, detail="RAG system unavailable")

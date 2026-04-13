@@ -837,15 +837,11 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
                 logger.error(f"Post-process/save failed (using raw text): {save_err}")
                 final_text = cleaned_text
 
-            # Post-generation product inference for streaming path
-            if not recommended_products:
-                try:
-                    recommended_products = await companion_engine.product_recommender.infer_from_response(
-                        session, final_text, meta.get("analysis", {}),
-                        life_domain=(session.memory.story.life_area or "unknown"),
-                    )
-                except Exception as prod_err:
-                    logger.warning(f"Post-gen product inference failed: {prod_err}")
+            # Post-generation product inference REMOVED (Apr 2026 adaptive
+            # architecture). The IntentAgent's recommend_products boolean is
+            # the single authority. Scanning the LLM response for product
+            # opportunities after the fact was the source of most product spam.
+            # Matches the non-streaming path decision.
 
             flow_meta = {
                 "detected_domain": session.memory.story.life_area,
