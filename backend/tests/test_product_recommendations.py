@@ -100,7 +100,8 @@ SCENARIOS = [
             "The constant fear of layoffs is making me physically sick",
             "Can you suggest something that might help me find peace?",
         ],
-        must_match_name=["peace", "anxiety", "antidepression", "amethyst", "rose quartz", "7 chakra"],
+        expect_products=False,
+        must_not_have_products=True,
     ),
     Scenario(
         id="A2",
@@ -113,7 +114,8 @@ SCENARIOS = [
             "I want to do something for his soul, some spiritual ritual",
             "Please suggest how I can honour his memory spiritually",
         ],
-        must_match_name=["seva", "consultation", "pind daan", "rudraksha", "rose quartz"],
+        expect_products=False,
+        must_not_have_products=True,
     ),
     Scenario(
         id="A3",
@@ -126,7 +128,8 @@ SCENARIOS = [
             "I shout at everyone and then feel terrible afterwards",
             "I need help controlling this, suggest something please",
         ],
-        must_match_name=["anger relief", "black tourmaline", "smoky quartz", "carnelian", "inner peace", "rose quartz", "rudraksha"],
+        expect_products=False,
+        must_not_have_products=True,
     ),
     Scenario(
         id="A4",
@@ -152,7 +155,8 @@ SCENARIOS = [
             "The loneliness is crushing me, I feel so sad",
             "Is there anything that can bring some peace to my heart?",
         ],
-        must_match_name=["rose quartz", "consultation", "inner peace", "7 chakra"],
+        expect_products=False,
+        must_not_have_products=True,
     ),
 
     # =========== Category B: Deity-Based ===========
