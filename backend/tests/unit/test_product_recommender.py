@@ -126,3 +126,31 @@ class TestLLMAuthority:
         analysis = {"urgency": "normal", "product_signal": _make_signal("contextual_need", [], 2)}
         result = await pr.recommend(session, "suggest something", analysis)
         assert result == []
+
+    @pytest.mark.asyncio
+    async def test_type_filter_strips_only_suffix(self):
+        """Bug #1: type_filter 'physical_only' must be normalized to 'physical'."""
+        from services.product_recommender import ProductRecommender
+        mock_service = MagicMock()
+        mock_service.search_products = AsyncMock(return_value=[
+            {"_id": "p1", "name": "Krishna Murti", "product_type": "physical"}
+        ])
+        pr = ProductRecommender(product_service=mock_service)
+        session = _make_session()
+        analysis = {
+            "urgency": "normal",
+            "product_signal": _make_signal("contextual_need", ["krishna", "murti"], 3, type_filter="physical_only"),
+        }
+
+        with patch("services.product_recommender.load_relational_profile") as mock_load, \
+             patch("services.product_recommender.update_product_interaction"):
+            mock_load.return_value = RelationalProfile()
+            result = await pr.recommend(session, "I want a Krishna murti", analysis)
+
+        # Verify search_products was called with "physical", not "physical_only"
+        mock_service.search_products.assert_called_once()
+        call_kwargs = mock_service.search_products.call_args
+        assert call_kwargs.kwargs.get("product_type") == "physical" or \
+               call_kwargs[1].get("product_type") == "physical", \
+               f"Expected product_type='physical', got {call_kwargs}"
+        assert len(result) == 1

@@ -149,7 +149,8 @@ class ProductRecommender:
         # Step 3: Search and return
         keywords = signal.get("search_keywords", [])
         max_results = signal.get("max_results", 3)
-        type_filter = signal.get("type_filter", "any")
+        type_filter_raw = signal.get("type_filter", "any")
+        type_filter = "any" if type_filter_raw == "any" else type_filter_raw.replace("_only", "")
 
         if not keywords:
             return []
