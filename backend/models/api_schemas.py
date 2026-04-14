@@ -293,3 +293,12 @@ class ProfileResetRequest(BaseModel):
 
 class ProfileResetResponse(BaseModel):
     reset: bool
+
+
+class ProductInteractionRequest(BaseModel):
+    """Track user engagement with recommended products."""
+    session_id: str
+    product_id: str
+    product_name: str = ""
+    action: str = Field(..., pattern="^(click|dismiss|visit)$")
+    position: int = Field(default=1, ge=1, le=10)

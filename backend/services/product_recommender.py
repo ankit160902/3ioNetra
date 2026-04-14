@@ -68,7 +68,39 @@ class ProductRecommender:
     """Handles all product recommendation logic.
 
     Depends on: ProductService (via port injection).
+
+    Uses a hybrid authority model:
+    - LLM decides WHEN to show products (product_signal.intent)
+    - Purpose-built code refines WHAT to search for (catalog-aligned keywords)
     """
+
+    # Small lookup: practice name → product search terms
+    _PRACTICE_SEARCH_TERMS = {
+        "japa": ["mala", "rudraksha"],
+        "puja": ["thali", "diya", "incense", "puja box"],
+        "meditation": ["incense", "bracelet", "mala"],
+        "havan": ["ghee", "havan", "samagri"],
+        "aarti": ["diya", "deep", "bell", "aarti"],
+        "abhishek": ["kalash", "puja thali"],
+        "yoga": ["bracelet", "mala"],
+    }
+
+    # Nouns that appear in product names — used to extract
+    # catalog-aligned terms from natural language messages.
+    _PRODUCT_NOUNS = frozenset({
+        "murti", "idol", "mala", "bracelet", "yantra", "frame", "lamp",
+        "thali", "diya", "deep", "incense", "agarbatti", "dhoop",
+        "rudraksha", "crystal", "stone", "book", "chalisa", "photo",
+        "bell", "kalash", "box", "combo", "chain", "pendant",
+    })
+
+    # Known deity names for extraction from messages/history
+    _DEITY_NAMES = frozenset({
+        "krishna", "shiva", "hanuman", "ganesh", "ganesha", "lakshmi",
+        "durga", "saraswati", "rama", "ram", "vishnu", "kali",
+        "parvati", "radha", "sita", "surya", "shrinathji", "balaji",
+        "mahadev", "bajrangbali", "hanumanji", "ganapati",
+    })
 
     def __init__(self, product_service):
         self.product_service = product_service
@@ -123,17 +155,37 @@ class ProductRecommender:
 
         # Step 2: Trust the LLM
         if intent == "negative":
+            # Record rejection on session (drives cooldown + 2-rejection auto-opt-out)
+            session.product_rejection_count += 1
+            session.product_rejection_turn = session.turn_count
+
+            # Widened hard-phrase detection (English + Hindi/Hinglish natural language).
+            # Two triggers auto-opt-out: (a) any hard phrase, (b) 2+ rejections in session.
+            _hard_phrases = {
+                # Original explicit phrases
+                "stop suggesting products", "stop recommending",
+                "no more products", "don't show products",
+                "dont show products", "i hate your products",
+                # English natural language
+                "not interested in products", "don't need products",
+                "dont need products", "no thanks", "no thank you",
+                "please stop", "stop showing", "don't want products",
+                "dont want products", "enough products",
+                # Hindi / Hinglish
+                "nahi chahiye", "band karo", "mat dikhao",
+                "product nahi chahiye", "bas karo",
+            }
+            msg_lower = message.lower()
+            hard_phrase_hit = any(p in msg_lower for p in _hard_phrases)
+            auto_opt_out = hard_phrase_hit or session.product_rejection_count >= 2
+
+            if auto_opt_out:
+                session.user_dismissed_products = True
+
             if user_id:
                 try:
-                    set_fields = {
-                        "product_last_rejected_at": datetime.utcnow().isoformat(),
-                    }
-                    _hard_phrases = {
-                        "stop suggesting products", "stop recommending",
-                        "no more products", "don't show products",
-                        "dont show products", "i hate your products",
-                    }
-                    if any(p in message.lower() for p in _hard_phrases):
+                    set_fields = {"product_last_rejected_at": datetime.utcnow().isoformat()}
+                    if auto_opt_out:
                         set_fields["product_preference"] = "opted_out"
                     await update_product_interaction(
                         user_id, set_fields,
@@ -141,72 +193,134 @@ class ProductRecommender:
                     )
                 except Exception as e:
                     logger.warning(f"Failed to update rejection: {e}")
+
+            logger.info(
+                f"REJECTION session={session.session_id} count={session.product_rejection_count} "
+                f"hard_phrase={hard_phrase_hit} opted_out={auto_opt_out}"
+            )
             return []
 
         if intent == "none":
             return []
 
+        # Session-level hard kill: respect prior opt-out
+        if session.user_dismissed_products and intent != "explicit_search":
+            logger.info(f"Session {session.session_id} opted out locally — suppressing")
+            return []
+
+        # Session cap: max 3 proactive/contextual products per session.
+        # Explicit searches bypass (user is actively asking — respect that).
+        PROACTIVE_SESSION_CAP = 3
+        if intent != "explicit_search" and session.product_event_count >= PROACTIVE_SESSION_CAP:
+            logger.info(
+                f"Session {session.session_id} hit proactive cap "
+                f"({session.product_event_count}/{PROACTIVE_SESSION_CAP}) — suppressing"
+            )
+            return []
+
+        # Cooldown: no back-to-back proactive products (min 2-turn gap).
+        # Explicit searches bypass.
+        COOLDOWN_TURNS = 2
+        if intent != "explicit_search" and session.last_proactive_product_turn >= 0:
+            turns_since = session.turn_count - session.last_proactive_product_turn
+            if turns_since < COOLDOWN_TURNS:
+                logger.info(
+                    f"Session {session.session_id} in cooldown "
+                    f"(last={session.last_proactive_product_turn}, now={session.turn_count}) — suppressing"
+                )
+                return []
+
         # Step 3: Search and return
-        keywords = signal.get("search_keywords", [])
+        llm_keywords = signal.get("search_keywords", [])
         max_results = signal.get("max_results", 3)
         type_filter_raw = signal.get("type_filter", "any")
         type_filter = "any" if type_filter_raw == "any" else type_filter_raw.replace("_only", "")
 
-        if not keywords:
+        if not llm_keywords:
             return []
 
-        try:
-            products = await self.product_service.search_products(
-                query_text=" ".join(keywords),
-                limit=max_results + 2,
-                product_type=type_filter if type_filter != "any" else None,
-            )
-        except Exception as e:
-            logger.warning(f"Product search failed: {e}")
-            return []
+        # Refine LLM keywords into catalog-aligned search terms
+        deity = self._extract_deity(analysis, session, message)
+        practices = self._extract_practices(message, session)
+        refined = self._refine_keywords(llm_keywords, message, deity, practices)
 
-        if len(products) < max_results:
+        logger.info(f"KEYWORD_REFINE llm={llm_keywords} → refined={refined} deity={deity} practices={practices}")
+
+        _emotion = analysis.get("emotion")
+        products = []
+
+        # Deity-first strategy: only when deity is the PRIMARY ask
+        # (deity mentioned in the current message, not just in conversation
+        # history). This prevents japa/puja queries from pulling deity
+        # products when a deity was mentioned earlier in the conversation.
+        _deity_in_current_msg = deity and deity in message.lower()
+
+        if _deity_in_current_msg:
+            # Deity IS the primary ask → metadata-first (guarantees deity products)
             try:
-                _life_domain = analysis.get("life_domain")
-                _emotion = analysis.get("emotion")
-                _entities = analysis.get("entities") or {}
-
-                # Extract practices from entities and search keywords
-                _practices = []
-                for key in ("ritual", "item", "practice"):
-                    val = _entities.get(key)
-                    if val:
-                        _practices.extend(val if isinstance(val, list) else [val])
-                _practice_terms = {"puja", "japa", "meditation", "yoga", "mantra", "aarti",
-                                   "abhishekam", "havan", "yagna", "pranayama", "dhyana"}
-                for kw in keywords:
-                    if kw.lower() in _practice_terms:
-                        _practices.append(kw.lower())
-                _practices = list(set(_practices)) or None
-
-                meta_products = await self.product_service.search_by_metadata(
-                    life_domains=[_life_domain] if _life_domain and _life_domain != "unknown" else None,
+                products = await self.product_service.search_by_metadata(
+                    deities=[deity],
+                    practices=practices if practices else None,
                     emotions=[_emotion] if _emotion and _emotion not in ("neutral", "unknown") else None,
-                    deities=_entities.get("deity") if isinstance(_entities.get("deity"), list) else (
-                        [_entities["deity"]] if _entities.get("deity") else None
-                    ),
-                    practices=_practices,
-                    limit=max_results - len(products),
+                    limit=max_results + 2,
                 )
-                seen_ids = {str(p.get("_id", "")) for p in products}
-                for mp in meta_products:
-                    if str(mp.get("_id", "")) not in seen_ids:
-                        products.append(mp)
             except Exception as e:
-                logger.warning(f"Metadata search failed: {e}")
+                logger.warning(f"Deity metadata search failed: {e}")
 
-        logger.info(f"PRODUCT_SEARCH_RESULT pre_filter={len(products)} keywords={keywords}")
+            if len(products) < max_results:
+                try:
+                    text_products = await self.product_service.search_products(
+                        query_text=" ".join(refined),
+                        limit=max_results + 2,
+                        product_type=type_filter if type_filter != "any" else None,
+                    )
+                    seen_ids = {str(p.get("_id", "")) for p in products}
+                    for tp in text_products:
+                        if str(tp.get("_id", "")) not in seen_ids and len(products) < max_results + 2:
+                            products.append(tp)
+                except Exception as e:
+                    logger.warning(f"Text search supplement failed: {e}")
+        else:
+            # No deity → text-first strategy (original behavior)
+            try:
+                products = await self.product_service.search_products(
+                    query_text=" ".join(refined),
+                    limit=max_results + 2,
+                    product_type=type_filter if type_filter != "any" else None,
+                )
+            except Exception as e:
+                logger.warning(f"Product search failed: {e}")
+                return []
+
+            # Metadata fallback (includes deity from history for boosting)
+            if len(products) < max_results:
+                try:
+                    meta_products = await self.product_service.search_by_metadata(
+                        deities=[deity] if deity else None,
+                        practices=practices if practices else None,
+                        emotions=[_emotion] if _emotion and _emotion not in ("neutral", "unknown") else None,
+                        limit=max_results - len(products),
+                    )
+                    seen_ids = {str(p.get("_id", "")) for p in products}
+                    for mp in meta_products:
+                        if str(mp.get("_id", "")) not in seen_ids:
+                            products.append(mp)
+                except Exception as e:
+                    logger.warning(f"Metadata search failed: {e}")
+
+        logger.info(f"PRODUCT_SEARCH_RESULT pre_filter={len(products)} refined={refined} llm={llm_keywords}")
 
         products = self._filter_shown(session, products)
         products = products[:max_results]
 
         if products:
             self._record_shown(session, products)
+            # Session-level throttling bookkeeping
+            if intent != "explicit_search":
+                session.product_event_count += 1
+                session.last_proactive_product_turn = session.turn_count
+            else:
+                session.explicit_product_count += 1
             if user_id:
                 try:
                     await update_product_interaction(
@@ -218,6 +332,102 @@ class ProductRecommender:
                     logger.warning(f"Failed to update product shown: {e}")
 
         return products
+
+    # ------------------------------------------------------------------
+    # Internal: keyword refinement (hybrid authority)
+    # ------------------------------------------------------------------
+
+    def _refine_keywords(
+        self, llm_keywords: List[str], message: str,
+        deity: str, practices: List[str],
+    ) -> List[str]:
+        """Refine LLM-generated keywords into catalog-aligned search terms.
+
+        The LLM decides WHEN to show products. This method improves WHAT
+        we search for by extracting deity names, practice-specific product
+        terms, and product-type nouns that match actual catalog names.
+        """
+        refined: List[str] = []
+
+        # 1. Deity name (strongest signal for product name matching)
+        if deity:
+            refined.append(deity)
+
+        # 2. Practice → product search terms
+        for practice in practices:
+            for term in self._PRACTICE_SEARCH_TERMS.get(practice, []):
+                if term not in refined:
+                    refined.append(term)
+
+        # 3. Product-type nouns from the user's message
+        msg_words = set(message.lower().split())
+        for noun in msg_words & self._PRODUCT_NOUNS:
+            if noun not in refined:
+                refined.append(noun)
+
+        # 4. Keep short LLM keywords (≤2 words) that align with catalog
+        for kw in llm_keywords:
+            if len(kw.split()) <= 2 and kw.lower() not in refined:
+                refined.append(kw.lower())
+
+        # Dedup preserving order, cap at 8
+        seen = set()
+        unique = []
+        for term in refined:
+            if term not in seen:
+                seen.add(term)
+                unique.append(term)
+        return unique[:8] if unique else [kw.split()[0] for kw in llm_keywords[:3]]
+
+    def _extract_deity(self, analysis: Dict, session: SessionState, message: str) -> str:
+        """Extract the primary deity from analysis entities, message, or history."""
+        # From IntentAgent entities
+        entities = analysis.get("entities") or {}
+        deity_val = entities.get("deity", "")
+        if isinstance(deity_val, list) and deity_val:
+            deity_val = deity_val[0]
+        if deity_val and deity_val.lower() in self._DEITY_NAMES:
+            return deity_val.lower()
+
+        # From user's message
+        msg_words = set(message.lower().split())
+        for d in self._DEITY_NAMES:
+            if d in msg_words:
+                return d
+
+        # From conversation history (last 6 messages)
+        for msg in reversed((session.conversation_history or [])[-6:]):
+            words = set(msg.get("content", "").lower().split())
+            for d in self._DEITY_NAMES:
+                if d in words:
+                    return d
+
+        # From user profile
+        preferred = getattr(session.memory, "preferred_deity", "") or ""
+        if preferred.lower() in self._DEITY_NAMES:
+            return preferred.lower()
+
+        return ""
+
+    def _extract_practices(self, message: str, session: SessionState) -> List[str]:
+        """Extract practice names from message and recent history."""
+        practices = set()
+        practice_names = set(self._PRACTICE_SEARCH_TERMS.keys())
+
+        # From current message
+        msg_lower = message.lower()
+        for practice in practice_names:
+            if practice in msg_lower:
+                practices.add(practice)
+
+        # From recent conversation history
+        for msg in (session.conversation_history or [])[-6:]:
+            text = msg.get("content", "").lower()
+            for practice in practice_names:
+                if practice in text:
+                    practices.add(practice)
+
+        return list(practices)
 
     # ------------------------------------------------------------------
     # Internal: session dedup

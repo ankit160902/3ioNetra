@@ -115,11 +115,19 @@ class IntentAgent:
        bar than a new user.
 
        product_signal output rules:
-       - "explicit_search": user asks to buy, find, or get product recommendations. ALWAYS use this when user says "buy", "purchase", "where can I get", "recommend items/products", "I need [item] for [practice]". confidence 0.8-1.0, max_results 3-5. search_keywords MUST contain specific product terms (e.g. ["rudraksha mala", "mala"] or ["puja thali", "diya", "incense"]).
-       - "contextual_need": the conversation has naturally reached a point where a product genuinely helps and the user has expressed readiness (e.g. "I want to start doing japa daily" after several turns of discussion). confidence 0.5-0.7, max_results 1-2.
+       - "explicit_search": user asks to buy, find, or get product recommendations. ALWAYS use this when user says "buy", "purchase", "where can I get", "recommend items/products", "I need [item] for [practice]", "suggest products", "product batao", "kuch chahiye [practice] ke liye", "khareedna hai", "order karna hai". confidence 0.8-1.0, max_results 3-5. search_keywords MUST contain specific product terms (e.g. ["rudraksha mala", "mala"] or ["puja thali", "diya", "incense"]).
+       - "contextual_need": the conversation has naturally reached a point where a product genuinely helps and the user has expressed readiness (e.g. "I want to start doing japa daily" after several turns of discussion, or "kuch suggest karo jo help kare", "kuch batao jo kaam aaye", "kuch chahiye stress ke liye"). confidence 0.5-0.7, max_results 1-2.
        - "casual_mention": products tangentially relevant but not the user's ask. confidence 0.2-0.4, max_results 1.
        - "negative": user rejects or criticizes products. confidence 0.8-1.0, max_results 0.
        - "none": DEFAULT. No product interest detected. This includes emotional sharing, advice-seeking, scripture questions, greetings, closures, and any turn where recommending would feel forced. confidence 0.0, max_results 0.
+
+       TURN-AWARENESS: Check the context for turn count. When a user has been
+       sharing for 3+ turns and explicitly asks for suggestions ("suggest
+       something", "is there anything", "what can help", "kuch suggest karo"),
+       consider "contextual_need" with max_results=1-2 even if the context is
+       emotional. By turn 3+, the user has been heard and is now seeking
+       actionable help. This does NOT apply to pure venting without an
+       explicit ask for suggestions.
 
        TYPE FILTER RULES:
        - "physical_only": User asks for objects/items (murti, mala, diya, incense)
@@ -461,7 +469,11 @@ class IntentAgent:
         )
 
         # Product signal — minimal fallback (LLM handles the real logic)
-        _buy_words = {"buy", "purchase", "order", "shop", "shopping", "price", "cost"}
+        _buy_words = {
+            "buy", "purchase", "order", "shop", "shopping", "price", "cost",
+            "khareed", "khareedna", "kharidna", "mangwa", "mangwao",
+            "product", "products", "chahiye",
+        }
         _reject_phrases = {"stop suggesting products", "stop recommending", "no more products",
                           "don't show products", "dont show products"}
         msg_lower = message.lower()

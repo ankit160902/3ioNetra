@@ -51,6 +51,34 @@ async def readiness_check():
     return {"status": "ready"}
 
 # ----------------------------------------------------------------------------
+# PRODUCT ANALYTICS
+# ----------------------------------------------------------------------------
+
+@router.get("/product-analytics")
+async def product_analytics():
+    """Product recommendation quality metrics."""
+    from services.auth_service import get_mongo_client
+    db = get_mongo_client()
+    if db is None:
+        return {"error": "Database unavailable"}
+    try:
+        import asyncio
+        total_shown = await asyncio.to_thread(db.product_interactions.count_documents, {"action": "click"})
+        total_clicks = await asyncio.to_thread(db.product_interactions.count_documents, {"action": "click"})
+        total_dismissals = await asyncio.to_thread(db.product_interactions.count_documents, {"action": "dismiss"})
+        total_visits = await asyncio.to_thread(db.product_interactions.count_documents, {"action": "visit"})
+        total_all = total_clicks + total_dismissals + total_visits
+        return {
+            "total_interactions": total_all,
+            "clicks": total_clicks,
+            "dismissals": total_dismissals,
+            "visits": total_visits,
+            "click_rate": round(total_clicks / max(total_all, 1), 3),
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+# ----------------------------------------------------------------------------
 # UTILITY ENDPOINTS
 # ----------------------------------------------------------------------------
 

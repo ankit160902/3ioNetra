@@ -217,7 +217,7 @@ class Settings(BaseSettings):
     MIN_SIGNALS_THRESHOLD: int = 2
     MIN_CLARIFICATION_TURNS: int = 1
     MAX_CLARIFICATION_TURNS: int = 4
-    SESSION_TTL_MINUTES: int = 60
+    SESSION_TTL_MINUTES: int = 120  # 2hr — prevents mid-conversation expiry on user pauses
     READINESS_POST_GUIDANCE: float = 0.3   # readiness reset after guidance phase
 
     # FSM thresholds — promoted from conversation_fsm.py module constants so

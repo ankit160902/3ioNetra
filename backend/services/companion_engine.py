@@ -123,6 +123,8 @@ class CompanionEngine:
         context_with_products = memory_summary
         if product_context:
             context_with_products += "\n" + product_context
+        # Turn count helps the IntentAgent make turn-aware product decisions
+        context_with_products += f"\n[Turn {session.turn_count}. Products shown this session: {len(session.shown_product_ids)}]"
 
         # 🚀 Parallel Task Execution: Intent Analysis + Memory Retrieval
         user_id = getattr(session, 'user_id', None) or getattr(session.memory, 'user_id', None)
@@ -240,6 +242,7 @@ class CompanionEngine:
         context_with_products = memory_summary
         if product_context:
             context_with_products += "\n" + product_context
+        context_with_products += f"\n[Turn {session.turn_count}. Products shown this session: {len(session.shown_product_ids)}]"
 
         _t_intent_start = time.perf_counter()
         analysis = await self.intent_agent.analyze_intent(

@@ -232,6 +232,20 @@ async def _get_or_create_session(
                 logger.error(f"Session restoration failed: {e}")
 
         if not session:
+            # Session_id was provided by client but we couldn't find or restore it.
+            # For authenticated users, signal 410 Gone so the frontend can create
+            # a fresh session gracefully instead of pretending the old one exists.
+            # Anonymous users get silent recreation (their state was never persisted).
+            if user:
+                logger.warning(
+                    f"Session {query.session_id} not found and restoration failed "
+                    f"for user {user.get('id')}. Returning 410."
+                )
+                raise HTTPException(
+                    status_code=410,
+                    detail={"error": "session_expired", "message": "Your session has expired. Please start a fresh conversation."},
+                )
+            # Anonymous user: silently recreate
             session = await session_manager.create_session(
                 min_signals=settings.MIN_SIGNALS_THRESHOLD,
                 min_turns=settings.MIN_CLARIFICATION_TURNS,
@@ -916,6 +930,39 @@ async def submit_feedback(request: FeedbackRequest, user: Optional[dict] = Depen
     except Exception as e:
         logger.error(f"Error saving feedback: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ----------------------------------------------------------------------------
+# PRODUCT INTERACTION TRACKING
+# ----------------------------------------------------------------------------
+
+@router.post("/product/interaction")
+async def track_product_interaction(
+    request: dict,
+    user: Optional[dict] = Depends(get_current_user),
+):
+    """Track user engagement with recommended products (click/dismiss/visit)."""
+    try:
+        from services.auth_service import get_mongo_client
+        db = get_mongo_client()
+        if db is None:
+            return {"message": "Tracking skipped — database unavailable"}
+        await asyncio.to_thread(
+            db.product_interactions.insert_one,
+            {
+                "user_id": user.get("id") if user else None,
+                "session_id": request.get("session_id", ""),
+                "product_id": request.get("product_id", ""),
+                "product_name": request.get("product_name", ""),
+                "action": request.get("action", "click"),
+                "position": request.get("position", 1),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+        return {"message": "Interaction tracked"}
+    except Exception as e:
+        logger.warning(f"Product interaction tracking failed: {e}")
+        return {"message": "Tracking failed"}
+
 
 # ----------------------------------------------------------------------------
 # USER HISTORY ENDPOINTS

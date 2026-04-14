@@ -59,13 +59,23 @@ export function useAuth() {
             return;
           }
 
-          // Verify token with backend (cookie sent automatically via credentials)
-          const response = await fetch(`${API_URL}/api/auth/verify`, {
+          // Verify token with backend (with one retry to absorb transient network blips)
+          const callVerify = () => fetch(`${API_URL}/api/auth/verify`, {
             credentials: 'include',  // Fix 4: httpOnly cookie auth
             headers: {
               'Authorization': `Bearer ${storedToken}`,  // Backwards compat header
             },
           });
+
+          let response = await callVerify();
+
+          // If first call returned 401, retry once after 1s. A transient
+          // Redis/network hiccup during a verify shouldn't force a full logout.
+          if (response.status === 401) {
+            console.warn('Auth verify returned 401 — retrying once...');
+            await new Promise(r => setTimeout(r, 1000));
+            response = await callVerify();
+          }
 
           if (response.ok) {
             const data = await response.json();
@@ -79,8 +89,8 @@ export function useAuth() {
               isLoading: false,
             });
           } else if (response.status === 401) {
-            // Token definitely invalid, clear storage
-            console.warn('Auth token expired or invalid (401)');
+            // Token definitely invalid (failed twice), clear storage
+            console.warn('Auth token expired or invalid (401 after retry)');
             localStorage.removeItem('auth_token');
             localStorage.removeItem('auth_user');
             setAuthState({
