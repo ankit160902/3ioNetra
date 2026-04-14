@@ -154,3 +154,64 @@ class TestLLMAuthority:
                call_kwargs[1].get("product_type") == "physical", \
                f"Expected product_type='physical', got {call_kwargs}"
         assert len(result) == 1
+
+
+class TestMetadataFallback:
+
+    @pytest.mark.asyncio
+    async def test_practices_passed_to_metadata_fallback(self):
+        """Bug #2: practices from entities must be passed to search_by_metadata."""
+        from services.product_recommender import ProductRecommender
+        mock_service = MagicMock()
+        mock_service.search_products = AsyncMock(return_value=[])
+        mock_service.search_by_metadata = AsyncMock(return_value=[
+            {"_id": "p1", "name": "Puja Thali Set", "product_type": "physical"}
+        ])
+        pr = ProductRecommender(product_service=mock_service)
+        session = _make_session()
+        analysis = {
+            "urgency": "normal",
+            "life_domain": "spiritual",
+            "emotion": "neutral",
+            "entities": {"ritual": "puja", "deity": "Ganesh"},
+            "product_signal": _make_signal("contextual_need", ["puja", "thali"], 3),
+        }
+
+        with patch("services.product_recommender.load_relational_profile") as mock_load, \
+             patch("services.product_recommender.update_product_interaction"):
+            mock_load.return_value = RelationalProfile()
+            result = await pr.recommend(session, "I need puja items for Ganesh puja", analysis)
+
+        mock_service.search_by_metadata.assert_called_once()
+        call_kwargs = mock_service.search_by_metadata.call_args[1]
+        assert call_kwargs.get("practices") is not None, \
+            f"practices not passed to search_by_metadata. Got kwargs: {call_kwargs}"
+        assert "puja" in call_kwargs["practices"], \
+            f"Expected 'puja' in practices, got {call_kwargs['practices']}"
+
+    @pytest.mark.asyncio
+    async def test_practice_terms_extracted_from_keywords(self):
+        """Bug #2: practice terms in search_keywords should also be passed."""
+        from services.product_recommender import ProductRecommender
+        mock_service = MagicMock()
+        mock_service.search_products = AsyncMock(return_value=[])
+        mock_service.search_by_metadata = AsyncMock(return_value=[])
+        pr = ProductRecommender(product_service=mock_service)
+        session = _make_session()
+        analysis = {
+            "urgency": "normal",
+            "life_domain": "spiritual",
+            "emotion": "neutral",
+            "entities": {},
+            "product_signal": _make_signal("contextual_need", ["meditation", "cushion"], 3),
+        }
+
+        with patch("services.product_recommender.load_relational_profile") as mock_load, \
+             patch("services.product_recommender.update_product_interaction"):
+            mock_load.return_value = RelationalProfile()
+            await pr.recommend(session, "I need something for meditation", analysis)
+
+        mock_service.search_by_metadata.assert_called_once()
+        call_kwargs = mock_service.search_by_metadata.call_args[1]
+        assert call_kwargs.get("practices") is not None
+        assert "meditation" in call_kwargs["practices"]

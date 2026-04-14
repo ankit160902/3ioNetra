@@ -167,18 +167,30 @@ class ProductRecommender:
 
         if len(products) < max_results:
             try:
-                # Use semantic fields from the analysis for metadata search
-                # (life_domain, emotion, entities) rather than product-name
-                # keywords which don't match the practices/deities arrays.
                 _life_domain = analysis.get("life_domain")
                 _emotion = analysis.get("emotion")
                 _entities = analysis.get("entities") or {}
+
+                # Extract practices from entities and search keywords
+                _practices = []
+                for key in ("ritual", "item", "practice"):
+                    val = _entities.get(key)
+                    if val:
+                        _practices.extend(val if isinstance(val, list) else [val])
+                _practice_terms = {"puja", "japa", "meditation", "yoga", "mantra", "aarti",
+                                   "abhishekam", "havan", "yagna", "pranayama", "dhyana"}
+                for kw in keywords:
+                    if kw.lower() in _practice_terms:
+                        _practices.append(kw.lower())
+                _practices = list(set(_practices)) or None
+
                 meta_products = await self.product_service.search_by_metadata(
                     life_domains=[_life_domain] if _life_domain and _life_domain != "unknown" else None,
                     emotions=[_emotion] if _emotion and _emotion not in ("neutral", "unknown") else None,
                     deities=_entities.get("deity") if isinstance(_entities.get("deity"), list) else (
                         [_entities["deity"]] if _entities.get("deity") else None
                     ),
+                    practices=_practices,
                     limit=max_results - len(products),
                 )
                 seen_ids = {str(p.get("_id", "")) for p in products}
