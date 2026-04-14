@@ -79,6 +79,12 @@ temp/
 *.tmp
 *.bak
 
+# Test outputs (JSON results + per-suite result directories)
+test-reports/
+tests/*_results.json
+tests/test_results_*.json
+tests/*_results/
+
 # Audio files (optional - uncomment if needed)
 # *.wav
 # *.mp3
