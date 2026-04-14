@@ -226,7 +226,7 @@ class RedisSessionManager(SessionManager):
             session_dict = json.loads(data)
             return SessionState.from_dict(session_dict)
         except Exception as e:
-            logger.error(f"Redis get_session error: {e}")
+            logger.error(f"Redis get_session error for {session_id}: {type(e).__name__}: {e}")
             return None
 
     async def update_session(self, session: SessionState) -> None:
@@ -242,7 +242,8 @@ class RedisSessionManager(SessionManager):
                 json.dumps(data)
             )
         except Exception as e:
-            logger.error(f"Redis update_session error: {e}")
+            logger.error(f"Redis update_session error for {session.session_id}: {e}")
+            raise
 
     async def delete_session(self, session_id: str) -> None:
         try:
