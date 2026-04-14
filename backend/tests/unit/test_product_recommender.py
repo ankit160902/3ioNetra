@@ -215,3 +215,19 @@ class TestMetadataFallback:
         call_kwargs = mock_service.search_by_metadata.call_args[1]
         assert call_kwargs.get("practices") is not None
         assert "meditation" in call_kwargs["practices"]
+
+
+class TestSessionSerialization:
+
+    def test_suggested_verses_survives_round_trip(self):
+        """Bug #4: suggested_verses must be in to_dict/from_dict."""
+        session = _make_session()
+        session.suggested_verses = [
+            {"turn": 1, "mantras": ["Om Namah Shivaya"], "references": ["BG 2.47"]}
+        ]
+        data = session.to_dict()
+        assert "suggested_verses" in data, "suggested_verses missing from to_dict()"
+
+        restored = SessionState.from_dict(data)
+        assert restored.suggested_verses == session.suggested_verses, \
+            f"suggested_verses lost in round-trip: {restored.suggested_verses}"

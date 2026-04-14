@@ -156,6 +156,7 @@ class SessionState:
             "crisis_resolved": self.crisis_resolved,
             "last_suggestions": self.last_suggestions,
             "readiness_trigger": self.readiness_trigger,
+            "suggested_verses": self.suggested_verses,
             "memory": self.memory.to_dict() if self.memory else None
         }
 
@@ -196,6 +197,7 @@ class SessionState:
             crisis_resolved=data.get("crisis_resolved", False),
             last_suggestions=data.get("last_suggestions", []),
             readiness_trigger=data.get("readiness_trigger", "listening"),
+            suggested_verses=data.get("suggested_verses", []),
             memory=ConversationMemory.from_dict(data.get("memory", {}))
         )
         return session
