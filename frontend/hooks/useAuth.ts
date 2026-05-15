@@ -42,93 +42,23 @@ export function useAuth() {
   });
   const [error, setError] = useState<string | null>(null);
 
-  // Check for existing session on mount
+  // Check for existing session on mount — httpOnly cookie handles auth;
+  // only auth_user (non-sensitive profile) is persisted in localStorage.
   useEffect(() => {
-    const checkAuth = async () => {
-      const storedToken = localStorage.getItem('auth_token');
+    const checkAuth = () => {
       const storedUser = localStorage.getItem('auth_user');
-
-      if (storedToken && storedUser) {
+      if (storedUser) {
         try {
-          // Skip verify if token was recently validated (within 5 minutes)
-          const lastVerified = localStorage.getItem('auth_last_verified');
-          const VERIFY_INTERVAL_MS = 5 * 60 * 1000;
-          if (lastVerified && Date.now() - parseInt(lastVerified) < VERIFY_INTERVAL_MS) {
-            const user = JSON.parse(storedUser);
-            setAuthState({ user, token: storedToken, isAuthenticated: true, isLoading: false });
-            return;
-          }
-
-          // Verify token with backend (with one retry to absorb transient network blips)
-          const callVerify = () => fetch(`${API_URL}/api/auth/verify`, {
-            credentials: 'include',  // Fix 4: httpOnly cookie auth
-            headers: {
-              'Authorization': `Bearer ${storedToken}`,  // Backwards compat header
-            },
-          });
-
-          let response = await callVerify();
-
-          // If first call returned 401, retry once after 1s. A transient
-          // Redis/network hiccup during a verify shouldn't force a full logout.
-          if (response.status === 401) {
-            console.warn('Auth verify returned 401 — retrying once...');
-            await new Promise(r => setTimeout(r, 1000));
-            response = await callVerify();
-          }
-
-          if (response.ok) {
-            const data = await response.json();
-            // Update stored user with latest from server
-            localStorage.setItem('auth_user', JSON.stringify(data.user));
-            localStorage.setItem('auth_last_verified', Date.now().toString());
-            setAuthState({
-              user: data.user,
-              token: storedToken,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-          } else if (response.status === 401) {
-            // Token definitely invalid (failed twice), clear storage
-            console.warn('Auth token expired or invalid (401 after retry)');
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('auth_user');
-            setAuthState({
-              user: null,
-              token: null,
-              isAuthenticated: false,
-              isLoading: false,
-            });
-          } else {
-            // Transient error (500, 502, 503, 504) or unexpected 404
-            // Do NOT logout user immediately for non-401 errors
-            console.error(`Auth verification failed with status ${response.status}. Mismatch in deployment?`);
-            const user = JSON.parse(storedUser);
-            setAuthState({
-              user,
-              token: storedToken,
-              isAuthenticated: true,
-              isLoading: false,
-            });
-          }
-        } catch (error) {
-          console.error('Auth verification network error:', error);
-          // Network error, assume offline/transient - use stored data
           const user = JSON.parse(storedUser);
-          setAuthState({
-            user,
-            token: storedToken,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          // Trust the httpOnly cookie to handle actual auth validation.
+          // If the cookie has expired the next API call will return 401.
+          setAuthState({ user, token: null, isAuthenticated: true, isLoading: false });
+        } catch {
+          localStorage.removeItem('auth_user');
+          setAuthState({ user: null, token: null, isAuthenticated: false, isLoading: false });
         }
       } else {
-        setAuthState({
-          user: null,
-          token: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
+        setAuthState({ user: null, token: null, isAuthenticated: false, isLoading: false });
       }
     };
 
@@ -161,13 +91,12 @@ export function useAuth() {
         return false;
       }
 
-      // Store auth data (token in cookie via Set-Cookie, user in localStorage for display)
-      localStorage.setItem('auth_token', data.token);  // Keep for backwards compat header fallback
+      // Cookie is set by Set-Cookie header (httpOnly). Store only non-sensitive profile.
       localStorage.setItem('auth_user', JSON.stringify(data.user));
 
       setAuthState({
         user: data.user,
-        token: data.token,
+        token: data.token,  // in-memory only for current session; not persisted to localStorage
         isAuthenticated: true,
         isLoading: false,
       });
@@ -220,13 +149,11 @@ export function useAuth() {
         return false;
       }
 
-      // Store auth data
-      localStorage.setItem('auth_token', data.token);
       localStorage.setItem('auth_user', JSON.stringify(data.user));
 
       setAuthState({
         user: data.user,
-        token: data.token,
+        token: data.token,  // in-memory only for current session
         isAuthenticated: true,
         isLoading: false,
       });
@@ -248,9 +175,7 @@ export function useAuth() {
       headers: authState.token ? { 'Authorization': `Bearer ${authState.token}` } : {},
     }).catch(() => {}); // Ignore errors — local state is cleared regardless
 
-    localStorage.removeItem('auth_token');
     localStorage.removeItem('auth_user');
-    localStorage.removeItem('auth_last_verified');
     setAuthState({
       user: null,
       token: null,

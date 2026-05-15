@@ -136,7 +136,7 @@ class SessionState:
             "phase": self.phase.value,
             "turn_count": self.turn_count,
             "signals_collected": {st.value: s.to_dict() for st, s in self.signals_collected.items()},
-            "conversation_history": self.conversation_history,
+            "conversation_history": self.conversation_history[-30:],
             "created_at": self.created_at.isoformat(),
             "last_activity": self.last_activity.isoformat(),
             "min_signals_threshold": self.min_signals_threshold,

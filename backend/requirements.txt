@@ -4,6 +4,7 @@ uvicorn[standard]
 pydantic
 pydantic-settings
 pymongo
+motor>=3.3.0
 
 # LLM
 google-genai==1.61.0

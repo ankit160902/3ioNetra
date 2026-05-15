@@ -397,6 +397,9 @@ export default function Home() {
         const data = await res.json();
         const conversations = Array.isArray(data.conversations) ? data.conversations : [];
         setHistory(conversations);
+      } else if (res.status === 401) {
+        localStorage.removeItem('auth_user');
+        logout();
       }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') console.error('Failed to fetch history:', error);
@@ -438,6 +441,7 @@ export default function Home() {
           'Content-Type': 'application/json',
           ...getAuthHeader(),
         },
+        credentials: 'include',
         body: JSON.stringify({
           conversation_id: convId,
           title,

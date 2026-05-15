@@ -119,6 +119,51 @@ def close_mongo_client():
         _mongo_client.close()
         _mongo_client = None
         _db = None
+    close_motor_client()
+
+
+# Lazy motor client — used for async operations in ConversationStorage
+_motor_client = None
+_motor_db = None
+
+
+def get_motor_db():
+    """Return async motor database handle. Created lazily on first call."""
+    global _motor_client, _motor_db
+    if _motor_db is not None:
+        return _motor_db
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        mongo_uri = settings.MONGODB_URI
+        if not mongo_uri:
+            return None
+        if settings.DATABASE_PASSWORD:
+            mongo_uri = mongo_uri.replace("<db_password>", settings.DATABASE_PASSWORD)
+        _motor_client = AsyncIOMotorClient(
+            mongo_uri,
+            serverSelectionTimeoutMS=10000,
+            connectTimeoutMS=10000,
+            socketTimeoutMS=10000,
+            retryWrites=True,
+            maxPoolSize=settings.MONGO_MAX_POOL_SIZE,
+            minPoolSize=settings.MONGO_MIN_POOL_SIZE,
+            maxIdleTimeMS=settings.MONGO_MAX_IDLE_TIME_MS,
+        )
+        _motor_db = _motor_client[settings.DATABASE_NAME]
+        logger.info("Motor async MongoDB client initialized")
+        return _motor_db
+    except Exception as e:
+        logger.error(f"Motor client initialization failed: {e}")
+        return None
+
+
+def close_motor_client():
+    """Close motor client on app shutdown."""
+    global _motor_client, _motor_db
+    if _motor_client is not None:
+        _motor_client.close()
+        _motor_client = None
+        _motor_db = None
 
 
 def _hash_password(password: str, salt: str = None) -> tuple[str, str]:
@@ -462,6 +507,7 @@ class ConversationStorage:
 
     def __init__(self):
         self.db = get_mongo_client()
+        self.motor_db = get_motor_db()
         import redis.asyncio as aioredis
         self._redis = aioredis.Redis(
             host=settings.REDIS_HOST,
@@ -503,32 +549,27 @@ class ConversationStorage:
         if memory:
             update_data["memory"] = memory
 
-        await asyncio.to_thread(
-            self.db.conversations.update_one,
+        write_result = await self.motor_db.conversations.update_one(
             query,
             {"$set": update_data, "$setOnInsert": {"created_at": datetime.utcnow()}},
             upsert=True,
         )
+        if write_result.matched_count == 0 and write_result.upserted_id is None:
+            logger.warning(f"save_conversation: no document written for session {conversation_id}")
 
         # Prune oldest conversations if user exceeds limit (Issue 22)
         try:
             max_convos = settings.MAX_CONVERSATIONS_PER_USER
-
-            def _prune():
-                count = self.db.conversations.count_documents({"user_id": user_id})
-                if count > max_convos:
-                    excess = count - max_convos
-                    oldest = (
-                        self.db.conversations.find({"user_id": user_id}, {"_id": 1})
-                        .sort("updated_at", 1)
-                        .limit(excess)
-                    )
-                    ids_to_delete = [doc["_id"] for doc in oldest]
-                    if ids_to_delete:
-                        self.db.conversations.delete_many({"_id": {"$in": ids_to_delete}})
-                        logger.info(f"Pruned {len(ids_to_delete)} old conversations for user {user_id}")
-
-            await asyncio.to_thread(_prune)
+            count = await self.motor_db.conversations.count_documents({"user_id": user_id})
+            if count > max_convos:
+                excess = count - max_convos
+                oldest = await self.motor_db.conversations.find(
+                    {"user_id": user_id}, {"_id": 1}
+                ).sort("updated_at", 1).limit(excess).to_list(excess)
+                ids_to_delete = [doc["_id"] for doc in oldest]
+                if ids_to_delete:
+                    await self.motor_db.conversations.delete_many({"_id": {"$in": ids_to_delete}})
+                    logger.info(f"Pruned {len(ids_to_delete)} old conversations for user {user_id}")
         except Exception as e:
             logger.warning(f"Conversation pruning failed (non-fatal): {e}")
 
@@ -555,7 +596,7 @@ class ConversationStorage:
         except Exception as e:
             logger.error(f"Redis history fetch error: {e}")
 
-        if self.db is None:
+        if self.motor_db is None:
             return []
 
         # Aggregation pipeline computes message_count server-side from the
@@ -574,24 +615,21 @@ class ConversationStorage:
             }},
         ]
 
-        def _run_aggregate():
-            result = []
-            for conv in self.db.conversations.aggregate(agg_pipeline):
-                created_at = conv.get("created_at")
-                updated_at = conv.get("updated_at") or created_at or datetime.utcnow()
-                if not created_at:
-                    created_at = updated_at
-                result.append({
-                    "id": str(conv["_id"]),
-                    "session_id": conv.get("session_id"),
-                    "title": conv.get("generated_title") or conv.get("last_title", "New Conversation"),
-                    "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
-                    "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
-                    "message_count": conv.get("message_count", 0),
-                })
-            return result
-
-        history_list = await asyncio.to_thread(_run_aggregate)
+        raw_convs = await self.motor_db.conversations.aggregate(agg_pipeline).to_list(None)
+        history_list = []
+        for conv in raw_convs:
+            created_at = conv.get("created_at")
+            updated_at = conv.get("updated_at") or created_at or datetime.utcnow()
+            if not created_at:
+                created_at = updated_at
+            history_list.append({
+                "id": str(conv["_id"]),
+                "session_id": conv.get("session_id"),
+                "title": conv.get("generated_title") or conv.get("last_title", "New Conversation"),
+                "created_at": created_at.isoformat() if isinstance(created_at, datetime) else str(created_at),
+                "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else str(updated_at),
+                "message_count": conv.get("message_count", 0),
+            })
 
         # Cache for 10 minutes (async)
         try:
@@ -608,22 +646,21 @@ class ConversationStorage:
 
         from bson import ObjectId
 
-        def _fetch():
-            if conversation_id:
-                try:
-                    if len(conversation_id) == 24:  # MongoDB ObjectId
-                        q = {"_id": ObjectId(conversation_id), "user_id": user_id}
-                    else:  # session_id (UUID string)
-                        q = {"session_id": conversation_id, "user_id": user_id}
-                except Exception as e:
-                    logger.debug(f"ObjectId parse failed for '{conversation_id}', using UUID query: {e}")
+        if conversation_id:
+            try:
+                if len(conversation_id) == 24:  # MongoDB ObjectId
+                    q = {"_id": ObjectId(conversation_id), "user_id": user_id}
+                else:  # session_id (UUID string)
                     q = {"session_id": conversation_id, "user_id": user_id}
-                return self.db.conversations.find_one(q)
-            else:
-                cursor = self.db.conversations.find({"user_id": user_id}).sort("updated_at", -1).limit(1)
-                return next(cursor, None)
-
-        conversation = await asyncio.to_thread(_fetch)
+            except Exception as e:
+                logger.debug(f"ObjectId parse failed for '{conversation_id}', using UUID query: {e}")
+                q = {"session_id": conversation_id, "user_id": user_id}
+            conversation = await self.motor_db.conversations.find_one(q)
+        else:
+            docs = await self.motor_db.conversations.find(
+                {"user_id": user_id}
+            ).sort("updated_at", -1).limit(1).to_list(1)
+            conversation = docs[0] if docs else None
 
         if conversation:
             created_at = conversation.get("created_at")
@@ -642,13 +679,10 @@ class ConversationStorage:
         if self.db is None:
             return []
         try:
-            def _fetch():
-                cursor = self.db.conversations.find(
-                    {"user_id": user_id},
-                    {"memory": 1, "updated_at": 1, "last_title": 1, "conversation_summary": 1}
-                ).sort("updated_at", -1).limit(limit)
-                return list(cursor)
-            return await asyncio.to_thread(_fetch)
+            return await self.motor_db.conversations.find(
+                {"user_id": user_id},
+                {"memory": 1, "updated_at": 1, "last_title": 1, "conversation_summary": 1}
+            ).sort("updated_at", -1).limit(limit).to_list(limit)
         except Exception as e:
             logger.error(f"Failed to fetch recent conversations: {e}")
             return []
@@ -657,8 +691,7 @@ class ConversationStorage:
         """Update a single field on a saved conversation."""
         if self.db is None:
             return
-        await asyncio.to_thread(
-            self.db.conversations.update_one,
+        await self.motor_db.conversations.update_one(
             {"user_id": user_id, "session_id": conversation_id},
             {"$set": {field: value}}
         )
@@ -668,12 +701,10 @@ class ConversationStorage:
         if self.db is None:
             return None
         projection = {f: 1 for f in fields}
-        def _fetch():
-            return self.db.conversations.find_one(
-                {"user_id": user_id, "session_id": conversation_id},
-                projection
-            )
-        return await asyncio.to_thread(_fetch)
+        return await self.motor_db.conversations.find_one(
+            {"user_id": user_id, "session_id": conversation_id},
+            projection
+        )
 
     async def invalidate_history_cache(self, user_id: str):
         """Invalidate the Redis-cached conversation list for a user."""
@@ -686,8 +717,7 @@ class ConversationStorage:
         """Delete a specific conversation"""
         if self.db is None:
             return False
-        result = await asyncio.to_thread(
-            self.db.conversations.delete_one,
+        result = await self.motor_db.conversations.delete_one(
             {"user_id": user_id, "session_id": conversation_id},
         )
 

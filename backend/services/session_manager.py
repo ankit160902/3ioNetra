@@ -81,17 +81,21 @@ class InMemorySessionManager(SessionManager):
 
 class MongoSessionManager(SessionManager):
     def __init__(self, ttl_minutes: int):
-        from services.auth_service import get_mongo_client
+        from services.auth_service import get_mongo_client, get_motor_db
 
         self.db = get_mongo_client()
         self._ttl_seconds = ttl_minutes * 60
-        
+
         if self.db is not None:
             self.collection = self.db.sessions
             self._ensure_indexes()
         else:
             self.collection = None
             logger.warning("MongoSessionManager: Database connection failed. Operations will be no-ops.")
+
+        motor_db = get_motor_db()
+        self.motor_collection = motor_db.sessions if motor_db is not None else None
+
         logger.info(f"MongoSessionManager initialized (TTL={ttl_minutes}m)")
 
     def _ensure_indexes(self):
@@ -131,9 +135,9 @@ class MongoSessionManager(SessionManager):
         return session
 
     async def get_session(self, session_id: str) -> Optional[SessionState]:
-        if self.collection is None:
+        if self.motor_collection is None:
             return None
-        doc = await asyncio.to_thread(self.collection.find_one, {"session_id": session_id})
+        doc = await self.motor_collection.find_one({"session_id": session_id})
         if not doc:
             return None
 
@@ -141,8 +145,7 @@ class MongoSessionManager(SessionManager):
 
         # Refresh last_activity with a lightweight $set instead of full document replace
         session.last_activity = datetime.utcnow()
-        await asyncio.to_thread(
-            self.collection.update_one,
+        await self.motor_collection.update_one(
             {"session_id": session_id},
             {"$set": {"last_activity": session.last_activity}},
         )
@@ -150,22 +153,21 @@ class MongoSessionManager(SessionManager):
         return session
 
     async def update_session(self, session: SessionState) -> None:
-        if self.collection is None:
+        if self.motor_collection is None:
             return
         session.last_activity = datetime.utcnow()
         data = session.to_dict()
 
-        await asyncio.to_thread(
-            self.collection.update_one,
+        await self.motor_collection.update_one(
             {"session_id": session.session_id},
             {"$set": data},
             upsert=True,
         )
 
     async def delete_session(self, session_id: str) -> None:
-        if self.collection is None:
+        if self.motor_collection is None:
             return
-        await asyncio.to_thread(self.collection.delete_one, {"session_id": session_id})
+        await self.motor_collection.delete_one({"session_id": session_id})
 
 
 # ============================================================================
@@ -174,25 +176,19 @@ class MongoSessionManager(SessionManager):
 
 class RedisSessionManager(SessionManager):
     def __init__(self, ttl_minutes: int):
-        import redis.asyncio as redis
-        
+        from services.redis_pool import get_redis_pool
+        import redis.asyncio as aioredis
+        import redis as sync_redis
+
         self._ttl_seconds = ttl_minutes * 60
-        self._redis = redis.Redis(
-            host=settings.REDIS_HOST,
-            port=settings.REDIS_PORT,
-            db=settings.REDIS_DB,
-            password=settings.REDIS_PASSWORD,
-            decode_responses=True,
-            max_connections=100,
-            socket_connect_timeout=3,
-            socket_timeout=5,
-            retry_on_timeout=True,
-        )
-        logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m)")
-        
+        pool = get_redis_pool()
+        if pool is None:
+            raise RuntimeError("Redis pool not configured for RedisSessionManager")
+        self._redis = aioredis.Redis(connection_pool=pool)
+        logger.info(f"RedisSessionManager initialized (TTL={ttl_minutes}m, shared pool)")
+
         # Test connection (sync ping to validate at init time)
         try:
-            import redis as sync_redis
             test_client = sync_redis.Redis(
                 host=settings.REDIS_HOST,
                 port=settings.REDIS_PORT,

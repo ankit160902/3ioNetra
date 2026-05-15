@@ -41,10 +41,28 @@ async def get_current_user(
         return None
 
     try:
+        # L2 Redis cache: avoids MongoDB hit on every request across workers.
+        # TTL 300s matches AuthService._TOKEN_CACHE_TTL.
+        try:
+            from services.cache_service import get_cache_service
+            _cache = get_cache_service()
+            cached_user = await _cache.get("auth_token", token=token)
+            if cached_user is not None:
+                return cached_user
+        except Exception:
+            pass  # Cache miss or Redis down → fall through to DB
+
         auth_service = get_auth_service()
         user = await asyncio.to_thread(auth_service.verify_token, token)
         if user is None:
             raise HTTPException(status_code=401, detail="Token expired or invalid")
+
+        # Populate Redis cache for subsequent requests on any worker
+        try:
+            await _cache.set("auth_token", user, ttl=300, token=token)
+        except Exception:
+            pass
+
         return user
     except HTTPException:
         raise
@@ -195,6 +213,12 @@ async def logout_user(authorization: Optional[str] = Header(None), request: Requ
     if token:
         auth_service = get_auth_service()
         await asyncio.to_thread(auth_service.logout_user, token)
+        # Invalidate Redis token cache so other workers stop accepting this token
+        try:
+            from services.cache_service import get_cache_service
+            await get_cache_service().set("auth_token", None, ttl=1, token=token)
+        except Exception:
+            pass
 
     # Fix 4: Clear httpOnly cookie on logout
     response = JSONResponse(content={"message": "Successfully logged out"})

@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     API_VERSION: str = "1.1.3"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8080
-    DEBUG: bool = True
+    THREAD_POOL_SIZE: int = Field(default=64, env="THREAD_POOL_SIZE")
+    DEBUG: bool = Field(default=False, env="DEBUG")
 
     # ------------------------------------------------------------------
     # LLM Settings
@@ -209,7 +210,7 @@ class Settings(BaseSettings):
     JUDGE_MAX_RETRIES: int = Field(default=1, env="JUDGE_MAX_RETRIES")
     JUDGE_CACHE_TTL: int = Field(default=86400, env="JUDGE_CACHE_TTL")
     GROUNDING_ENABLED: bool = Field(default=True, env="GROUNDING_ENABLED")
-    GROUNDING_MIN_CONFIDENCE: float = Field(default=0.5, env="GROUNDING_MIN_CONFIDENCE")
+    GROUNDING_MIN_CONFIDENCE: float = Field(default=0.7, env="GROUNDING_MIN_CONFIDENCE")
 
     # ------------------------------------------------------------------
     # Conversation Flow

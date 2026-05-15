@@ -116,7 +116,14 @@ async def _populate_session_with_user_context(session: SessionState, user: Optio
             try:
                 async def _inherit_memory():
                     storage = get_conversation_storage()
-                    recent = await storage.get_recent_conversation_summaries(user["id"], limit=5)
+                    from services.cache_service import get_cache_service as _get_cache
+                    _cache = _get_cache()
+                    _uid = user["id"]
+                    recent = await _cache.get("conv_summaries", user_id=_uid)
+                    if recent is None:
+                        recent = await storage.get_recent_conversation_summaries(_uid, limit=5)
+                        if recent:
+                            await _cache.set("conv_summaries", recent, ttl=300, user_id=_uid)
                     if recent:
                         from models.memory_context import ConversationMemory
                         latest = recent[0]
@@ -223,7 +230,7 @@ async def _get_or_create_session(
                         return s
                     return None
 
-                restored = await asyncio.wait_for(_restore_session(), timeout=15.0)
+                restored = await asyncio.wait_for(_restore_session(), timeout=5.0)
                 if restored:
                     session = restored
             except asyncio.TimeoutError:
@@ -561,6 +568,18 @@ async def conversational_query(query: ConversationalQuery, user: dict = Depends(
     _t_start = time.perf_counter()
     logger.info(f"REQUEST_START | cid={cid} | session={query.session_id} | msg_len={len(query.message)}")
 
+    # Per-user rate limit: 20 messages/minute to protect LLM quota
+    _user_id_for_rate = (user or {}).get("id", "") if user else ""
+    if _user_id_for_rate:
+        from services.rate_limiter import check_rate_limit
+        if not await check_rate_limit(_user_id_for_rate):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests. Please wait a moment before sending another message.",
+                headers={"Retry-After": "60"},
+            )
+
     rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
         raise HTTPException(status_code=500, detail="RAG pipeline not available")
@@ -739,6 +758,18 @@ async def conversational_query_stream(query: ConversationalQuery, user: dict = D
     """Streaming conversational endpoint — SSE token-by-token responses."""
     cid = set_correlation_id()
     logger.info(f"STREAM_START | cid={cid} | session={query.session_id} | msg_len={len(query.message)}")
+
+    # Per-user rate limit: 20 messages/minute to protect LLM quota
+    _user_id_for_rate = (user or {}).get("id", "") if user else ""
+    if _user_id_for_rate:
+        from services.rate_limiter import check_rate_limit
+        if not await check_rate_limit(_user_id_for_rate):
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests. Please wait a moment before sending another message.",
+                headers={"Retry-After": "60"},
+            )
 
     rag_pipeline = get_rag_pipeline()
     if not rag_pipeline or not rag_pipeline.available:
@@ -1032,6 +1063,13 @@ async def save_conversation(request: SaveConversationRequest, user: dict = Depen
         messages=request.messages,
         memory=memory_snapshot
     )
+
+    # Invalidate conv_summaries cache so next session inherits fresh context
+    try:
+        from services.cache_service import get_cache_service as _get_cache
+        await _get_cache().flush_prefix("conv_summaries")
+    except Exception:
+        pass
 
     # 4. Generate smart title + conversation summary (async, non-blocking)
     async def _generate_title_and_summary(conversation_id, messages, memory_snap, uid):

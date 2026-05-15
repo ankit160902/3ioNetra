@@ -9,12 +9,13 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, Request
 
-# Increase thread pool to prevent exhaustion from hanging Gemini calls
-asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=128))
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from config import settings
+
+# Configurable thread pool — default 64; tune via THREAD_POOL_SIZE env var
+asyncio.get_event_loop().set_default_executor(ThreadPoolExecutor(max_workers=settings.THREAD_POOL_SIZE))
 from rag.pipeline import RAGPipeline
 
 # Import routers after they are created
@@ -101,14 +102,17 @@ async def lifespan(app: FastAPI):
     # Shutdown logic
     logger.info("Shutting down 3ioNetra Spiritual Companion API...")
     
-    # 1. Close Cache Connections
+    # 1. Close Cache Connections + shared Redis pool
     from services.cache_service import get_cache_service
     cache_service = get_cache_service()
     await cache_service.close()
+    from services.redis_pool import close_redis_pool
+    await close_redis_pool()
     
     # 2. Close MongoDB Connections
-    from services.auth_service import close_mongo_client
+    from services.auth_service import close_mongo_client, close_motor_client
     close_mongo_client()
+    close_motor_client()
 
     # 3. Close query logger
     if settings.QUERY_LOG_ENABLED:
