@@ -258,6 +258,8 @@ class RAGPipeline:
         self._data_dir_override: Optional[Path] = Path(data_dir) if data_dir is not None else None
         # Register as the module-level singleton so get_rag_pipeline() works
         _rag_pipeline_instance = self
+        # Per-instance semaphore for embedding model concurrency (max 4 parallel calls)
+        self._embed_sem = asyncio.Semaphore(4)
 
     def __bool__(self) -> bool:
         return self.available
@@ -670,7 +672,7 @@ class RAGPipeline:
             prefix = "query: " if is_query else "passage: "
             clean_text = prefix + clean_text
 
-        async with _gpu_lock():
+        async with self._embed_sem:
             vec = (await asyncio.to_thread(
                 self._embedding_model.encode, [clean_text],
                 convert_to_tensor=False, show_progress_bar=False,
@@ -688,7 +690,7 @@ class RAGPipeline:
         if self._needs_instruction_prefix():
             prefix = "query: " if is_query else "passage: "
         clean_texts = [prefix + t.strip().replace("\n", " ") for t in texts]
-        async with _gpu_lock():
+        async with self._embed_sem:
             vecs = await asyncio.to_thread(
                 self._embedding_model.encode, clean_texts,
                 convert_to_tensor=False, show_progress_bar=False, batch_size=len(clean_texts),

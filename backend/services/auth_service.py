@@ -87,6 +87,8 @@ def get_mongo_client():
             _db.tokens.create_index("user_id")
             _db.conversations.create_index([("user_id", 1), ("updated_at", -1)])
             _db.conversations.create_index([("user_id", 1), ("session_id", 1)])
+            _db.conversations.create_index("session_id")
+            _db.user_memories.create_index([("user_id", 1), ("valid_at", -1)])
             try:
                 _db.feedback.drop_index("session_id_1_message_index_1_user_id_1")
             except OperationFailure:

@@ -523,22 +523,28 @@ class LLMService:
 
         try:
             from google.genai import types
-            
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-                            types.Part.from_text(text=prompt)
+
+            async def _do_ocr():
+                def _sync():
+                    return self.client.models.generate_content(
+                        model=settings.GEMINI_MODEL,
+                        contents=[
+                            types.Content(
+                                role="user",
+                                parts=[
+                                    types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+                                    types.Part.from_text(text=prompt)
+                                ]
+                            )
                         ]
                     )
-                ]
-            )
-            
+                return await asyncio.to_thread(_sync)
+
+            async with self._gemini_sem:
+                response = await self.circuit_breaker.call(_do_ocr)
+
             return response.text if response.text else ""
-            
+
         except Exception as e:
             logger.error(f"OCR Extraction failed: {e}")
             return ""
@@ -596,17 +602,23 @@ class LLMService:
             4. Keep transcriptions original (Hindi/Sanskrit where applicable) but provide English context if it helps clarity.
             """
 
-            response = self.client.models.generate_content(
-                model=settings.GEMINI_MODEL,
-                contents=[
-                    file_ref,
-                    prompt
-                ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            
+            async def _do_video():
+                def _sync():
+                    return self.client.models.generate_content(
+                        model=settings.GEMINI_MODEL,
+                        contents=[
+                            file_ref,
+                            prompt
+                        ],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json"
+                        )
+                    )
+                return await asyncio.to_thread(_sync)
+
+            async with self._gemini_sem:
+                response = await self.circuit_breaker.call(_do_video)
+
             # Optionally delete file from Files API after processing
             try:
                 self.client.files.delete(name=file_ref.name)
@@ -1693,21 +1705,24 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
 
         target_model = model or settings.GEMINI_FAST_MODEL
 
-        def _sync_call():
-            return self.client.models.generate_content(
-                model=target_model,
-                contents=prompt,
-                config={
-                    "temperature": temperature,
-                    "response_mime_type": "application/json",
-                    "max_output_tokens": max_output_tokens,
-                    "automatic_function_calling": __import__(
-                        "google.genai", fromlist=["types"]
-                    ).types.AutomaticFunctionCallingConfig(disable=True),
-                },
-            )
+        async def _do_json():
+            def _sync_call():
+                return self.client.models.generate_content(
+                    model=target_model,
+                    contents=prompt,
+                    config={
+                        "temperature": temperature,
+                        "response_mime_type": "application/json",
+                        "max_output_tokens": max_output_tokens,
+                        "automatic_function_calling": __import__(
+                            "google.genai", fromlist=["types"]
+                        ).types.AutomaticFunctionCallingConfig(disable=True),
+                    },
+                )
+            return await asyncio.to_thread(_sync_call)
 
-        response = await asyncio.to_thread(_sync_call)
+        async with self._gemini_sem:
+            response = await self.circuit_breaker.call(_do_json)
         return (response.text or "").strip()
 
     async def generate_response(
