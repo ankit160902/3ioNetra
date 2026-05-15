@@ -582,19 +582,20 @@ class ConversationStorage:
         logger.info(f"Saved persistent history for session {conversation_id}")
         return str(conversation_id)
 
-    async def get_conversations_list(self, user_id: str, limit: int = 50) -> list:
+    async def get_conversations_list(self, user_id: str, limit: int = 20, offset: int = 0) -> list:
         """Get list of individual sessions with async Redis caching"""
         import json
 
-        # Try cache first (async)
-        cache_key = f"history_list:{user_id}"
-        try:
-            cached_data = await self._redis.get(cache_key)
-            if cached_data:
-                logger.info(f"Serving history list from Redis cache for user {user_id}")
-                return json.loads(cached_data)
-        except Exception as e:
-            logger.error(f"Redis history fetch error: {e}")
+        # Try cache first (async) — only cache the first page (offset == 0)
+        cache_key = f"history_list:{user_id}" if offset == 0 else None
+        if cache_key:
+            try:
+                cached_data = await self._redis.get(cache_key)
+                if cached_data:
+                    logger.info(f"Serving history list from Redis cache for user {user_id}")
+                    return json.loads(cached_data)
+            except Exception as e:
+                logger.error(f"Redis history fetch error: {e}")
 
         if self.motor_db is None:
             return []
@@ -604,6 +605,7 @@ class ConversationStorage:
         agg_pipeline = [
             {"$match": {"user_id": user_id}},
             {"$sort": {"updated_at": -1}},
+            {"$skip": offset},
             {"$limit": limit},
             {"$project": {
                 "session_id": 1,
@@ -631,11 +633,12 @@ class ConversationStorage:
                 "message_count": conv.get("message_count", 0),
             })
 
-        # Cache for 10 minutes (async)
-        try:
-            await self._redis.setex(cache_key, 600, json.dumps(history_list))
-        except Exception as e:
-            logger.warning(f"Failed to cache history list: {e}")
+        # Cache for 10 minutes (async) — only cache the first page
+        if cache_key:
+            try:
+                await self._redis.setex(cache_key, 600, json.dumps(history_list))
+            except Exception as e:
+                logger.warning(f"Failed to cache history list: {e}")
 
         return history_list
 

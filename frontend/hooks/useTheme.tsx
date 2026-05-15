@@ -37,7 +37,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (transitionTimeout.current) clearTimeout(transitionTimeout.current);
     root.classList.add('theme-transition');
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
-    transitionTimeout.current = setTimeout(() => root.classList.remove('theme-transition'), 400);
+    transitionTimeout.current = setTimeout(() => root.classList.remove('theme-transition'), 350);
   }, []);
 
   return (

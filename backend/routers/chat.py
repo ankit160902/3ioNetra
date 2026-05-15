@@ -1000,11 +1000,15 @@ async def track_product_interaction(
 # ----------------------------------------------------------------------------
 
 @router.get("/user/conversations")
-async def get_user_conversations(user: dict = Depends(get_current_user)):
+async def get_user_conversations(
+    user: dict = Depends(get_current_user),
+    limit: int = 20,
+    offset: int = 0,
+):
     if not user:
         raise HTTPException(status_code=401)
     storage = get_conversation_storage()
-    return {"conversations": await storage.get_conversations_list(user["id"])}
+    return {"conversations": await storage.get_conversations_list(user["id"], limit=limit, offset=offset)}
 
 @router.get("/user/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str, user: dict = Depends(get_current_user)):

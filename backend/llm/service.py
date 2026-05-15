@@ -369,6 +369,8 @@ class LLMService:
             failure_threshold=settings.CIRCUIT_BREAKER_THRESHOLD,
             recovery_timeout=settings.CIRCUIT_BREAKER_TIMEOUT
         )
+        # Semaphore to cap concurrent Gemini API calls
+        self._gemini_sem = asyncio.Semaphore(settings.GEMINI_MAX_CONCURRENT)
 
         if not GEMINI_AVAILABLE:
             logger.warning("Gemini SDK not available")
@@ -1640,28 +1642,29 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
                 return await asyncio.to_thread(_sync)
 
-            stream = await _do_stream_call()
+            async with self._gemini_sem:
+                stream = await self.circuit_breaker.call(_do_stream_call)
 
-            queue: asyncio.Queue[str | None] = asyncio.Queue()
-            loop = asyncio.get_event_loop()
+                queue: asyncio.Queue[str | None] = asyncio.Queue()
+                loop = asyncio.get_event_loop()
 
-            def _read_stream():
-                try:
-                    for chunk in stream:
-                        if chunk.text:
-                            loop.call_soon_threadsafe(queue.put_nowait, chunk.text)
-                finally:
-                    loop.call_soon_threadsafe(queue.put_nowait, None)
+                def _read_stream():
+                    try:
+                        for chunk in stream:
+                            if chunk.text:
+                                loop.call_soon_threadsafe(queue.put_nowait, chunk.text)
+                    finally:
+                        loop.call_soon_threadsafe(queue.put_nowait, None)
 
-            reader_task = loop.run_in_executor(None, _read_stream)
+                reader_task = loop.run_in_executor(None, _read_stream)
 
-            while True:
-                token = await queue.get()
-                if token is None:
-                    break
-                yield token
+                while True:
+                    token = await queue.get()
+                    if token is None:
+                        break
+                    yield token
 
-            await reader_task
+                await reader_task
 
         except Exception as e:
             logger.exception(f"Error in generate_response_stream: {str(e)}")
@@ -1806,7 +1809,8 @@ Do NOT just say "good to see you again" — that is a generic greeting and count
                     )
                 return await asyncio.to_thread(_sync)
 
-            response = await _do_call()
+            async with self._gemini_sem:
+                response = await self.circuit_breaker.call(_do_call)
 
             # Fallback responses in case of errors or empty responses
             fallbacks = [

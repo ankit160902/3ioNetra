@@ -61,7 +61,10 @@ function ProductCard({ product }: { product: Product }) {
             src={product.image_url}
             alt={product.name}
             loading="lazy"
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            onLoad={(e) => { e.currentTarget.style.opacity = '1'; }}
+            className="w-full h-full object-cover group-hover:scale-110 transition-all duration-500"
+            style={{ opacity: 0, transition: 'opacity 0.3s ease' }}
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-300 dark:text-gray-600">
@@ -70,11 +73,11 @@ function ProductCard({ product }: { product: Product }) {
         )}
       </div>
       <div className="p-3 flex flex-col flex-1">
-        <h4 className="text-[11px] font-black text-gray-900 dark:text-gray-100 leading-tight mb-1 truncate">{product.name}</h4>
+        <h4 className="text-[11px] font-black text-gray-900 dark:text-gray-100 leading-tight mb-1 truncate" title={product.name}>{product.name}</h4>
         <p className="text-[9px] font-bold text-orange-600 uppercase tracking-tighter mb-2">{product.category}</p>
 
         <div className="mt-auto flex items-center justify-between gap-2">
-          <span className="text-[11px] font-black text-gray-900 dark:text-gray-100">{product.currency} {product.amount}</span>
+          <span className="text-[11px] font-black text-gray-900 dark:text-gray-100">{product.currency === 'INR' ? '₹' : product.currency}{Number(product.amount).toLocaleString('en-IN')}</span>
           <span className="p-1.5 bg-gray-900 dark:bg-gray-600 text-white rounded-lg group-hover:bg-orange-600 transition-colors">
             <ExternalLink className="w-3 h-3" />
           </span>
@@ -100,22 +103,24 @@ function ProductDisplay({ products }: { products: Product[] }) {
           Recommended for your journey
         </span>
       </div>
-      <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1">
-        {products.map((product, i) => (
-          <ProductCard key={i} product={product} />
-        ))}
-        {/* View all card */}
-        <a
-          href="https://my3ionetra.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex flex-col items-center justify-center bg-orange-50/30 dark:bg-gray-800/50 border border-dashed border-orange-200 dark:border-orange-800 rounded-2xl p-4 w-[120px] shrink-0 hover:bg-orange-50 dark:hover:bg-gray-700 transition-all group"
-        >
-          <div className="w-8 h-8 bg-white dark:bg-gray-700 rounded-full flex items-center justify-center mb-2 shadow-sm border border-orange-100 dark:border-gray-600 group-hover:scale-110 transition-transform">
-            <ExternalLink className="w-4 h-4 text-orange-600" />
-          </div>
-          <span className="text-[9px] font-black text-orange-800 dark:text-orange-300 uppercase text-center leading-tight">Visit<br />Netra Store</span>
-        </a>
+      <div className="relative">
+        <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide -mx-1 px-1 snap-x">
+          {products.map((product) => (
+            <ProductCard key={product.product_url || product.name} product={product} />
+          ))}
+          <a
+            href="https://my3ionetra.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex flex-col items-center justify-center bg-orange-50/30 dark:bg-gray-800/50 border border-dashed border-orange-200 dark:border-orange-800 rounded-2xl p-4 w-[120px] shrink-0 hover:bg-orange-50 dark:hover:bg-gray-700 transition-all group"
+          >
+            <div className="w-8 h-8 bg-white dark:bg-gray-700 rounded-full flex items-center justify-center mb-2 shadow-sm border border-orange-100 dark:border-gray-600 group-hover:scale-110 transition-transform">
+              <ExternalLink className="w-4 h-4 text-orange-600" />
+            </div>
+            <span className="text-[9px] font-black text-orange-800 dark:text-orange-300 uppercase text-center leading-tight">Visit<br />Netra Store</span>
+          </a>
+        </div>
+        <div className="absolute right-0 top-0 bottom-2 w-8 bg-gradient-to-l from-white dark:from-gray-900 pointer-events-none" />
       </div>
     </div>
   );
@@ -159,6 +164,9 @@ export default function Home() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyLimit, setHistoryLimit] = useState(30);  // Fix 16: paginated history
   const [historyLoading, setHistoryLoading] = useState(false);  // Fix 18: loading state
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyOffset, setHistoryOffset] = useState(0);
+  const HISTORY_LIMIT = 20;
   const [feedback, setFeedback] = useState<Record<number, 'like' | 'dislike'>>({});
   const [expandedCitations, setExpandedCitations] = useState<Record<number, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -257,6 +265,10 @@ export default function Home() {
     }
   }, [isHistoryOpen]);
 
+  useEffect(() => {
+    if (authError) toast(authError, 'error');
+  }, [authError]);
+
   // Fix 14: Only update feedback UI after successful API call
   const handleFeedback = async (messageIndex: number, responseText: string, type: 'like' | 'dislike') => {
     const prev = feedback[messageIndex];
@@ -280,10 +292,12 @@ export default function Home() {
         // Only update UI after successful API save
         setFeedback((f) => ({ ...f, [messageIndex]: type }));
         toast(type === 'like' ? 'Thanks for your feedback!' : 'Feedback noted, we\'ll improve', 'info');
+      } else {
+        toast('Could not save feedback', 'error');
       }
     } catch (err) {
       if (process.env.NODE_ENV === 'development') console.error('Feedback submit failed:', err);
-      toast('Failed to submit feedback', 'error');
+      toast('Could not save feedback', 'error');
     }
   };
 
@@ -389,7 +403,7 @@ export default function Home() {
     if (!isAuthenticated) return;
     setHistoryLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/user/conversations`, {
+      const res = await fetch(`${API_URL}/api/user/conversations?limit=${HISTORY_LIMIT}&offset=0`, {
         headers: getAuthHeader(),
         credentials: 'include',
       });
@@ -397,12 +411,36 @@ export default function Home() {
         const data = await res.json();
         const conversations = Array.isArray(data.conversations) ? data.conversations : [];
         setHistory(conversations);
+        setHistoryHasMore(conversations.length === HISTORY_LIMIT);
+        setHistoryOffset(HISTORY_LIMIT);
       } else if (res.status === 401) {
         localStorage.removeItem('auth_user');
         logout();
       }
     } catch (error) {
       if (process.env.NODE_ENV === 'development') console.error('Failed to fetch history:', error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const loadMoreHistory = async () => {
+    if (!isAuthenticated || historyLoading || !historyHasMore) return;
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/user/conversations?limit=${HISTORY_LIMIT}&offset=${historyOffset}`, {
+        headers: getAuthHeader(),
+        credentials: 'include',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const more = Array.isArray(data.conversations) ? data.conversations : [];
+        setHistory(prev => [...prev, ...more]);
+        setHistoryHasMore(more.length === HISTORY_LIMIT);
+        setHistoryOffset(prev => prev + more.length);
+      }
+    } catch (error) {
+      if (process.env.NODE_ENV === 'development') console.error('Failed to load more history:', error);
     } finally {
       setHistoryLoading(false);
     }
@@ -678,6 +716,7 @@ export default function Home() {
                   value={historySearch}
                   onChange={(e) => setHistorySearch(e.target.value)}
                   placeholder="Search conversations..."
+                  aria-label="Search conversation history"
                   className="w-full pl-9 pr-3 py-2.5 bg-gray-50/50 dark:bg-gray-800/50 border border-orange-100 dark:border-gray-700 rounded-xl text-xs font-bold text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:ring-2 focus:ring-orange-500/10 focus:border-orange-200 dark:focus:border-orange-700 outline-none transition-all"
                 />
                 {historySearch && (
@@ -689,7 +728,13 @@ export default function Home() {
             </div>
             <div className="flex-1 overflow-y-auto p-3 space-y-1.5 scrollbar-hide">
               {/* Fix 18: Loading state */}
-              {historyLoading && <p className="text-xs text-gray-400 dark:text-gray-500 p-4 text-center">Loading conversations...</p>}
+              {historyLoading && (
+                <div className="space-y-2 p-3">
+                  {[0,1,2,3].map(i => (
+                    <div key={i} className="h-14 rounded-xl bg-orange-50/50 dark:bg-gray-800 animate-pulse" />
+                  ))}
+                </div>
+              )}
               {!historyLoading && history.length === 0 && (
                 <p className="text-xs text-gray-400 dark:text-gray-500 p-6 text-center italic">No conversations yet. Start a chat to see your history here.</p>
               )}
@@ -733,6 +778,15 @@ export default function Home() {
                   Load more ({historyLimit} of {history.length})
                 </button>
               )}
+              {historyHasMore && (
+                <button
+                  onClick={loadMoreHistory}
+                  disabled={historyLoading}
+                  className="w-full p-3 text-xs font-bold text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-gray-800 rounded-xl transition-all disabled:opacity-50"
+                >
+                  {historyLoading ? 'Loading...' : 'Load more'}
+                </button>
+              )}
             </div>
 
             <div className="p-5 border-t border-orange-100 dark:border-gray-800 bg-orange-50/10 dark:bg-gray-800/30">
@@ -755,7 +809,7 @@ export default function Home() {
           <header className="sticky top-0 z-30 bg-white/70 dark:bg-gray-900/70 backdrop-blur-md border-b border-orange-50 dark:border-gray-800 shrink-0 px-4 py-2.5">
             <div className="max-w-4xl mx-auto flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <button data-testid="sidebar-toggle" onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="p-2 text-gray-600 dark:text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-gray-800 rounded-xl transition-all shadow-sm border border-orange-50 dark:border-gray-700 bg-white dark:bg-gray-800">
+                <button data-testid="sidebar-toggle" aria-label={isHistoryOpen ? "Close conversation history" : "Open conversation history"} onClick={() => setIsHistoryOpen(!isHistoryOpen)} className="p-2 text-gray-600 dark:text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-gray-800 rounded-xl transition-all shadow-sm border border-orange-50 dark:border-gray-700 bg-white dark:bg-gray-800">
                   <History className={`w-4 h-4 transition-transform duration-500 ${isHistoryOpen ? 'rotate-180' : ''}`} />
                 </button>
                 <div className="flex flex-col">
@@ -774,7 +828,10 @@ export default function Home() {
                   {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
                 </button>
                 <button
-                  onClick={handleNewConversation}
+                  onClick={() => {
+                    if (messages.length > 0 && !window.confirm('Start a new conversation? Your current conversation is saved in history.')) return;
+                    handleNewConversation();
+                  }}
                   className="flex items-center gap-1.5 px-4 py-2 text-xs font-black text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-gray-800 border border-orange-100 dark:border-gray-700 rounded-xl transition-all shadow-sm bg-white dark:bg-gray-800 active:scale-95"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -799,11 +856,9 @@ export default function Home() {
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6 mt-8 md:mt-12 max-w-2xl mx-auto">
-                      <div
+                      <button
+                        type="button"
                         onClick={() => setInput("I'd like spiritual guidance from the scriptures")}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInput("I'd like spiritual guidance from the scriptures"); } }}
-                        role="button"
-                        tabIndex={0}
                         className="p-6 md:p-8 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left group cursor-pointer active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500/30"
                       >
                         <div className="w-10 h-10 md:w-12 md:h-12 bg-orange-50 dark:bg-orange-900/30 rounded-2xl flex items-center justify-center mb-4 md:mb-6 text-orange-600 group-hover:scale-110 group-hover:bg-orange-600 group-hover:text-white transition-all duration-500 shadow-inner">
@@ -811,12 +866,10 @@ export default function Home() {
                         </div>
                         <h3 className="font-black text-gray-900 dark:text-gray-100 mb-1.5 text-lg md:text-xl tracking-tight">Seek Wisdom</h3>
                         <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 leading-relaxed font-medium">Explore Sanatan Dharma through sacred scriptures and tailored guidance.</p>
-                      </div>
-                      <div
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => setInput("I'm going through a difficult time and need guidance")}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInput("I'm going through a difficult time and need guidance"); } }}
-                        role="button"
-                        tabIndex={0}
                         className="p-6 md:p-8 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-3xl shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all text-left group cursor-pointer active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-orange-500/30"
                       >
                         <div className="w-10 h-10 md:w-12 md:h-12 bg-amber-50 dark:bg-amber-900/30 rounded-2xl flex items-center justify-center mb-4 md:mb-6 text-amber-600 group-hover:scale-110 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500 shadow-inner">
@@ -824,16 +877,16 @@ export default function Home() {
                         </div>
                         <h3 className="font-black text-gray-900 dark:text-gray-100 mb-1.5 text-lg md:text-xl tracking-tight">Daily Support</h3>
                         <p className="text-xs md:text-sm text-gray-500 dark:text-gray-400 leading-relaxed font-medium">Share your life's challenges and find spiritual peace and direction.</p>
-                      </div>
+                      </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="space-y-6 md:space-y-8 pb-10">
+                  <div role="log" aria-label="Conversation with Mitra" aria-live="polite" className="space-y-6 md:space-y-8 pb-10">
                     {messages.map((message, index) => {
                       if (message.role === 'assistant' && !message.content) return null;
                       return (
                       <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`}>
-                        <div className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 md:px-6 md:py-4 shadow-xl shadow-orange-900/[0.03] dark:shadow-black/10 transition-all relative group ${message.role === 'user'
+                        <div className={`max-w-[85%] sm:max-w-[70%] lg:max-w-[680px] rounded-2xl px-4 py-3 md:px-6 md:py-4 shadow-xl shadow-orange-900/[0.03] dark:shadow-black/10 transition-all relative group ${message.role === 'user'
                           ? 'bg-gradient-to-br from-orange-500 to-amber-600 text-white shadow-orange-200/30 rounded-tr-sm'
                           : 'bg-white dark:bg-gray-800 border border-orange-50/50 dark:border-gray-700 text-gray-800 dark:text-gray-200 rounded-tl-sm shadow-sm'
                           }`}>
@@ -860,22 +913,22 @@ export default function Home() {
                                 {/* Text + Verse segments */}
                                 {textAndVerseSegs.map((seg, si) => (
                                   seg.type === 'verse' ? (
-                                    <div key={si} className="my-3 md:my-4 pl-3.5 md:pl-5 border-l-4 border-amber-400 dark:border-amber-600 bg-amber-50/40 dark:bg-amber-900/20 rounded-r-xl py-3 md:py-4 pr-3.5 md:pr-5 border border-orange-100/30 dark:border-amber-800/30 relative overflow-hidden">
+                                    <blockquote key={si} className="my-3 md:my-4 pl-3.5 md:pl-5 border-l-4 border-amber-400 dark:border-amber-600 bg-amber-50/40 dark:bg-amber-900/20 rounded-r-xl py-3 md:py-4 pr-3.5 md:pr-5 border border-orange-100/30 dark:border-amber-800/30 relative overflow-hidden">
                                       <p className="whitespace-pre-wrap text-amber-950 dark:text-amber-200 italic text-[14px] leading-relaxed font-serif relative z-10">
-                                        &quot;{seg.content}&quot;
+                                        &ldquo;{seg.content}&rdquo;
                                       </p>
                                       <div className="mt-2.5 relative z-10 flex items-center gap-2">
                                         <TTSButton text={seg.content} lang="hi" variant="verse" />
                                         <button
                                           onClick={() => handleCopy(seg.content, `verse-${index}-${si}`)}
+                                          aria-label="Copy verse text"
                                           className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black uppercase tracking-wider border border-amber-100 dark:border-amber-800 text-amber-700 dark:text-amber-400 bg-white dark:bg-gray-800 hover:bg-amber-50 dark:hover:bg-amber-900/30 transition-all"
-                                          title="Copy verse text"
                                         >
                                           {copiedId === `verse-${index}-${si}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
                                           <span>{copiedId === `verse-${index}-${si}` ? 'Copied!' : 'Copy'}</span>
                                         </button>
                                       </div>
-                                    </div>
+                                    </blockquote>
                                   ) : (
                                     <div key={si} className="prose prose-sm md:prose-base dark:prose-invert max-w-none prose-p:leading-[1.7] prose-p:my-1.5 prose-strong:text-orange-700 dark:prose-strong:text-amber-400 prose-li:my-0.5 prose-ol:my-2 prose-ul:my-2">
                                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{fixInlineBullets(seg.content)}</ReactMarkdown>
@@ -916,14 +969,14 @@ export default function Home() {
                                     <button
                                       onClick={() => handleFeedback(index, message.content, 'like')}
                                       className={`p-1.5 rounded-lg transition-all ${feedback[index] === 'like' ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' : 'text-gray-500 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20'}`}
-                                      title="Helpful"
+                                      aria-label="Helpful"
                                     >
                                       <ThumbsUp className="w-3.5 h-3.5" />
                                     </button>
                                     <button
                                       onClick={() => handleFeedback(index, message.content, 'dislike')}
                                       className={`p-1.5 rounded-lg transition-all ${feedback[index] === 'dislike' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'text-gray-500 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20'}`}
-                                      title="Not helpful"
+                                      aria-label="Not helpful"
                                     >
                                       <ThumbsDown className="w-3.5 h-3.5" />
                                     </button>
@@ -938,6 +991,7 @@ export default function Home() {
                                     <button
                                       onClick={() => setExpandedCitations(prev => ({ ...prev, [index]: !prev[index] }))}
                                       aria-expanded={!!expandedCitations[index]}
+                                      aria-controls={`cite-list-${index}`}
                                       className="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-400 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
                                     >
                                       <BookOpen className="w-3 h-3" />
@@ -946,8 +1000,11 @@ export default function Home() {
                                       </span>
                                       <ChevronDown className={`w-3 h-3 transition-transform ${expandedCitations[index] ? 'rotate-180' : ''}`} />
                                     </button>
-                                    {expandedCitations[index] && (
-                                      <div className="mt-2 space-y-2">
+                                    <div
+                                      id={`cite-list-${index}`}
+                                      className={`overflow-hidden transition-all duration-200 ease-out ${expandedCitations[index] ? 'max-h-96 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}
+                                    >
+                                      <div className="space-y-2">
                                         {allCites.map((cite, ci) => (
                                           <div key={ci} className="pl-3 border-l-2 border-amber-300 dark:border-amber-700 py-1.5">
                                             <p className="text-[10px] font-black text-orange-700 dark:text-orange-400 uppercase tracking-wider">
@@ -959,7 +1016,7 @@ export default function Home() {
                                           </div>
                                         ))}
                                       </div>
-                                    )}
+                                    </div>
                                   </div>
                                   );
                                 })()}
@@ -1035,8 +1092,9 @@ export default function Home() {
                     ))}
                   </div>
                 )}
-                <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-[12px] border border-orange-100 dark:border-gray-700 shadow-xl rounded-2xl p-1 pr-2.5 flex items-end gap-1 group transition-all duration-700 hover:shadow-orange-900/5 focus-within:ring-[6px] focus-within:ring-orange-500/[0.04]">
+                <div className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-[12px] border border-orange-100 dark:border-gray-700 shadow-xl rounded-2xl p-1 pr-2.5 flex items-end gap-1 group transition-all duration-700 hover:shadow-orange-900/5 focus-within:ring-[6px] focus-within:ring-orange-500/20">
                   <form onSubmit={handleTextSubmit} className="flex-1 flex items-end">
+                    <label htmlFor="chat-input" className="sr-only">Send a message to Mitra</label>
                     <textarea
                       ref={textareaRef}
                       id="chat-input"

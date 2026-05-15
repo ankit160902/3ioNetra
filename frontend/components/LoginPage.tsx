@@ -316,8 +316,6 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
     setRegistrationStep(1);
     setLocalError(null);
     setName('');
-    setEmail('');
-    setPassword('');
     setConfirmPassword('');
     setPhone('');
     setGender('');
@@ -371,11 +369,15 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
             <div data-testid="step-indicators" className="flex items-center justify-center gap-1.5 mb-6">
               {[1, 2, 3].map(step => (
                 <div key={step} className="flex items-center gap-1.5">
-                  <div className={`flex items-center justify-center w-6 h-6 rounded-full text-[9px] font-black transition-all duration-500 ${
-                    registrationStep > step ? 'bg-orange-500 text-white' :
-                    registrationStep === step ? 'bg-orange-500 text-white ring-4 ring-orange-500/20' :
-                    'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
-                  }`}>
+                  <div
+                    aria-label={`Step ${step} of 3`}
+                    aria-current={registrationStep === step ? 'step' : undefined}
+                    className={`flex items-center justify-center w-6 h-6 rounded-full text-[9px] font-black transition-all duration-500 ${
+                      registrationStep > step ? 'bg-orange-500 text-white' :
+                      registrationStep === step ? 'bg-orange-500 text-white ring-4 ring-orange-500/20' :
+                      'bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400'
+                    }`}
+                  >
                     {registrationStep > step ? '\u2713' : step}
                   </div>
                   {step < 3 && <div className={`w-8 h-0.5 rounded-full transition-all duration-500 ${registrationStep > step ? 'bg-orange-500' : 'bg-gray-200 dark:bg-gray-700'}`} />}
@@ -398,6 +400,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Your Name"
                       required={isRegisterMode}
+                      disabled={isLoading}
                       className={inputClass}
                     />
                   </div>
@@ -412,6 +415,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@nexus.com"
                     required
+                    disabled={isLoading}
                     className={inputClass}
                   />
                 </div>
@@ -426,11 +430,13 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
                       required
+                      disabled={isLoading}
                       className={`${inputClass} pr-14`}
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                       className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
                     >
                       {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -447,6 +453,7 @@ export default function LoginPage({ onLogin, onRegister, isLoading, error }: Log
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
+                      disabled={isLoading}
                       required={isRegisterMode}
                       className={inputClass}
                     />

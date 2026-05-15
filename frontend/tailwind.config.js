@@ -8,9 +8,12 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
+        sans: ['Outfit', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         serif: ['"Noto Serif Devanagari"', 'Georgia', 'Cambria', '"Times New Roman"', 'Times', 'serif'],
       },
       colors: {
+        danger: { DEFAULT: '#ef4444', light: '#fef2f2' },
+        success: { DEFAULT: '#22c55e', light: '#f0fdf4' },
         orange: {
           50: '#fff7ed',
           100: '#ffedd5',

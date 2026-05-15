@@ -345,6 +345,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     CIRCUIT_BREAKER_THRESHOLD: int = 1   # Trip after 1 failure — fastest possible fail-fast
     CIRCUIT_BREAKER_TIMEOUT: int = 15    # Recover after 15s (was 60) — retry sooner
+    GEMINI_MAX_CONCURRENT: int = 10      # Max concurrent Gemini API calls (semaphore)
 
     # ------------------------------------------------------------------
     # Logging

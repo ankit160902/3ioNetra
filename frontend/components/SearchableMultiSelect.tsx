@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Search, X, ChevronDown } from 'lucide-react';
+import { Search, X, ChevronDown, Loader2 } from 'lucide-react';
 
 interface SearchableMultiSelectProps {
   label: string;
@@ -112,7 +112,7 @@ export default function SearchableMultiSelect({
               if (!isOpen) openDropdown();
             }}
             placeholder={selected.length > 0 ? 'Add more...' : placeholder}
-            className="flex-1 bg-transparent outline-none text-sm font-bold text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
+            className="flex-1 bg-transparent outline-none text-base md:text-sm font-bold text-gray-700 dark:text-gray-200 placeholder:text-gray-400 dark:placeholder:text-gray-500 min-w-0"
           />
           <ChevronDown
             className={`w-3.5 h-3.5 text-gray-400 dark:text-gray-500 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
@@ -124,9 +124,14 @@ export default function SearchableMultiSelect({
       {isOpen && (
         <div className="absolute left-0 right-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-orange-100 dark:border-gray-700 rounded-2xl shadow-lg dark:shadow-black/30 max-h-[200px] overflow-y-auto">
           {loading ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic px-4 py-3">Loading...</p>
+            <div className="flex items-center gap-2 py-3 px-4 text-xs text-gray-400 dark:text-gray-500">
+              <Loader2 className="animate-spin w-3 h-3 shrink-0" />
+              Loading options...
+            </div>
           ) : filtered.length === 0 ? (
-            <p className="text-xs text-gray-400 dark:text-gray-500 italic px-4 py-3">No results found</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 py-3 px-4 text-center">
+              No results for &ldquo;{searchTerm}&rdquo;
+            </p>
           ) : (
             filtered.map((option) => {
               const isSelected = selected.includes(option);

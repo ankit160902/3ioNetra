@@ -151,7 +151,7 @@ export default function TTSButton({
     };
 
     const getLabelText = () => {
-        if (state === 'error') return 'unavailable';
+        if (state === 'error') return 'try again';
         if (label) return label;
         if (isMantra) {
             switch (state) {
@@ -178,8 +178,8 @@ export default function TTSButton({
     };
 
     const baseClasses = isVerse
-        ? 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer select-none border'
-        : 'inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest transition-all duration-300 cursor-pointer select-none border';
+        ? 'inline-flex items-center gap-1.5 px-2.5 py-2 rounded-full text-[9px] font-black uppercase tracking-wider transition-all duration-300 cursor-pointer select-none border min-h-[44px]'
+        : 'inline-flex items-center gap-2 px-3.5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest transition-all duration-300 cursor-pointer select-none border min-h-[44px]';
 
     const colorClasses = isVerse
         ? state === 'playing'
@@ -192,9 +192,14 @@ export default function TTSButton({
     return (
         <button
             onClick={handleClick}
-            disabled={state === 'loading' || state === 'error'}
+            disabled={state === 'loading'}
             className={`${baseClasses} ${colorClasses} ${className} active:scale-90`}
-            title={isMantra ? 'Play mantra in Hindi' : isVerse ? 'Play verse in Hindi' : 'Play response in Hindi'}
+            aria-label={
+                state === 'error' ? 'Voice unavailable, try again' :
+                state === 'playing' ? (isMantra ? 'Pause mantra' : isVerse ? 'Pause verse' : 'Pause') :
+                state === 'paused' ? (isMantra ? 'Resume mantra' : isVerse ? 'Resume verse' : 'Resume') :
+                (isMantra ? 'Play mantra in Hindi' : isVerse ? 'Play verse in Hindi' : 'Play response in Hindi')
+            }
         >
             {getIcon()}
             <span>{getLabelText()}</span>
